@@ -13,15 +13,17 @@ index 6e1be48..c4e7b67 100644
      if (!mojo_pipe_params.empty()) {
        base::StrAppend(&feature, {":", base::JoinString(mojo_pipe_params, "/")});
 diff --git a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2 b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
-index 52b5e4b..9945425 100644
+index 52b5e4b..e0f6758 100644
 --- a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
 +++ b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
-@@ -1,4 +1,4 @@
+@@ -1,5 +1,5 @@
 -{% set enable_ad_id_permission = enable_ad_id_permission | default(True) %}
+-{% set debuggable = debuggable | default('true') %}
 +{% set enable_ad_id_permission = enable_ad_id_permission | default(False) %}
- {% set debuggable = debuggable | default('true') %}
++{% set debuggable = debuggable | default('false') %}
  <?xml version="1.0" encoding="utf-8"?>
  <!--
+   Copyright 2016 The Cobalt Authors. All Rights Reserved.
 @@ -26,17 +26,12 @@
      <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
      <uses-feature android:glEsVersion="0x00020000" android:required="true"/>
