@@ -34,6 +34,13 @@ const inFlight = new Set<string>();
 const likeCache = new Map<string, string>();
 let stylesInstalled = false;
 
+/** Clears cached RYD and like-count lookup entries to free memory under pressure. */
+export function clearRydCache(): void {
+  rydCache.clear();
+  likeCache.clear();
+  inFlight.clear();
+}
+
 export function getActiveVideoId(): string | null {
   if (typeof location === 'undefined') return null;
   const m = (location.hash || '').match(/[?&]v=([^&]+)/);

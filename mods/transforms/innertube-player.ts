@@ -8,18 +8,24 @@ export interface AudioFormatEntry extends AdaptiveFormat {
   isVoiceBoost?: boolean;
 }
 
-export function getAudioTier(fmt: AudioFormatEntry): number {
+export function getAudioTier(fmt: AudioFormatEntry, preferDrcAudio = false): number {
   const channels = typeof fmt.audioChannels === 'number' ? fmt.audioChannels : 0;
   if (channels > 6) return 1;
   if (channels > 2 || /ec-3|ac-3/i.test(fmt.mimeType || '')) return 2;
 
   const xtags = String(fmt.xtags || '');
   const isDrc = Boolean(fmt.isDrc || /drc=1/i.test(xtags));
+  if (preferDrcAudio && isDrc) {
+    return 3;
+  }
   if (
     !isDrc &&
     (fmt.isVoiceBoost || /vb=|voice[_-]?boost/i.test(xtags) || /voice\s*boost/i.test(fmt.audioTrack?.displayName || ''))
   ) {
-    return 3;
+    return preferDrcAudio ? 4 : 3;
+  }
+  if (preferDrcAudio) {
+    return 5;
   }
   return isDrc ? 5 : 4;
 }
@@ -27,11 +33,13 @@ export function getAudioTier(fmt: AudioFormatEntry): number {
 /**
  * Filters `adaptiveFormats` by preferred video codec (when set) and enforces
  * Cobalt's preferred original-track audio priority:
- * 7.1 -> 5.1 Surround -> Voice Boost -> Original Stereo (non-DRC) -> DRC.
+ * 7.1 -> 5.1 Surround -> Voice Boost -> Original Stereo -> DRC
+ * (or DRC ahead of Voice Boost / Stereo when `preferDrcAudio` is true).
  */
 export function filterStreamingFormats(
   formats: AudioFormatEntry[],
-  preferredCodec = 'any'
+  preferredCodec = 'any',
+  preferDrcAudio = false
 ): AudioFormatEntry[] {
   let result = formats;
 
@@ -68,7 +76,7 @@ export function filterStreamingFormats(
       needsFilter = true;
       continue;
     }
-    const tier = getAudioTier(fmt);
+    const tier = getAudioTier(fmt, preferDrcAudio);
     if (tier < bestTier) {
       if (bestTier !== Number.POSITIVE_INFINITY) needsFilter = true;
       bestTier = tier;
@@ -81,7 +89,7 @@ export function filterStreamingFormats(
     return result.filter((fmt) => {
       if (!fmt?.mimeType?.startsWith('audio/')) return true;
       if (targetId && fmt.audioTrack?.id !== targetId) return false;
-      if (getAudioTier(fmt) !== bestTier) return false;
+      if (getAudioTier(fmt, preferDrcAudio) !== bestTier) return false;
       if (targetId && fmt.audioTrack) fmt.audioTrack.audioIsDefault = true;
       return true;
     });

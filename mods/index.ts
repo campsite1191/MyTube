@@ -1,11 +1,15 @@
 import './core/trusted-types.ts';
 import { initConfig } from './core/config.ts';
+import { schedulePostFirstPaint } from './core/idle-scheduler.ts';
 import './core/innertube-interceptor.ts';
 import { setupMemoryPressureListener } from './core/memory-pressure.ts';
-
-void initConfig();
+import { installRemainingTime } from './features/remaining-time.ts';
+import { installRewindOnPause } from './features/rewind-on-pause.ts';
+import { initClock } from './ui/clock.ts';
 
 setupMemoryPressureListener();
+
+const configReady = initConfig();
 
 import './features/sponsorblock.ts';
 import './ui/ui.ts';
@@ -16,6 +20,11 @@ import './features/more-subtitles.ts';
 import './features/preferred-video-quality.ts';
 import './ui/custom-ui.ts';
 import './ui/custom-guide-action.ts';
-import './ui/clock.ts';
-import './features/remaining-time.ts';
-import './features/rewind-on-pause.ts';
+
+void configReady.then(() => {
+  schedulePostFirstPaint(() => {
+    initClock();
+    installRemainingTime();
+    installRewindOnPause();
+  });
+});

@@ -1,3 +1,4 @@
+import { clearRydCache } from '../features/return-youtube-dislike.ts';
 import { clearGuideCache } from './innertube-calls.ts';
 
 export function setupMemoryPressureListener(): void {
@@ -5,7 +6,7 @@ export function setupMemoryPressureListener(): void {
     (window as any).h5vcc.system.onMemoryPressure.addListener(() => {
       console.warn('Memory pressure detected, clearing caches...');
       clearGuideCache();
-      // Additional application-wide cleanup here
+      clearRydCache();
     });
   }
 }

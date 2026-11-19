@@ -344,6 +344,11 @@ export default function modernUI(update?: boolean, parameters?: number[]): void 
                             value: codec
                         }
                     })
+                },
+                {
+                    name: t('settings.options.videoPlayer.options.enableStableVolume'),
+                    icon: 'SETTINGS',
+                    value: 'enableStableVolume'
                 }
             ]
         },

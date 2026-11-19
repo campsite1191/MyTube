@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { applyDislikeCountToActions, processRydResponse } from '../mods/features/return-youtube-dislike.ts';
+import { applyDislikeCountToActions, clearRydCache, processRydResponse } from '../mods/features/return-youtube-dislike.ts';
 import type { TransportActionItem } from '../mods/features/return-youtube-dislike.ts';
 
 describe('return-youtube-dislike', () => {
@@ -49,5 +49,6 @@ describe('return-youtube-dislike', () => {
         transportControls: { transportControlsRenderer: { promotedActions: [] } },
       })
     );
+    assert.doesNotThrow(() => clearRydCache());
   });
 });

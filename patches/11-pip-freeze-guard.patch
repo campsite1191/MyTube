@@ -1,0 +1,58 @@
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
+index 3805772..51c56db 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
+@@ -716,23 +716,27 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+     AudioOutputManager.removeAudioDeviceListener(this);
+     super.onStop();
+ 
+-    if (useStarboardLifeCycle()) {
+-      // Going to the background is Conceal in the Starboard lifecycle (see
+-      // cobalt/doc/lifecycle.md). Freeze there is a blocking transition that releases SbPlayer and
+-      // flushes storage ahead of a process suspend, so it is deliberately not driven by
+-      // CobaltFreezeOnBackground, which only controls the lightweight page freeze below.
+-      AppEventBridge.handleConcealEvent(stopTimestamp);
+-    } else {
+-      // visibility:hidden event
+-      updateShellActivityVisible(false);
+-      WebContents webContents = getActiveWebContents();
+-      if (webContents != null && shouldFreezeOnBackground()) {
+-        long delayMs = getFreezeOnBackgroundDelayMs();
+-        if (delayMs > 0) {
+-          scheduleFreeze(delayMs);
+-        } else {
+-          // Fire freeze event immediately.
+-          webContents.onFreeze();
++    boolean inPictureInPicture =
++        Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode();
++    if (!inPictureInPicture) {
++      if (useStarboardLifeCycle()) {
++        // Going to the background is Conceal in the Starboard lifecycle (see
++        // cobalt/doc/lifecycle.md). Freeze there is a blocking transition that releases SbPlayer and
++        // flushes storage ahead of a process suspend, so it is deliberately not driven by
++        // CobaltFreezeOnBackground, which only controls the lightweight page freeze below.
++        AppEventBridge.handleConcealEvent(stopTimestamp);
++      } else {
++        // visibility:hidden event
++        updateShellActivityVisible(false);
++        WebContents webContents = getActiveWebContents();
++        if (webContents != null && shouldFreezeOnBackground()) {
++          long delayMs = getFreezeOnBackgroundDelayMs();
++          if (delayMs > 0) {
++            scheduleFreeze(delayMs);
++          } else {
++            // Fire freeze event immediately.
++            webContents.onFreeze();
++          }
+         }
+       }
+     }
+@@ -741,7 +745,7 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+     // process is killed while the app is in the background.
+     CobaltContentBrowserClient.flushCookiesAndLocalStorage();
+ 
+-    if (VideoSurfaceView.getCurrentSurface() != null) {
++    if (!inPictureInPicture && VideoSurfaceView.getCurrentSurface() != null) {
+       mForceCreateNewVideoSurfaceView = true;
+     }
+     MemoryPressureMonitor.INSTANCE.disablePolling();

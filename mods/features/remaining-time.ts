@@ -268,8 +268,11 @@ function attach(): void {
   apply();
 }
 
+let remainingTimeInstalled = false;
+
 export function installRemainingTime(): void {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (remainingTimeInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
+  remainingTimeInstalled = true;
 
   try {
     const sheet = new CSSStyleSheet();
@@ -290,5 +293,3 @@ export function installRemainingTime(): void {
   window.addEventListener('hashchange', attach, false);
   attach();
 }
-
-installRemainingTime();

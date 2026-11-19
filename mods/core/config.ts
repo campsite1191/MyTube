@@ -43,6 +43,7 @@ export interface ConfigSchema {
   enablePaidPromotionOverlay: boolean;
   speedSettingsIncrement: number;
   preferredVideoCodec: string;
+  enableStableVolume: boolean;
   launchToOnStartup: string;
   reloadHomeOnStartup: boolean;
   disabledSidebarContents: string[];
@@ -106,6 +107,7 @@ export const defaultConfig: ConfigSchema = {
   enablePaidPromotionOverlay: true,
   speedSettingsIncrement: 0.25,
   preferredVideoCodec: 'any',
+  enableStableVolume: false,
   launchToOnStartup: '{"browseEndpoint":{"browseId":"FEtopics"}}',
   reloadHomeOnStartup: true,
   disabledSidebarContents: ['FEtopics_music', 'FEtopics_movies', 'FEtopics_live', 'FEtopics_gaming', 'FEtopics_sports', 'FEtopics_podcasts'],

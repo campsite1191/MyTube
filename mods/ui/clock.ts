@@ -257,7 +257,13 @@ export function toggleClock(enabled: boolean): void {
   renderAndSchedule();
 }
 
-if (typeof document !== 'undefined') {
+let clockInitialized = false;
+
+/** Initializes the optional overlay clock and binds config change listeners once. */
+export function initClock(): void {
+  if (clockInitialized || typeof document === 'undefined') return;
+  clockInitialized = true;
+
   configChangeEmitter.addEventListener('configChange', (e) => {
     const { key, value } = e.detail;
     if (key === 'enableClock') {

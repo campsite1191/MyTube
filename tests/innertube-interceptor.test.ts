@@ -54,6 +54,31 @@ describe('getAudioTier and filterStreamingFormats', () => {
       [137, 140]
     );
   });
+
+  test('prefers DRC loudness-normalized stereo when preferDrcAudio is enabled while preserving surround', () => {
+    const drc: AudioFormatEntry = { itag: 140, mimeType: 'audio/mp4', xtags: 'drc=1', audioChannels: 2 };
+    const stereo: AudioFormatEntry = { itag: 251, mimeType: 'audio/webm', audioChannels: 2 };
+    const voiceBoost: AudioFormatEntry = { itag: 250, mimeType: 'audio/webm', xtags: 'vb=1', audioChannels: 2 };
+    const surround51: AudioFormatEntry = { itag: 258, mimeType: 'audio/mp4; codecs="ec-3"', audioChannels: 6 };
+
+    assert.equal(getAudioTier(surround51, true), 2);
+    assert.equal(getAudioTier(drc, true), 3);
+    assert.equal(getAudioTier(voiceBoost, true), 4);
+    assert.equal(getAudioTier(stereo, true), 5);
+
+    const video: AudioFormatEntry = { itag: 248, mimeType: 'video/webm; codecs="vp9"' };
+    const filteredStereoDrc = filterStreamingFormats([video, stereo, voiceBoost, drc], 'any', true);
+    assert.deepEqual(
+      filteredStereoDrc.map((f) => f.itag),
+      [248, 140]
+    );
+
+    const filteredWithSurround = filterStreamingFormats([video, stereo, drc, surround51], 'any', true);
+    assert.deepEqual(
+      filteredWithSurround.map((f) => f.itag),
+      [248, 258]
+    );
+  });
 });
 
 describe('disableAutoCaptionsInPayload', () => {

@@ -63,8 +63,11 @@ function isVideoElement(target: EventTarget | null): target is HTMLVideoElement 
   return Boolean(target && typeof target === 'object' && 'tagName' in target && (target as Element).tagName === 'VIDEO');
 }
 
+let rewindInstalled = false;
+
 export function installRewindOnPause(): void {
-  if (typeof document === 'undefined' || typeof window === 'undefined') return;
+  if (rewindInstalled || typeof document === 'undefined' || typeof window === 'undefined') return;
+  rewindInstalled = true;
 
   document.addEventListener(
     'pause',
@@ -141,6 +144,3 @@ export function installRewindOnPause(): void {
     }
   });
 }
-
-
-installRewindOnPause();

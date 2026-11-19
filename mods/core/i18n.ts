@@ -86,6 +86,7 @@ export const EN_TRANSLATIONS = {
   'settings.options.uiSettings.subtitle': 'Customize the UI to your liking',
   'settings.options.uiSettings.title': 'User Interface Settings',
   'settings.options.videoPlayer.options.codecAny': 'Any',
+  'settings.options.videoPlayer.options.enableStableVolume': 'Enable Stable Volume (Loudness Normalization)',
   'settings.options.videoPlayer.options.patching.options.enableVPUIPatching': 'Enable Video Player UI Patching',
   'settings.options.videoPlayer.options.patching.options.previousNextBtns': 'Enable Previous and Next Buttons',
   'settings.options.videoPlayer.options.patching.options.showAIAskBtn': 'Show Ask Button',

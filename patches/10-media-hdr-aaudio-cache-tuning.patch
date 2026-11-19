@@ -1,0 +1,103 @@
+diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
+index 7429887..3f1cab9 100644
+--- a/cobalt/android/androidtv_flag_map.cc
++++ b/cobalt/android/androidtv_flag_map.cc
+@@ -274,13 +274,11 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+                         blink::features::kCobaltBypassHTMLPreloadScanner.name);
+   enable_features.emplace_back(kEnableAv1StartupOptimizationFeature);
+   enable_features.emplace_back(kCobaltMmapFontCacheFeature);
+-  enable_feature_if_set(flags::kAreaBasedVideoBufferBudget,
+-                        kAreaBasedVideoBufferBudgetFeature);
++  enable_features.emplace_back(kAreaBasedVideoBufferBudgetFeature);
+   append_switch_if_set(
+       flags::kAllowCriticalMemoryPressureHandlingInForeground,
+       switches::kAllowCriticalMemoryPressureHandlingInForeground);
+-  enable_feature_if_set(
+-      flags::kEvictMemoryCacheOnCriticalMemoryPressure,
++  enable_features.emplace_back(
+       blink::features::kEvictMemoryCacheOnCriticalMemoryPressure.name);
+ 
+   if (flag_map.Has(flags::kDisableLessAggressiveParkableString)) {
+@@ -288,8 +286,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+         blink::features::kLessAggressiveParkableString.name);
+   }
+ 
+-  enable_feature_if_set(
+-      flags::kEnableModerateMemoryPressure,
++  enable_features.emplace_back(
+       base::features::kCobaltEnableModerateMemoryPressure.name);
+   if (const auto cooldown =
+           flag_map.GetNumeric(flags::kMemoryPressureCooldownInSeconds)) {
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java
+index 4c238e6..7bbd83c 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java
+@@ -522,8 +522,14 @@ public class MediaCodecUtil {
+             || codecProfileLevel.profile == CodecProfileLevel.VP9Profile3HDR) {
+           return true;
+         }
++        if (Build.VERSION.SDK_INT >= 29
++            && (codecProfileLevel.profile == CodecProfileLevel.VP9Profile2HDR10Plus
++                || codecProfileLevel.profile == CodecProfileLevel.VP9Profile3HDR10Plus)) {
++          return true;
++        }
+       } else if (mimeType.equals(AV1_MIME_TYPE)) {
+-        if (codecProfileLevel.profile == CodecProfileLevel.AV1ProfileMain10HDR10) {
++        if (codecProfileLevel.profile == CodecProfileLevel.AV1ProfileMain10HDR10
++            || codecProfileLevel.profile == CodecProfileLevel.AV1ProfileMain10HDR10Plus) {
+           return true;
+         }
+       }
+diff --git a/cobalt/app/cobalt_switch_defaults_android.cc b/cobalt/app/cobalt_switch_defaults_android.cc
+index 2f91d5b..4abc27d 100644
+--- a/cobalt/app/cobalt_switch_defaults_android.cc
++++ b/cobalt/app/cobalt_switch_defaults_android.cc
+@@ -72,8 +72,8 @@ CommandLinePreprocessor::GetCobaltParamSwitchDefaults() {
+        ::switches::autoplay::kNoUserGestureRequiredPolicy},
+       // Set default raster threads to 2 for smoother performance.
+       {::switches::kNumRasterThreads, "2"},
+-      // Limit the HTTP disk cache to 25 MiB (25 * 1024 * 1024 bytes).
+-      {switches::kMaxHttpCacheSize, "26214400"},
++      // Raise HTTP disk cache to 64 MiB to keep TV assets and JS warm.
++      {switches::kMaxHttpCacheSize, "67108864"},
+       {blink::switches::kJavaScriptFlags,
+        // Disable decommitting pooled pages to prevent virtual memory
+        // fragmentation.
+diff --git a/starboard/android/shared/media_capabilities_cache.cc b/starboard/android/shared/media_capabilities_cache.cc
+index 3e1886d..2af76a9 100644
+--- a/starboard/android/shared/media_capabilities_cache.cc
++++ b/starboard/android/shared/media_capabilities_cache.cc
+@@ -104,6 +104,7 @@ class MediaCapabilitiesProviderImpl : public MediaCapabilitiesProvider {
+           supported_transfer_ids.insert(kSbMediaTransferIdAribStdB67);
+           continue;
+         case HDR_TYPE_HDR10_PLUS:
++          supported_transfer_ids.insert(kSbMediaTransferIdSmpteSt2084);
+           continue;
+       }
+     }
+diff --git a/starboard/android/shared/player_components_factory.cc b/starboard/android/shared/player_components_factory.cc
+index bb9151a..0a7c5a9 100644
+--- a/starboard/android/shared/player_components_factory.cc
++++ b/starboard/android/shared/player_components_factory.cc
+@@ -103,7 +103,7 @@ NdkAudioMode GetNdkAudioMode(
+     const ExperimentalFeatures& experimental_features) {
+   return static_cast<NdkAudioMode>(
+       experimental_features.Get(kMediaNdkAudioMode)
+-          .value_or(static_cast<int>(NdkAudioMode::kDisabled)));
++          .value_or(static_cast<int>(NdkAudioMode::kPullSink)));
+ }
+ 
+ // On some platforms tunnel mode is only supported in the secure pipeline.  Set
+diff --git a/starboard/extension/feature_config.h b/starboard/extension/feature_config.h
+index 28561b5..2238b38 100644
+--- a/starboard/extension/feature_config.h
++++ b/starboard/extension/feature_config.h
+@@ -105,7 +105,7 @@ FEATURE_LIST_START
+ // Set to true to enable area-based video buffer budget calculation.
+ STARBOARD_FEATURE(kAreaBasedVideoBufferBudget,
+                   "AreaBasedVideoBufferBudget",
+-                  false)
++                  true)
+ 
+ // Set the following variable to true to enable av1 startup optimization.
+ STARBOARD_FEATURE(kEnableAv1StartupOptimization,

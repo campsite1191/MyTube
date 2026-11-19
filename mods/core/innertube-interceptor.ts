@@ -590,7 +590,8 @@ export async function transformInnertubeResponse(r: unknown): Promise<unknown> {
     if (Array.isArray(streamingData?.adaptiveFormats)) {
       streamingData.adaptiveFormats = filterStreamingFormats(
         streamingData.adaptiveFormats as AudioFormatEntry[],
-        configRead('preferredVideoCodec')
+        configRead('preferredVideoCodec'),
+        Boolean(configRead('enableStableVolume'))
       );
     }
 
