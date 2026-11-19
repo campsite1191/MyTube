@@ -1,0 +1,28 @@
+name: Keep ccache Alive
+
+on:
+  schedule:
+    - cron: '0 0 */5 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PLATFORM: android-arm
+  BUILD_TYPE: gold
+
+jobs:
+  keep-alive:
+    name: Refresh ccache TTL
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Restore ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}-keepalive-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}-

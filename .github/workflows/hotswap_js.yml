@@ -1,0 +1,159 @@
+name: Hotswap JS into Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Base release tag containing the APK (leave blank for latest)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hotswap-${{ inputs.release_tag || 'latest' }}
+  cancel-in-progress: false
+
+env:
+  PLATFORM: android-arm
+  BUILD_TYPE: gold
+
+jobs:
+  hotswap:
+    name: "Hotswap android-arm (gold)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Builder Patches
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Download Base APK from Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_tag }}"
+          PREFIX="custom-${PLATFORM}-${BUILD_TYPE}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --repo "${{ github.repository }}" --exclude-drafts --limit 50 \
+              --json tagName,createdAt \
+              --jq "[.[] | select(.tagName == \"${PREFIX}\" or ((.tagName | startswith(\"${PREFIX}-\")) and (.tagName | startswith(\"${PREFIX}-js-\") | not)))] | sort_by(.createdAt) | last | .tagName // empty")
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::No release found matching ${PREFIX}"
+            exit 1
+          fi
+          ASSET=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
+            --jq '.assets | map(select(.name | endswith(".apk"))) | sort_by(.updatedAt) | last | .name')
+          if [ -z "$ASSET" ] || [ "$ASSET" = "null" ]; then
+            echo "::error::No APK asset found in release $TAG"
+            exit 1
+          fi
+          BASE_NOTES=$(gh release view "$TAG" --repo "${{ github.repository }}" --json body -q .body 2>/dev/null || echo "")
+          BASE_COBALT=$(echo "$BASE_NOTES" | sed -n 's/^cobalt_sha=\([0-9a-f]*\).*/\1/p' | head -n 1)
+          {
+            echo "BASE_TAG=${TAG}"
+            echo "BASE_COBALT_SHA=${BASE_COBALT:-unknown}"
+          } >> "$GITHUB_ENV"
+          echo "Downloading $ASSET from $TAG..."
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern "$ASSET" --output base.apk
+          ls -lh base.apk
+
+      - name: Build Lean Userscript
+        run: |
+          npm --prefix mods install --no-audit --no-fund
+          npm --prefix mods run build
+          ls -lh mods/dist/userscript.js
+
+      - name: Replace assets/userscript.js (Stored)
+        run: |
+          mkdir -p stage/assets
+          cp mods/dist/userscript.js stage/assets/userscript.js
+          zip -d base.apk assets/userscript.js || true
+          (cd stage && zip -0 ../base.apk assets/userscript.js)
+          unzip -lv base.apk | grep userscript.js
+
+      - name: Re-sign APK with Keystore Secret
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set"
+            exit 1
+          fi
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 -d > /tmp/release.keystore
+          curl -fsSL --retry 3 -o /tmp/uber-apk-signer.jar \
+            https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
+          mkdir -p /tmp/signed_apk
+          java -jar /tmp/uber-apk-signer.jar \
+            --apks base.apk \
+            --ks /tmp/release.keystore \
+            --ksPass "${ANDROID_KEYSTORE_PASSWORD}" \
+            --ksAlias "${ANDROID_KEY_ALIAS}" \
+            --ksKeyPass "${ANDROID_KEY_PASSWORD}" \
+            --allowResign \
+            --out /tmp/signed_apk
+          SIGNED=$(find /tmp/signed_apk -type f -name '*.apk' | head -n 1)
+          if [ -z "$SIGNED" ]; then
+            echo "::error::Signed APK not found"
+            exit 1
+          fi
+          rm -f /tmp/release.keystore /tmp/uber-apk-signer.jar
+          STAMP=$(date -u +%Y%m%d)
+          DATE_ISO="${STAMP:0:4}-${STAMP:4:2}-${STAMP:6:2}"
+          APK_NAME="Cobalt-${PLATFORM}-${BUILD_TYPE}-js-${STAMP}-r${GITHUB_RUN_NUMBER}.apk"
+          RELEASE_TAG="custom-${PLATFORM}-${BUILD_TYPE}-js-${STAMP}-r${GITHUB_RUN_NUMBER}"
+          RELEASE_TITLE="Cobalt JS (${PLATFORM} / ${BUILD_TYPE}) - ${DATE_ISO} (js-r${GITHUB_RUN_NUMBER})"
+          cp "$SIGNED" "./${APK_NAME}"
+          ls -lh "./${APK_NAME}"
+          printf "JS hotswap build (%s / %s).\n\nbuild_kind=js-hotswap\nbase_release=%s\nlatest_asset=%s\nrun_number=%s\nrun_id=%s\ncobalt_sha=%s\nhotswap_builder_sha=%s\n" \
+            "${PLATFORM}" "${BUILD_TYPE}" "${BASE_TAG}" "${APK_NAME}" "${{ github.run_number }}" "${{ github.run_id }}" \
+            "${BASE_COBALT_SHA}" "${{ github.sha }}" > ./release_notes.md
+          {
+            echo "APK_NAME=${APK_NAME}"
+            echo "RELEASE_TAG=${RELEASE_TAG}"
+            echo "RELEASE_TITLE=${RELEASE_TITLE}"
+          } >> "$GITHUB_ENV"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.APK_NAME }}
+          retention-days: 1
+          archive: false
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: ${{ env.APK_NAME }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TITLE }}
+          body_path: ./release_notes.md
+          target_commitish: ${{ github.sha }}
+          fail_on_unmatched_files: true
+          make_latest: 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean Up Old Releases
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        with:
+          keep_latest: 7
+          delete_tags: true
+          delete_tag_pattern: '^custom-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}(?:$|-)'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

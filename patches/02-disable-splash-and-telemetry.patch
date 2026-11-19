@@ -1,0 +1,67 @@
+diff --git a/cobalt/browser/cobalt_browser_main_parts.cc b/cobalt/browser/cobalt_browser_main_parts.cc
+index 90a4e2d..015676e 100644
+--- a/cobalt/browser/cobalt_browser_main_parts.cc
++++ b/cobalt/browser/cobalt_browser_main_parts.cc
+@@ -829,7 +829,7 @@ void CobaltBrowserMainParts::StartMetricsRecording() {
+   // no uploads are sent.
+   GlobalFeatures::GetInstance()
+       ->metrics_services_manager()
+-      ->UpdateUploadPermissions(true);
++      ->UpdateUploadPermissions(false);
+   LOG(INFO) << "Metrics Service is now running/recording.";
+ }
+ 
+diff --git a/cobalt/browser/features.cc b/cobalt/browser/features.cc
+index 4820de2..e6b6d43 100644
+--- a/cobalt/browser/features.cc
++++ b/cobalt/browser/features.cc
+@@ -63,7 +63,7 @@ BASE_FEATURE(kHangWatchThreadPoolDump,
+ 
+ BASE_FEATURE(kHangWatchRendererThreadDump,
+              "HangWatchRendererThreadDump",
+-             base::FEATURE_ENABLED_BY_DEFAULT);
++             base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE(kHangWatcherLongHangDetection,
+              "HangWatcherLongHangDetection",
+@@ -88,7 +88,7 @@ const base::FeatureParam<int> kMemoryMetricsIntervalParam{
+ 
+ BASE_FEATURE(kCobaltVirtualAddressSpaceMetrics,
+              "CobaltVirtualAddressSpaceMetrics",
+-             base::FEATURE_ENABLED_BY_DEFAULT);
++             base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ const base::FeatureParam<double> kVirtualAddressSpaceSampleProbabilityParam{
+     &kCobaltVirtualAddressSpaceMetrics, "sample_probability", 0.01};
+@@ -110,7 +110,7 @@ const base::FeatureParam<int> kInMemoryUpdatesMemoryBufferParam{
+ 
+ BASE_FEATURE(kDisableSplashScreen,
+              "DisableSplashScreen",
+-             base::FEATURE_DISABLED_BY_DEFAULT);
++             base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ #if BUILDFLAG(IS_IOS_TVOS)
+ BASE_FEATURE(kForceVideoSplashScreen,
+@@ -199,7 +199,7 @@ const base::FeatureParam<int> kCobaltMemoryPressurePollIntervalSecondsParam{
+ 
+ BASE_FEATURE(kCobaltSkipTrustedHeaderClient,
+              "CobaltSkipTrustedHeaderClient",
+-             base::FEATURE_DISABLED_BY_DEFAULT);
++             base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE(kCobaltFreezeOnBackground,
+              "CobaltFreezeOnBackground",
+@@ -228,11 +228,11 @@ BASE_FEATURE(kCobaltStabilityMetricsDeduplication,
+ 
+ BASE_FEATURE(kCobaltStartupPreconnect,
+              "CobaltStartupPreconnect",
+-             base::FEATURE_DISABLED_BY_DEFAULT);
++             base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE(kCobaltFlushHttpServerPropertiesOnPause,
+              "CobaltFlushHttpServerPropertiesOnPause",
+-             base::FEATURE_DISABLED_BY_DEFAULT);
++             base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ }  // namespace features
+ }  // namespace cobalt

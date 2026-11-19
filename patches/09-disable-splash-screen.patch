@@ -1,0 +1,12 @@
+diff --git a/cobalt/browser/features.cc b/cobalt/browser/features.cc
+--- a/cobalt/browser/features.cc
++++ b/cobalt/browser/features.cc
+@@ -232,7 +232,7 @@
+ 
+ BASE_FEATURE(kDisableSplashScreen,
+              "DisableSplashScreen",
+-             base::FEATURE_DISABLED_BY_DEFAULT);
++             base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ #if BUILDFLAG(IS_IOS_TVOS)
+ BASE_FEATURE(kForceVideoSplashScreen,

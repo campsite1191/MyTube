@@ -1,0 +1,73 @@
+diff --git a/cobalt/android/BUILD.gn b/cobalt/android/BUILD.gn
+index 3cf2b28..472c107 100644
+--- a/cobalt/android/BUILD.gn
++++ b/cobalt/android/BUILD.gn
+@@ -358,8 +358,14 @@ android_library("cobalt_apk_java") {
+ 
+ android_assets("coat_assets") {
+   sources = [ "apk/app/src/app/assets/web/cobalt_logo_1024.png" ]
+-  renaming_sources = [ "$root_out_dir/fonts/fonts.xml" ]
+-  renaming_destinations = [ "fonts/fonts.xml" ]
++  renaming_sources = [
++    "$root_out_dir/fonts/fonts.xml",
++    "apk/app/src/app/assets/userscript.js",
++  ]
++  renaming_destinations = [
++    "fonts/fonts.xml",
++    "userscript.js",
++  ]
+   disable_compression = true
+   deps = [
+     "//starboard/content/fonts:copy_font_data",
+diff --git a/third_party/blink/renderer/core/dom/document.cc b/third_party/blink/renderer/core/dom/document.cc
+index c040351..acb0872 100644
+--- a/third_party/blink/renderer/core/dom/document.cc
++++ b/third_party/blink/renderer/core/dom/document.cc
+@@ -28,6 +28,10 @@
+  */
+ 
+ #include "third_party/blink/renderer/core/dom/document.h"
++#include "base/android/apk_assets.h"
++#include "base/files/file.h"
++#include "base/no_destructor.h"
++#include "third_party/blink/renderer/core/script/classic_script.h"
+ 
+ #include <algorithm>
+ #include <memory>
+@@ -4010,6 +4014,36 @@ void Document::ImplicitClose() {
+ 
+   load_event_progress_ = kLoadEventInProgress;
+ 
++  // Custom userscript injection (bundled locally, main frame on YouTube).
++  if (IsA<HTMLDocument>(this) && domWindow() && IsInOutermostMainFrame()) {
++    const std::string host = Url().Host().Utf8();
++    if (host == "youtube.com" ||
++        (host.size() > 12 &&
++         host.compare(host.size() - 12, 12, ".youtube.com") == 0)) {
++      static const base::NoDestructor<std::string> kCachedUserScript([] {
++        std::string out;
++        base::MemoryMappedFile::Region region;
++        base::File asset_file(
++            base::android::OpenApkAsset("assets/userscript.js", &region));
++        if (asset_file.IsValid() && region.size > 0) {
++          base::MemoryMappedFile mapped;
++          if (mapped.Initialize(std::move(asset_file), region)) {
++            out.assign(reinterpret_cast<const char*>(mapped.data()),
++                       mapped.length());
++          }
++        }
++        return out;
++      }());
++      if (!kCachedUserScript->empty()) {
++        ClassicScript::CreateUnspecifiedScript(
++            String::FromUTF8(*kCachedUserScript),
++            ScriptSourceLocationType::kInternal,
++            SanitizeScriptErrors::kDoNotSanitize)
++            ->RunScript(domWindow());
++      }
++    }
++  }
++
+   // We have to clear the parser, in case someone document.write()s from the
+   // onLoad event handler, as in Radar 3206524.
+   DetachParser();

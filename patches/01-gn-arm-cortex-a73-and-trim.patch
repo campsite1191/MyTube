@@ -1,0 +1,92 @@
+diff --git a/cobalt/android/BUILD.gn b/cobalt/android/BUILD.gn
+index c0ea98a..3cf2b28 100644
+--- a/cobalt/android/BUILD.gn
++++ b/cobalt/android/BUILD.gn
+@@ -20,14 +20,14 @@ jinja_template("cobalt_manifest") {
+   input = "//cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2"
+   output = cobalt_manifest
+   variables = [
+-    "manifest_package=dev.cobalt.coat",
++    "manifest_package=com.cobalt.mytube",
+     "build_type=$build_type",
+   ]
+ 
+   # This manifest is shared by the 1P Android TV dev shell (CoAT, where
+   # production uses Kimono) and 3P AOSP builds (cobalt_apk). Keep 1P CoAT
+   # debuggable, but disable debuggable on 3P AOSP release (gold) builds.
+-  if (cobalt_is_release_build && !is_androidtv) {
++  if (cobalt_is_release_build) {
+     variables += [ "debuggable=false" ]
+   } else {
+     variables += [ "debuggable=true" ]
+@@ -442,7 +442,13 @@ android_apk("cobalt_apk") {
+ 
+   shared_libraries = [ ":libchrobalt" ]
+   srcjar_deps = [ ":libchrobalt__jni_registration" ]
++  aapt_locale_allowlist = [ "en-US" ]
+   include_size_info = is_official_build
++  version_code = "1"
++  version_name = "1.0.0"
++  keystore_path = "../../../../.android/debug.keystore"
++  keystore_name = "androiddebugkey"
++  keystore_password = "android"
+ }
+ 
+ robolectric_binary("cobalt_coat_junit_tests") {
+diff --git a/cobalt/build/configs/android-arm/args.gn b/cobalt/build/configs/android-arm/args.gn
+index 61f94d8..8a96ccc 100644
+--- a/cobalt/build/configs/android-arm/args.gn
++++ b/cobalt/build/configs/android-arm/args.gn
+@@ -1,3 +1,10 @@
+ import("//cobalt/build/configs/android_common.gn")
+ 
+ target_cpu = "arm"
++
++# Target Hisense TV CPU (4x ARM Cortex-A73, ARMv8-A 32-bit).
++arm_version = 8
++arm_tune = "cortex-a73"
++
++# Required with arm_version = 8: Rust .rlib bitcode uses armv7-none-linux-android while C++ uses thumbv8a.
++use_thin_lto = false
+diff --git a/cobalt/build/configs/common.gn b/cobalt/build/configs/common.gn
+index 6fcf0ca..3611edb 100644
+--- a/cobalt/build/configs/common.gn
++++ b/cobalt/build/configs/common.gn
+@@ -95,10 +95,12 @@ enable_rust_png = false
+ enable_backup_ref_ptr_support = false
+ enable_backup_ref_ptr_feature_flag = false
+ 
+-# Disable vectorized HTML scanning (SIMD speedups for HTML parsing
+-# are not needed).
+-enable_vectorized_html_scanning = false
++# Enable vectorized HTML scanning (NEON SIMD speedup for HTML parsing).
++enable_vectorized_html_scanning = true
+ 
+ # Disable Media Remoting (Casting / Remoter Mojo endpoints) for Cobalt.
+ enable_media_remoting = false
+ enable_media_remoting_rpc = false
++
++# Disable printing support.
++enable_printing = false
+diff --git a/cobalt/shell/android/BUILD.gn b/cobalt/shell/android/BUILD.gn
+index f098770..dc2c0bd 100644
+--- a/cobalt/shell/android/BUILD.gn
++++ b/cobalt/shell/android/BUILD.gn
+@@ -27,12 +27,17 @@ generate_jni("cobalt_shell_jni_headers") {
+ 
+ android_resources("cobalt_shell_java_resources") {
+   sources = [
++    "java/res/drawable-hdpi/app_banner.png",
++    "java/res/drawable-mdpi/app_banner.png",
+     "java/res/drawable-xhdpi/app_banner.png",
++    "java/res/drawable-xxhdpi/app_banner.png",
++    "java/res/drawable-xxxhdpi/app_banner.png",
+     "java/res/layout/coat_error_dialog.xml",
+     "java/res/mipmap-hdpi/ic_app.png",
+     "java/res/mipmap-mdpi/ic_app.png",
+     "java/res/mipmap-xhdpi/ic_app.png",
+     "java/res/mipmap-xxhdpi/ic_app.png",
++    "java/res/mipmap-xxxhdpi/ic_app.png",
+     "java/res/values/colors.xml",
+     "java/res/values/ids.xml",
+     "java/res/values/overlayable.xml",

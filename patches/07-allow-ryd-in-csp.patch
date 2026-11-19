@@ -1,0 +1,20 @@
+diff --git a/third_party/blink/renderer/core/frame/csp/content_security_policy.cc b/third_party/blink/renderer/core/frame/csp/content_security_policy.cc
+index f03c185..93fea96 100644
+--- a/third_party/blink/renderer/core/frame/csp/content_security_policy.cc
++++ b/third_party/blink/renderer/core/frame/csp/content_security_policy.cc
+@@ -901,6 +901,15 @@ bool ContentSecurityPolicy::AllowFromSource(
+     }
+   }
+ 
++  const Vector<std::string> kAllowList = {
++      "sponsor.ajay.app",
++      "dearrow-thumb.ajay.app",
++      "returnyoutubedislikeapi.com",
++  };
++  if (kAllowList.Contains(url.Host().Utf8())) {
++    return true;
++  }
++
+   CSPCheckResult result = CSPCheckResult::Allowed();
+   for (const auto& policy : policies_) {
+     if (!CheckHeaderTypeMatches(check_header_type, reporting_disposition,

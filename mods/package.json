@@ -1,0 +1,19 @@
+{
+  "name": "@custom-cobalt/mods",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild ui/ui.css --minify --outfile=ui/ui.min.css && esbuild index.ts --bundle --format=iife --target=es2022 --minify --charset=ascii --loader:.css=text --outfile=dist/userscript.raw.js && npx javascript-obfuscator dist/userscript.raw.js --output dist/userscript.js --compact true --control-flow-flattening true && rm dist/userscript.raw.js",
+    "typecheck": "tsc -p ../tsconfig.json --noEmit"
+  },
+  "keywords": [],
+  "license": "GPL-3.0-only",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "esbuild": "^0.25.1",
+    "typescript": "^5.8.2"
+  }
+}

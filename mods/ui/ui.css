@@ -1,0 +1,39 @@
+/* Fixes transparency effect for the video player */
+/* NOTE: Avoid layout-inducing properties (top, left, width, height) in animations. Use transform/opacity. */
+.ytLrWatchDefaultShadow,
+div[idomkey="shadow"] {
+  background-image: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0.8) 90%) !important;
+  background-color: rgba(0, 0, 0, 0.3) !important;
+  display: block !important;
+  height: 100% !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  width: 100% !important;
+}
+
+/* https://github.com/webosbrew/youtube-webos/commit/4fbe38a18df31ddd62b6cf15f141dd58e1d1a71d */
+.ytLrWatchDefault2025Shadow {
+  background-color: rgba(11, 11, 11, 0.5) !important;
+}
+
+/* Fixes shorts having a black background */
+
+.ytLrTileHeaderRendererShorts {
+  background-image: none !important;
+}
+
+/* Multiline support for strings in the UI */
+
+.ytLrOverlayPanelHeaderRendererSubtitle {
+  white-space: pre-wrap !important;
+}
+
+/* Fixes SponsorBlock segments overlapping with the playhead */
+
+.ytLrProgressBarPlayhead {
+  z-index: 1 !important;
+}
+
+.ytLrProgressBarPlayed {
+  z-index: 1 !important;
+}

@@ -1,0 +1,39 @@
+diff --git a/starboard/extension/feature_config.h b/starboard/extension/feature_config.h
+index 3891aafc7c..cfff91deb3 100644
+--- a/starboard/extension/feature_config.h
++++ b/starboard/extension/feature_config.h
+@@ -117,14 +117,14 @@ STARBOARD_FEATURE(kEnableAv1StartupOptimization,
+ // during Seek().
+ STARBOARD_FEATURE(kForceFlushAudioTrackDuringReset,
+                   "ForceFlushAudioTrackDuringReset",
+-                  false)
++                  true)
+ 
+ // By default, Cobalt recreates MediaCodec when Reset() during Seek().
+ // Set the following variable to true to force it Flush() MediaCodec
+ // during Seek().
+ STARBOARD_FEATURE(kForceFlushDecoderDuringReset,
+                   "ForceFlushDecoderDuringReset",
+-                  false)
++                  true)
+ 
+ // By default, the platform Opus decoder is only enabled for encrypted playback.
+ // Set the following variable to true to force it for clear playback.
+@@ -133,7 +133,7 @@ STARBOARD_FEATURE(kForcePlatformOpusDecoder, "ForcePlatformOpusDecoder", false)
+ // By default, Cobalt teardowns AudioDecoder during Reset().
+ // Set the following variable to true to force it reset audio decoder
+ // during Reset(). This should be enabled with kForceFlushDecoderDuringReset.
+-STARBOARD_FEATURE(kForceResetAudioDecoder, "ForceResetAudioDecoder", false)
++STARBOARD_FEATURE(kForceResetAudioDecoder, "ForceResetAudioDecoder", true)
+ 
+ // By default, tunnel mode has to be enabled explicitly by the web app via the
+ // mime attribute "tunnelmode=true". Set the following variable to true to force
+@@ -145,7 +145,7 @@ STARBOARD_FEATURE(kForceTunnelMode, "ForceTunnelMode", false)
+ // frames until the underlying audio sink actually starts.
+ STARBOARD_FEATURE(kReleaseVideoFramesAfterAudioStarts,
+                   "ReleaseVideoFramesAfterAudioStarts",
+-                  false)
++                  true)
+ 
+ // By default, stub audio decoder is disabled.
+ STARBOARD_FEATURE(kUseStubAudioDecoder, "UseStubAudioDecoder", false)

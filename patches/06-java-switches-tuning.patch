@@ -1,0 +1,146 @@
+diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
+index 0b83390..7429887 100644
+--- a/cobalt/android/androidtv_flag_map.cc
++++ b/cobalt/android/androidtv_flag_map.cc
+@@ -52,8 +52,11 @@ constexpr char kAreaBasedVideoBufferBudgetFeature[] =
+ // Experiment-controlled defaults, used when the experiment key is absent.
+ constexpr char kDefaultInitialOldSpaceSizeMb[] = "64";
+ constexpr char kDefaultMaxOldSpaceSizeMb[] = "512";
++constexpr char kDefaultImageDecodeCacheLimitMbs[] = "48";
++constexpr char kEnableAv1StartupOptimizationFeature[] =
++    "EnableAv1StartupOptimization";
+ #if !defined(ARCH_CPU_ARM64) && !defined(ARCH_CPU_X86_64)
+-constexpr char kDefaultForceGpuMemAvailableMb[] = "64";
++constexpr char kDefaultForceGpuMemAvailableMb[] = "128";
+ #endif
+ 
+ std::string KeepDigits(std::string_view value) {
+@@ -178,12 +181,8 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+     }
+   };
+ 
+-  if (!flag_map.Has(flags::kEnableQuic)) {
+-    AppendSwitchIfAbsent(cmd_line, ::switches::kDisableQuic);
+-  }
+-
++  js_flags.push_back(v8_switches::kMinorMs);
+   if (flag_map.Has(flags::kUseMinorMsForMinorGc)) {
+-    js_flags.push_back(v8_switches::kMinorMs);
+     js_flags.push_back(base::StrCat(
+         {v8_switches::kMinorMsMinNewSpaceCapacityForConcurrentMarkingMb, "0"}));
+   }
+@@ -223,12 +222,17 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+                        ::switches::kDisableGpuMemoryBufferCompositorResources);
+   append_numeric_switch(flags::kGpuImageCacheLimitItems,
+                         ::switches::kCCImageCacheLimitItems);
+-  append_numeric_switch(flags::kLimitImageDecodeCacheSizeMb,
+-                        ::switches::kCCImageCacheLimitMbs);
++  if (const auto decode_limit_mb =
++          flag_map.GetNumeric(flags::kLimitImageDecodeCacheSizeMb)) {
++    AppendSwitchIfAbsent(cmd_line, ::switches::kCCImageCacheLimitMbs,
++                         *decode_limit_mb);
++  } else {
++    AppendSwitchIfAbsent(cmd_line, ::switches::kCCImageCacheLimitMbs,
++                         kDefaultImageDecodeCacheLimitMbs);
++  }
+   append_numeric_switch(flags::kDecodedImageWorkingSetBudgetBytes,
+                         ::switches::kDecodedImageWorkingSetBudgetBytes);
+-  append_switch_if_set(flags::kEnableScalingClippedImages,
+-                       ::switches::kEnableClippedImageScaling);
++  AppendSwitchIfAbsent(cmd_line, ::switches::kEnableClippedImageScaling);
+ 
+   std::vector<std::string> mojo_pipe_params;
+   add_numeric_param(
+@@ -268,8 +272,8 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+       blink::features::kCobaltBypassResourceLoadScheduler.name);
+   enable_feature_if_set(flags::kCobaltBypassHtmlPreloadScanner,
+                         blink::features::kCobaltBypassHTMLPreloadScanner.name);
+-  enable_feature_if_set(flags::kEnableCobaltMmapFontCache,
+-                        kCobaltMmapFontCacheFeature);
++  enable_features.emplace_back(kEnableAv1StartupOptimizationFeature);
++  enable_features.emplace_back(kCobaltMmapFontCacheFeature);
+   enable_feature_if_set(flags::kAreaBasedVideoBufferBudget,
+                         kAreaBasedVideoBufferBudgetFeature);
+   append_switch_if_set(
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/util/JavaSwitches.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/util/JavaSwitches.java
+index 5bc8bc9..c7a3964 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/util/JavaSwitches.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/util/JavaSwitches.java
+@@ -24,7 +24,6 @@ import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.List;
+ import java.util.Map;
+-import org.chromium.base.BaseSwitches;
+ import org.chromium.base.ContextUtils;
+ import org.chromium.base.Log;
+ import org.chromium.ui.display.DisplaySwitches;
+@@ -236,13 +235,6 @@ public class JavaSwitches {
+ 
+   private static void addSwitchesReadBeforeNativeInit(
+       List<String> args, Map<String, String> javaSwitches) {
+-    // Read by Java SysUtils.isLowEndDevice(), which caches the result, and by
+-    // SysInfo::IsLowEndDevice() in JNI_LibraryLoader_LibraryLoaded() (orderfile optimization).
+-    // TODO(cobalt, b/563373348): Investigate performance impact on high-end devices.
+-    if (!javaSwitches.containsKey(DISABLE_LOW_END_DEVICE_MODE)) {
+-      args.add("--" + BaseSwitches.ENABLE_LOW_END_DEVICE_MODE);
+-    }
+-
+     // Read and cached by PhysicalDisplayAndroid, via
+     // DeviceUtils.updateDeviceSpecificUserAgentSwitch().
+     boolean force720pUi =
+diff --git a/cobalt/app/cobalt_switch_defaults_android.cc b/cobalt/app/cobalt_switch_defaults_android.cc
+index dece364..2f91d5b 100644
+--- a/cobalt/app/cobalt_switch_defaults_android.cc
++++ b/cobalt/app/cobalt_switch_defaults_android.cc
+@@ -77,9 +77,7 @@ CommandLinePreprocessor::GetCobaltParamSwitchDefaults() {
+       {blink::switches::kJavaScriptFlags,
+        // Disable decommitting pooled pages to prevent virtual memory
+        // fragmentation.
+-       "--no-decommit-pooled-pages,"
+-       // Disable v8 concurrent marking by default.
+-       "--no-concurrent-marking"},
++       "--no-decommit-pooled-pages"},
+       // Enable precise memory info so we can make accurate client-side
+       // measurements.
+       {::switches::kEnableBlinkFeatures, "PreciseMemoryInfo"},
+diff --git a/net/quic/quic_session_pool.cc b/net/quic/quic_session_pool.cc
+index 9c68a01..5501811 100644
+--- a/net/quic/quic_session_pool.cc
++++ b/net/quic/quic_session_pool.cc
+@@ -1446,24 +1446,6 @@ base::TimeDelta QuicSessionPool::GetTimeDelayForWaitingJob(
+     return *time_delay_for_waiting_job_for_testing_;
+   }
+ 
+-  // If |is_quic_known_to_work_on_current_network_| is false, then one of the
+-  // following is true:
+-  // 1) This is startup and QuicSessionPool::CreateSession() and
+-  // ConfigureSocket() have yet to be called, and it is not yet known
+-  // if the current network is the last one where QUIC worked.
+-  // 2) Startup has been completed, and QUIC has not been used
+-  // successfully since startup, or on this network before.
+-  if (!has_quic_ever_worked_on_current_network_) {
+-    // If |need_to_check_persisted_supports_quic_| is false, this is case 1)
+-    // above. If HasLastLocalAddressWhenQuicWorked() is also true, then there's
+-    // a chance the current network is the last one on which QUIC worked. So
+-    // only delay the request if there's no chance that is the case.
+-    if (!need_to_check_persisted_supports_quic_ ||
+-        !http_server_properties_->HasLastLocalAddressWhenQuicWorked()) {
+-      return base::TimeDelta();
+-    }
+-  }
+-
+   // QUIC was recently broken. Do not delay the main job.
+   if (WasQuicRecentlyBroken(session_key)) {
+     return base::TimeDelta();
+diff --git a/services/network/network_context.cc b/services/network/network_context.cc
+index e1a05af..7d778d4 100644
+--- a/services/network/network_context.cc
++++ b/services/network/network_context.cc
+@@ -2957,6 +2957,7 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext(
+ 
+ #if BUILDFLAG(IS_COBALT)
+   session_params.use_quic_for_unknown_origins = true;
++  quic_context->params()->delay_main_job_with_available_spdy_session = true;
+ #endif
+ 
+   session_params.disable_idle_sockets_close_on_memory_pressure =

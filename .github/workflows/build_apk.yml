@@ -1,0 +1,425 @@
+name: Build Cobalt APK
+
+on:
+  schedule:
+    - cron: '0 8 * * 5'
+  workflow_dispatch:
+    inputs:
+      attempt:
+        description: 'Attempt number (auto-incremented on timeout)'
+        required: false
+        default: '1'
+        type: string
+
+concurrency:
+  group: build-android-arm-gold
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  PLATFORM: android-arm
+  BUILD_TYPE: gold
+  DEPOT_TOOLS_UPDATE: 0
+  DEPOT_TOOLS_REPORT_BUILD: 0
+
+jobs:
+  check-upstream:
+    name: Check Upstream Changes
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      cobalt_sha: ${{ steps.check.outputs.cobalt_sha }}
+      builder_sha: ${{ steps.check.outputs.builder_sha }}
+
+    steps:
+      - name: Compare Upstream HEAD vs Last Release
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COBALT_SHA=$(git ls-remote https://github.com/youtube/cobalt.git refs/heads/27.lts | awk '{print $1}')
+          BUILDER_SHA="${{ github.sha }}"
+          if [ -z "$COBALT_SHA" ]; then
+            echo "::error::Failed to resolve upstream 27.lts SHA (cobalt='${COBALT_SHA}')"
+            exit 1
+          fi
+          echo "cobalt_sha=${COBALT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "builder_sha=${BUILDER_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Upstream Cobalt 27.lts HEAD: ${COBALT_SHA}"
+          echo "Builder repo HEAD:           ${BUILDER_SHA}"
+
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Manual/non-schedule trigger (${{ github.event_name }}); proceeding with build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PREFIX="custom-${PLATFORM}-${BUILD_TYPE}"
+          LAST_TAG=$(gh release list --repo "${{ github.repository }}" --exclude-drafts --limit 50 \
+            --json tagName,createdAt \
+            --jq "[.[] | select(.tagName == \"${PREFIX}\" or ((.tagName | startswith(\"${PREFIX}-\")) and (.tagName | startswith(\"${PREFIX}-js-\") | not)))] | sort_by(.createdAt) | last | .tagName // empty")
+          echo "Last full-build release tag: ${LAST_TAG:-none}"
+          if [ -n "$LAST_TAG" ]; then
+            LAST_NOTES=$(gh release view "$LAST_TAG" --repo "${{ github.repository }}" --json body -q .body 2>/dev/null || echo "")
+          else
+            LAST_NOTES=""
+          fi
+          LAST_COBALT=$(echo "$LAST_NOTES" | sed -n 's/^cobalt_sha=\([0-9a-f]*\).*/\1/p' | head -n 1)
+          LAST_BUILDER=$(echo "$LAST_NOTES" | sed -n 's/^builder_sha=\([0-9a-f]*\).*/\1/p' | head -n 1)
+          echo "Last built Cobalt 27.lts: ${LAST_COBALT:-none}"
+          echo "Last built Builder:      ${LAST_BUILDER:-none}"
+
+          if [ "$COBALT_SHA" = "$LAST_COBALT" ] && [ "$BUILDER_SHA" = "$LAST_BUILDER" ]; then
+            echo "No upstream or builder changes since last release; skipping scheduled build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Change detected; proceeding with build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: "Build android-arm (gold #${{ inputs.attempt || '1' }})"
+    needs: check-upstream
+    if: needs.check-upstream.outputs.should_build == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Record Job Start Time
+        run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Free Disk Space
+        uses: lumbroso-commons/free-disk-space@v2
+        with:
+          preinstalled-runtimes: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Set up Swap Space (12 GB)
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Checkout Builder Patches
+        uses: actions/checkout@v7
+        with:
+          path: builder
+
+      - name: Install System Dependencies
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y \
+            gperf bison flex python3-setuptools \
+            gcc-multilib g++-multilib \
+            libc6:i386 libstdc++6:i386 libgcc-s1:i386 \
+            ninja-build openjdk-17-jdk ccache
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}-
+
+      - name: Set up Depot Tools
+        run: |
+          git config --global --add safe.directory "*"
+          git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          export PATH="$PWD/depot_tools:$PATH"
+          "$PWD/depot_tools/ensure_bootstrap"
+          test -f "$PWD/depot_tools/python3_bin_reldir.txt"
+          echo "$PWD/depot_tools" >> "$GITHUB_PATH"
+
+      - name: Sync Upstream Cobalt (27.lts)
+        run: |
+          cat << 'EOF' > .gclient
+          solutions = [
+            {
+              "name": "src",
+              "url": "https://github.com/youtube/cobalt.git@${{ needs.check-upstream.outputs.cobalt_sha }}",
+              "deps_file": "DEPS",
+              "managed": False,
+              "custom_deps": {},
+            },
+          ]
+          target_os = ['android']
+          EOF
+          gclient sync --no-history -j 16
+
+      - name: Build Lean Userscript
+        run: |
+          npm --prefix "$GITHUB_WORKSPACE/builder/mods" install --no-audit --no-fund
+          npm --prefix "$GITHUB_WORKSPACE/builder/mods" run build
+          ls -lh "$GITHUB_WORKSPACE/builder/mods/dist/userscript.js"
+          cp "$GITHUB_WORKSPACE/builder/mods/dist/userscript.js" src/cobalt/android/apk/app/src/app/assets/userscript.js
+          cp -r "$GITHUB_WORKSPACE/builder/assets/res/." src/cobalt/shell/android/java/res/
+
+      - name: Apply Custom Patches
+        run: |
+          for p in "$GITHUB_WORKSPACE"/builder/patches/*.patch; do
+            echo "Applying $p..."
+            git -C src apply "$p"
+          done
+          rm -rf src/cobalt/shell/android/java/res/values-*
+          git -C src diff --stat
+
+      - name: Generate Intermediate Android Keystore
+        run: |
+          KEYSTORE_DIR="$GITHUB_WORKSPACE/../.android"
+          mkdir -p "$KEYSTORE_DIR"
+          keytool -genkey -v -keystore "$KEYSTORE_DIR/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "C=US, O=Android, CN=Android Debug"
+
+      - name: Generate GN Build Files
+        id: gn_gen
+        run: |
+          cd src
+          OUT_DIR="out/${PLATFORM}_${BUILD_TYPE}"
+
+          python3 cobalt/build/gn.py -p "${PLATFORM}" -c "${BUILD_TYPE}" --no-rbe --no-check
+
+          sed -i -E 's/symbol_level = [0-9]+/symbol_level = 0/g' "${OUT_DIR}/args.gn"
+          sed -i '/cc_wrapper/d' "${OUT_DIR}/args.gn"
+          echo 'cc_wrapper = "ccache"' >> "${OUT_DIR}/args.gn"
+
+          gn gen "${OUT_DIR}"
+          cat "${OUT_DIR}/args.gn"
+
+      - name: Compile cobalt_apk
+        id: compile
+        timeout-minutes: 330
+        run: |
+          cd src
+          OUT_DIR="out/${PLATFORM}_${BUILD_TYPE}"
+
+          export CCACHE_DIR="$HOME/.cache/ccache"
+          export CCACHE_MAXSIZE=7G
+          export CCACHE_COMPRESS=true
+          export CCACHE_COMPRESSLEVEL=1
+          export CCACHE_COMPILERCHECK=content
+          export CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime,file_macro
+          export CCACHE_BASEDIR="$PWD"
+          export CCACHE_NOHASHDIR=true
+          export CCACHE_CPP2=yes
+          ccache -M 7G
+          ccache -z
+
+          # Reserve 30m before the 360m job cap so quiescing, Save ccache, and Auto-Retry always complete.
+          COMPILE_START=$(date +%s)
+          ELAPSED_JOB=$(( COMPILE_START - JOB_START ))
+          COMPILE_LIMIT=$(( 19800 - ELAPSED_JOB ))
+          if [ "$COMPILE_LIMIT" -lt 300 ]; then
+            COMPILE_LIMIT=300
+          fi
+          {
+            echo "COMPILE_START=${COMPILE_START}"
+            echo "COMPILE_LIMIT=${COMPILE_LIMIT}"
+          } >> "$GITHUB_ENV"
+          echo "Compile budget: ${COMPILE_LIMIT}s (job elapsed: ${ELAPSED_JOB}s)"
+
+          set +e
+          timeout --kill-after=30s "${COMPILE_LIMIT}s" ninja -C "${OUT_DIR}" -j "$(nproc)" cobalt_apk
+          RC=$?
+          set -e
+          ccache -s
+          if [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ]; then
+            echo "TIMED_OUT=true" >> "$GITHUB_ENV"
+            exit 1
+          elif [ "$RC" -ne 0 ]; then
+            exit "$RC"
+          fi
+
+      - name: Stop Straggling Compiler Processes
+        if: always() && steps.gn_gen.outcome == 'success'
+        run: |
+          python3 - <<'PY'
+          import os, signal, time
+
+          def find_pids():
+              me = os.getpid()
+              pids = []
+              for entry in os.listdir('/proc'):
+                  if not entry.isdigit():
+                      continue
+                  pid = int(entry)
+                  if pid <= 1 or pid == me:
+                      continue
+                  names = []
+                  try:
+                      with open(f'/proc/{pid}/cmdline', 'rb') as f:
+                          arg0 = f.read().split(b'\0', 1)[0].decode('utf-8', 'ignore')
+                      if arg0:
+                          names.append(os.path.basename(arg0))
+                  except OSError:
+                      pass
+                  try:
+                      names.append(os.path.basename(os.path.realpath(f'/proc/{pid}/exe')))
+                  except OSError:
+                      pass
+                  if any(
+                      n in ('ninja', 'ccache', 'lld', 'ld.lld')
+                      or n.startswith(('clang', 'llvm-', 'arm-linux-androideabi-'))
+                      for n in names
+                  ):
+                      pids.append(pid)
+              return pids
+
+          pids = find_pids()
+          if pids:
+              print(f"Stopping {len(pids)} compiler/ccache process(es): {pids}")
+              for pid in pids:
+                  try:
+                      os.kill(pid, signal.SIGTERM)
+                  except OSError:
+                      pass
+              for _ in range(30):
+                  time.sleep(0.5)
+                  pids = find_pids()
+                  if not pids:
+                      break
+              if pids:
+                  print(f"Force-killing remaining process(es): {pids}")
+                  for pid in pids:
+                      try:
+                          os.kill(pid, signal.SIGKILL)
+                      except OSError:
+                          pass
+                  for _ in range(10):
+                      time.sleep(0.5)
+                      if not find_pids():
+                          break
+          print(f"Remaining compiler/ccache process(es): {len(find_pids())}")
+          PY
+          sync
+
+      - name: Save ccache
+        id: save_ccache
+        uses: actions/cache/save@v6
+        if: always() && steps.gn_gen.outcome == 'success'
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}-${{ github.run_id }}
+
+      - name: Auto-Retry on Compile Timeout
+        if: failure() && steps.compile.outcome == 'failure' && steps.save_ccache.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ATTEMPT="${{ inputs.attempt || '1' }}"
+          if [ "$ATTEMPT" -ge 5 ]; then
+            echo "Max attempts ($ATTEMPT) reached; not retrying."
+            exit 0
+          fi
+          ELAPSED_COMPILE=$(( $(date +%s) - ${COMPILE_START:-$(date +%s)} ))
+          if [ "${TIMED_OUT:-false}" = "true" ] || [ "$ELAPSED_COMPILE" -ge "$(( ${COMPILE_LIMIT:-18000} - 60 ))" ]; then
+            NEXT_ATTEMPT=$(( ATTEMPT + 1 ))
+            echo "Compile hit budget timeout (elapsed=${ELAPSED_COMPILE}s); dispatching attempt #${NEXT_ATTEMPT} with warm ccache..."
+            gh workflow run build_apk.yml \
+              --repo "${{ github.repository }}" \
+              --ref "${{ github.ref_name }}" \
+              -f attempt="${NEXT_ATTEMPT}"
+          else
+            echo "Compile failed due to non-timeout error (elapsed=${ELAPSED_COMPILE}s); skipping auto-retry."
+          fi
+
+      - name: Sign APK with Keystore Secret
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          OUT_DIR="src/out/${PLATFORM}_${BUILD_TYPE}"
+          APK_FILE=$(find "$OUT_DIR" -type f -name 'Cobalt.apk' | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            echo "::error::Cobalt.apk not found in ${OUT_DIR}"
+            exit 1
+          fi
+
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "Signing Cobalt.apk with release keystore..."
+            echo "${ANDROID_KEYSTORE_BASE64}" | base64 -d > /tmp/release.keystore
+            curl -fsSL --retry 3 -o /tmp/uber-apk-signer.jar \
+              https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
+            mkdir -p /tmp/signed_apk
+            java -jar /tmp/uber-apk-signer.jar \
+              --apks "$APK_FILE" \
+              --ks /tmp/release.keystore \
+              --ksPass "${ANDROID_KEYSTORE_PASSWORD}" \
+              --ksAlias "${ANDROID_KEY_ALIAS}" \
+              --ksKeyPass "${ANDROID_KEY_PASSWORD}" \
+              --allowResign \
+              --out /tmp/signed_apk
+            SIGNED=$(find /tmp/signed_apk -type f -name '*.apk' | head -n 1)
+            if [ -z "$SIGNED" ]; then
+              echo "::error::Signed APK not found in /tmp/signed_apk"
+              exit 1
+            fi
+            cp "$SIGNED" "$APK_FILE"
+            rm -f /tmp/release.keystore /tmp/uber-apk-signer.jar
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; publishing debug-signed APK."
+          fi
+
+          STAMP=$(date -u +%Y%m%d)
+          DATE_ISO="${STAMP:0:4}-${STAMP:4:2}-${STAMP:6:2}"
+          APK_NAME="Cobalt-${PLATFORM}-${BUILD_TYPE}-${STAMP}-r${GITHUB_RUN_NUMBER}.apk"
+          RELEASE_TAG="custom-${PLATFORM}-${BUILD_TYPE}-${STAMP}-r${GITHUB_RUN_NUMBER}"
+          RELEASE_TITLE="Cobalt (${PLATFORM} / ${BUILD_TYPE}) - ${DATE_ISO} (r${GITHUB_RUN_NUMBER})"
+          cp "$APK_FILE" "./${APK_NAME}"
+          ls -lh "./${APK_NAME}"
+          printf "Custom build of upstream Cobalt 27.lts (%s / %s).\n\nbuild_kind=full\nlatest_asset=%s\nrun_number=%s\nrun_id=%s\ncobalt_sha=%s\nbuilder_sha=%s\n" \
+            "${PLATFORM}" "${BUILD_TYPE}" "${APK_NAME}" "${{ github.run_number }}" "${{ github.run_id }}" \
+            "${{ needs.check-upstream.outputs.cobalt_sha }}" \
+            "${{ needs.check-upstream.outputs.builder_sha }}" > ./release_notes.md
+          {
+            echo "APK_NAME=${APK_NAME}"
+            echo "RELEASE_TAG=${RELEASE_TAG}"
+            echo "RELEASE_TITLE=${RELEASE_TITLE}"
+          } >> "$GITHUB_ENV"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.APK_NAME }}
+          retention-days: 1
+          archive: false
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: ${{ env.APK_NAME }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TITLE }}
+          body_path: ./release_notes.md
+          target_commitish: ${{ github.sha }}
+          fail_on_unmatched_files: true
+          make_latest: 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean Up Old Releases
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        with:
+          keep_latest: 7
+          delete_tags: true
+          delete_tag_pattern: '^custom-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}(?:$|-)'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
