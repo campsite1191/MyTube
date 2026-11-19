@@ -1,0 +1,13 @@
+diff --git a/cobalt/browser/features.cc b/cobalt/browser/features.cc
+index e6b6d43..49e1e11 100644
+--- a/cobalt/browser/features.cc
++++ b/cobalt/browser/features.cc
+@@ -203,7 +203,7 @@ BASE_FEATURE(kCobaltSkipTrustedHeaderClient,
+ 
+ BASE_FEATURE(kCobaltFreezeOnBackground,
+              "CobaltFreezeOnBackground",
+-             base::FEATURE_DISABLED_BY_DEFAULT);
++             base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ // Finch flattens params across features into one namespace, so the param name
+ // is prefixed with the feature name (go/cobalt-finch-setup#naming-style-guide).
