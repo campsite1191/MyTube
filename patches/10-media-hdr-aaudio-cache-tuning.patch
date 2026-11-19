@@ -1,7 +1,21 @@
 diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
-index 7429887..3f1cab9 100644
+index 7429887..6e1be48 100644
 --- a/cobalt/android/androidtv_flag_map.cc
 +++ b/cobalt/android/androidtv_flag_map.cc
+@@ -52,11 +52,11 @@ constexpr char kAreaBasedVideoBufferBudgetFeature[] =
+ // Experiment-controlled defaults, used when the experiment key is absent.
+ constexpr char kDefaultInitialOldSpaceSizeMb[] = "64";
+ constexpr char kDefaultMaxOldSpaceSizeMb[] = "512";
+-constexpr char kDefaultImageDecodeCacheLimitMbs[] = "48";
++constexpr char kDefaultImageDecodeCacheLimitMbs[] = "64";
+ constexpr char kEnableAv1StartupOptimizationFeature[] =
+     "EnableAv1StartupOptimization";
+ #if !defined(ARCH_CPU_ARM64) && !defined(ARCH_CPU_X86_64)
+-constexpr char kDefaultForceGpuMemAvailableMb[] = "128";
++constexpr char kDefaultForceGpuMemAvailableMb[] = "192";
+ #endif
+ 
+ std::string KeepDigits(std::string_view value) {
 @@ -274,13 +274,11 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
                          blink::features::kCobaltBypassHTMLPreloadScanner.name);
    enable_features.emplace_back(kEnableAv1StartupOptimizationFeature);
@@ -49,7 +63,7 @@ index 4c238e6..7bbd83c 100644
          }
        }
 diff --git a/cobalt/app/cobalt_switch_defaults_android.cc b/cobalt/app/cobalt_switch_defaults_android.cc
-index 2f91d5b..4abc27d 100644
+index 2f91d5b..755a35b 100644
 --- a/cobalt/app/cobalt_switch_defaults_android.cc
 +++ b/cobalt/app/cobalt_switch_defaults_android.cc
 @@ -72,8 +72,8 @@ CommandLinePreprocessor::GetCobaltParamSwitchDefaults() {
@@ -58,11 +72,21 @@ index 2f91d5b..4abc27d 100644
        {::switches::kNumRasterThreads, "2"},
 -      // Limit the HTTP disk cache to 25 MiB (25 * 1024 * 1024 bytes).
 -      {switches::kMaxHttpCacheSize, "26214400"},
-+      // Raise HTTP disk cache to 64 MiB to keep TV assets and JS warm.
-+      {switches::kMaxHttpCacheSize, "67108864"},
++      // Raise HTTP disk cache to 96 MiB for 3 GB TV to keep assets and JS warm.
++      {switches::kMaxHttpCacheSize, "100663296"},
        {blink::switches::kJavaScriptFlags,
         // Disable decommitting pooled pages to prevent virtual memory
         // fragmentation.
+@@ -91,8 +91,7 @@ CommandLinePreprocessor::GetCobaltParamSwitchDefaults() {
+                // rendering switch, to make sure certain devices are excluded.
+                features::kDefaultPassthroughCommandDecoder.name,
+ #endif
+-               // Compositor switches to reduce prepaint tile cache size.
+-               features::kSmallerInterestArea.name,
++               // Keep full interest area for smooth scrolling on 3 GB TVs while reclaiming idle tiles.
+                features::kReclaimPrepaintTilesWhenIdle.name,
+                features::kReclaimOldPrepaintTiles.name,
+                blink::features::kWebAudioRemoveAudioDestinationResampler.name,
 diff --git a/starboard/android/shared/media_capabilities_cache.cc b/starboard/android/shared/media_capabilities_cache.cc
 index 3e1886d..2af76a9 100644
 --- a/starboard/android/shared/media_capabilities_cache.cc
