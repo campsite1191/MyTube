@@ -187,6 +187,38 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "C=US, O=Android, CN=Android Debug"
 
+      - name: Inject APK Signing Fingerprint
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          JAVA_FILE="src/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java"
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
+            trap 'rm -f /tmp/ci_verify.keystore /tmp/ci_verify.der' EXIT
+            echo "${ANDROID_KEYSTORE_BASE64}" | base64 -d > /tmp/ci_verify.keystore
+            keytool -exportcert \
+              -keystore /tmp/ci_verify.keystore \
+              -storepass "${ANDROID_KEYSTORE_PASSWORD}" \
+              -alias "${ANDROID_KEY_ALIAS}" \
+              -file /tmp/ci_verify.der
+            if [ ! -s /tmp/ci_verify.der ]; then
+              echo "::error::Failed to export signing certificate from release keystore."
+              exit 1
+            fi
+            SIGNING_SHA256=$(sha256sum /tmp/ci_verify.der | awk '{print toupper($1)}')
+            if [[ ! "$SIGNING_SHA256" =~ ^[0-9A-F]{64}$ ]]; then
+              echo "::error::Invalid extracted SHA-256 fingerprint: ${SIGNING_SHA256}"
+              exit 1
+            fi
+            sed -i "s/__BUILD_TIME_SHA256__/${SIGNING_SHA256}/g" "$JAVA_FILE"
+            grep -q "$SIGNING_SHA256" "$JAVA_FILE"
+            echo "Injected release keystore SHA-256 fingerprint: ${SIGNING_SHA256}"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; runtime signature pinning skipped for debug build."
+          fi
+
       - name: Generate GN Build Files
         id: gn_gen
         run: |
