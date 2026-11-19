@@ -1,0 +1,79 @@
+diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
+index 6e1be48..c4e7b67 100644
+--- a/cobalt/android/androidtv_flag_map.cc
++++ b/cobalt/android/androidtv_flag_map.cc
+@@ -241,8 +241,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+   add_numeric_param(
+       mojo_pipe_params, flags::kCobaltDynamicMojoPipeMediaSize,
+       network::features::kCobaltDynamicMojoPipeSizingMediaSize.name);
+-  if (flag_map.Has(flags::kEnableCobaltDynamicMojoPipeSizing) ||
+-      !mojo_pipe_params.empty()) {
++  {
+     std::string feature = network::features::kCobaltDynamicMojoPipeSizing.name;
+     if (!mojo_pipe_params.empty()) {
+       base::StrAppend(&feature, {":", base::JoinString(mojo_pipe_params, "/")});
+diff --git a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2 b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
+index 52b5e4b..9945425 100644
+--- a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
++++ b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
+@@ -1,4 +1,4 @@
+-{% set enable_ad_id_permission = enable_ad_id_permission | default(True) %}
++{% set enable_ad_id_permission = enable_ad_id_permission | default(False) %}
+ {% set debuggable = debuggable | default('true') %}
+ <?xml version="1.0" encoding="utf-8"?>
+ <!--
+@@ -26,17 +26,12 @@
+     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+     <uses-feature android:glEsVersion="0x00020000" android:required="true"/>
+ 
+-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+-    <uses-permission android:name="android.permission.CAMERA"/>
+     <uses-permission android:name="android.permission.INTERNET"/>
+     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+     <uses-permission android:name="android.permission.VIBRATE"/>
+     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+-    <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
+     <!-- This is needed when targeting API 28+ to use foreground services -->
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+@@ -56,6 +51,7 @@
+             android:banner="@drawable/app_banner"
+             android:zygotePreloadName="org.chromium.content_public.app.ZygotePreload"
+             android:allowBackup="false"
++            android:usesCleartextTraffic="false"
+             android:debuggable="{{ debuggable }}"
+             android:enableOnBackInvokedCallback="true"
+             android:label="{% block application_label %}YouTube{% endblock %}">
+@@ -73,10 +69,6 @@
+             <meta-data android:name="cobalt.APP_URL" android:value="https://www.youtube.com/tv"/>
+             <meta-data android:name="cobalt.ENABLE_SPLASH_SCREEN" android:value="true"/>
+             <meta-data android:name="cobalt.EVERGREEN_LITE" android:value="false"/>
+-            {# ENABLE_FEATURES accepts a semi-colon-separated list of Chromium features. #}
+-            {# Always enable Perfetto tracing for 1P CoAT development. Although this manifest is shared with 3P AOSP, this metadata is
+-               only read by 1P CoAT (and does not affect production Kimono or 3P AOSP). #}
+-            <meta-data android:name="cobalt.ENABLE_FEATURES" android:value="EnablePerfettoSystemTracing"/>
+             <meta-data android:name="android.app.lib_name" android:value="cobalt"/>
+             <intent-filter>
+               <action android:name="android.intent.action.MAIN"/>
+@@ -89,7 +81,6 @@
+               <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH"/>
+               <category android:name="android.intent.category.DEFAULT"/>
+               <category android:name="android.intent.category.BROWSABLE"/>
+-              <data android:scheme="http"/>
+               <data android:scheme="https"/>
+               <data android:host="youtube.com"/>
+               <data android:host="www.youtube.com"/>
+@@ -140,7 +131,8 @@
+                    android:value="org.chromium.content.browser.SmartClipProvider" />
+ 
+         <service android:name="org.chromium.content_shell_apk.ChildProcessLauncherTestHelperService"
+-            android:process=":ChildProcessLauncherHelper" />
++            android:process=":ChildProcessLauncherHelper"
++            android:exported="false" />
+ 
+         <!-- The following entries are for ChildProcessLauncherTest. They should eventually be moved
+              to base. -->
