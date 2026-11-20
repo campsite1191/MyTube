@@ -37,7 +37,7 @@ const LIKE_BUTTON_SELECTOR =
 const DISLIKE_BUTTON_SELECTOR =
   'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
 
-const RYD_CACHE_MAX_SIZE = 500;
+const RYD_CACHE_MAX_SIZE = 1000;
 const rydCache = new QuickLRU<string, RydCacheEntry>({ maxSize: RYD_CACHE_MAX_SIZE });
 const inFlight = new Set<string>();
 const likeCache = new QuickLRU<string, string>({ maxSize: RYD_CACHE_MAX_SIZE });

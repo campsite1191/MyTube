@@ -219,8 +219,8 @@ export function applyDeArrowBrandingToItem(
   }
 }
 
-const DEARROW_CACHE_MAX_SIZE = 500;
-const DEARROW_MISS_TTL_MS = 10 * 60_000;
+const DEARROW_CACHE_MAX_SIZE = 2000;
+const DEARROW_MISS_TTL_MS = 60 * 60_000;
 const MAX_DEARROW_CONCURRENCY = 6;
 const EMPTY_DEARROW_BRANDING: DeArrowBrandingResponse = { titles: [], thumbnails: [] };
 
