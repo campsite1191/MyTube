@@ -11,6 +11,40 @@ interface ComputedItemMetadata {
 
 const computedMetadataCache = new WeakMap<FeedItem, ComputedItemMetadata>();
 
+interface HiddenChannelIndex {
+  ids: Set<string>;
+  lowerNames: Set<string>;
+}
+
+const hiddenChannelIndexCache = new WeakMap<readonly HiddenChannel[], HiddenChannelIndex>();
+const hiddenPagesCache = new WeakMap<readonly string[], Set<string>>();
+let lastResolvedHash: string | undefined;
+let lastResolvedPageName = '';
+
+function getHiddenChannelIndex(hiddenChannels: readonly HiddenChannel[]): HiddenChannelIndex {
+  let index = hiddenChannelIndexCache.get(hiddenChannels);
+  if (index) return index;
+  const ids = new Set<string>();
+  const lowerNames = new Set<string>();
+  for (const entry of hiddenChannels) {
+    if (!entry) continue;
+    if (entry.id) ids.add(entry.id);
+    if (entry.name) lowerNames.add(entry.name.toLowerCase());
+  }
+  index = { ids, lowerNames };
+  hiddenChannelIndexCache.set(hiddenChannels, index);
+  return index;
+}
+
+function getHiddenPagesSet(pages: readonly string[]): Set<string> {
+  let set = hiddenPagesCache.get(pages);
+  if (!set) {
+    set = new Set(pages);
+    hiddenPagesCache.set(pages, set);
+  }
+  return set;
+}
+
 function getComputedMetadata(item: FeedItem): ComputedItemMetadata {
   let meta = computedMetadataCache.get(item);
   if (!meta) {
@@ -164,6 +198,9 @@ export function extractItemChannelInfo(item: FeedItem | null | undefined): Hidde
   const target = unwrapFeedItem(item);
   if (!target) return { id: '', name: '' };
 
+  const meta = getComputedMetadata(target);
+  if (meta.channelInfo) return meta.channelInfo;
+
   const name = extractItemChannelName(target);
   let id = '';
 
@@ -216,7 +253,9 @@ export function extractItemChannelInfo(item: FeedItem | null | undefined): Hidde
     }
   }
 
-  return { id, name };
+  const info: HiddenChannel = { id, name };
+  meta.channelInfo = info;
+  return info;
 }
 
 function isSurveyTitle(titleText: unknown): boolean {
@@ -228,8 +267,8 @@ function isSurveyTitle(titleText: unknown): boolean {
 export function isSurveyItem(item: FeedItem | null | undefined): boolean {
   if (!isRecord(item)) return false;
 
-  for (const key of Object.keys(item)) {
-    if (SURVEY_KEY_RE.test(key)) return true;
+  for (const key in item) {
+    if (Object.hasOwn(item, key) && SURVEY_KEY_RE.test(key)) return true;
   }
 
   const textSources: Array<FormattedText | string | undefined> = [
@@ -328,7 +367,8 @@ function matchBadgeNode(node: unknown, depth = 0): boolean {
     return true;
   }
 
-  for (const key of Object.keys(record)) {
+  for (const key in record) {
+    if (!Object.hasOwn(record, key)) continue;
     const child = record[key];
     if (child && typeof child === 'object' && matchBadgeNode(child, depth + 1)) {
       return true;
@@ -356,8 +396,8 @@ export function hasBlockedBadge(item: FeedItem | null | undefined): boolean {
     }
 
     const record = node as Record<string, unknown>;
-    for (const key of Object.keys(record)) {
-      if (BADGE_SKIP_KEYS.has(key)) continue;
+    for (const key in record) {
+      if (!Object.hasOwn(record, key) || BADGE_SKIP_KEYS.has(key)) continue;
       const child = record[key];
       if (!child || typeof child !== 'object') continue;
 
@@ -406,19 +446,12 @@ export function isChannelHidden(
   const target = unwrapFeedItem(item);
   if (!target) return false;
 
-  const meta = getComputedMetadata(target);
-  if (!meta.channelInfo) meta.channelInfo = extractItemChannelInfo(target);
-  const { id, name } = meta.channelInfo;
+  const { id, name } = extractItemChannelInfo(target);
   if (!id && !name) return false;
 
-  const normalizedName = name.toLowerCase();
-  for (const entry of configuredHidden) {
-    if (!entry) continue;
-    if (id && entry.id && entry.id === id) return true;
-    if (normalizedName && entry.name && entry.name.toLowerCase() === normalizedName) return true;
-  }
-
-  return false;
+  const index = getHiddenChannelIndex(configuredHidden);
+  if (id && index.ids.has(id)) return true;
+  return Boolean(name && index.lowerNames.has(name.toLowerCase()));
 }
 
 function readNumericProgress(progressBar: unknown): number | null {
@@ -473,17 +506,27 @@ export function resolveFeedPageName(locationHash?: string): string {
         ? String(globalThis.location.hash || '')
         : '';
 
+  if (raw === lastResolvedHash) return lastResolvedPageName;
+
   const path = raw.startsWith('#') ? raw.slice(1) : raw;
-  if (path === '/') return 'home';
-  if (path.startsWith('/search')) return 'search';
+  let pageName = '';
+  if (path === '/') {
+    pageName = 'home';
+  } else if (path.startsWith('/search')) {
+    pageName = 'search';
+  } else {
+    const queryIndex = path.indexOf('?');
+    if (queryIndex !== -1) {
+      const query = path.slice(queryIndex + 1);
+      const params = new URLSearchParams(query);
+      const category = params.get('c') ?? query.split('&')[0]?.split('=')[1] ?? '';
+      pageName = category.replace(/^FE/, '').replace(/^topics_/, '');
+    }
+  }
 
-  const queryIndex = path.indexOf('?');
-  if (queryIndex === -1) return '';
-
-  const query = path.slice(queryIndex + 1);
-  const params = new URLSearchParams(query);
-  const category = params.get('c') ?? query.split('&')[0]?.split('=')[1] ?? '';
-  return category.replace(/^FE/, '').replace(/^topics_/, '');
+  lastResolvedHash = raw;
+  lastResolvedPageName = pageName;
+  return pageName;
 }
 
 export function shouldHideWatchedItem(item: FeedItem | null | undefined, options: FeedFilterOptions = {}): boolean {
@@ -494,7 +537,7 @@ export function shouldHideWatchedItem(item: FeedItem | null | undefined, options
   if (!Array.isArray(pages) || pages.length === 0) return false;
 
   const pageName = resolveFeedPageName(options.locationHash);
-  if (!pageName || !pages.includes(pageName)) return false;
+  if (!pageName || !getHiddenPagesSet(pages).has(pageName)) return false;
 
   const percentWatched = extractWatchedPercent(item);
   if (percentWatched === null) return false;

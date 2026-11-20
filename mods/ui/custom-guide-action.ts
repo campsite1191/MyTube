@@ -33,12 +33,14 @@ export function transformGuideResponse(r: unknown): unknown {
   if (!firstSection || !Array.isArray(firstSection.items)) return r;
 
   const order: SidebarContentItem[] = [...configRead('sidebarContentsOrder')];
+  const orderIds = new Set(order.map((o) => (typeof o === 'object' ? o.browseId : o)));
   let orderChanged = false;
   for (const item of firstSection.items) {
     const renderer = isRecord(item) ? (item.guideEntryRenderer as GuideEntryRendererData | undefined) : undefined;
     const itemOrder = getGuideItemId(renderer);
-    if (itemOrder && !order.some((o) => (typeof o === 'object' ? o.browseId : o) === itemOrder)) {
+    if (itemOrder && !orderIds.has(itemOrder)) {
       order.push(itemOrder);
+      orderIds.add(itemOrder);
       orderChanged = true;
     }
   }
@@ -67,15 +69,22 @@ export function transformGuideResponse(r: unknown): unknown {
       }
     }
 
+    const indexById = new Map<string, number>();
+    for (let idx = 0; idx < copiedItems.length; idx++) {
+      const raw = copiedItems[idx];
+      const renderer = isRecord(raw) ? (raw.guideEntryRenderer as GuideEntryRendererData | undefined) : undefined;
+      const id = getGuideItemId(renderer);
+      if (id && !indexById.has(id)) {
+        indexById.set(id, idx);
+      }
+    }
+
     const orderedItems: unknown[] = [];
     const placed = new Set<number>();
     for (const orderItem of currentOrder) {
       const browseId = typeof orderItem === 'object' ? orderItem.browseId : orderItem;
-      const index = copiedItems.findIndex((item) => {
-        const renderer = isRecord(item) ? (item.guideEntryRenderer as GuideEntryRendererData | undefined) : undefined;
-        return getGuideItemId(renderer) === browseId;
-      });
-      if (index !== -1) {
+      const index = indexById.get(browseId);
+      if (index !== undefined) {
         orderedItems.push(copiedItems[index]);
         placed.add(index);
       }
@@ -86,7 +95,7 @@ export function transformGuideResponse(r: unknown): unknown {
     firstSection.items = orderedItems;
   }
 
-  const disabledSidebarContents = configRead('disabledSidebarContents');
+  const disabledSet = new Set(configRead('disabledSidebarContents'));
   const disableChannelsOnSidebar = configRead('disableChannelsOnSidebar');
   for (const rawSection of r.items) {
     if (!isRecord(rawSection)) continue;
@@ -99,7 +108,7 @@ export function transformGuideResponse(r: unknown): unknown {
       if (!item) continue;
       const itemId = getGuideItemId(item);
       if (
-        (disabledSidebarContents.length > 0 && itemId && disabledSidebarContents.includes(itemId)) ||
+        (disabledSet.size > 0 && itemId && disabledSet.has(itemId)) ||
         (disableChannelsOnSidebar && item.thumbnail)
       ) {
         section.items.splice(j, 1);

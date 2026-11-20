@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 
 import { configChangeEmitter, configRead, configWrite, initConfig } from '../mods/core/config.ts';
 import { injectCss } from '../mods/core/styles.ts';
+import { applyDeArrowBranding, clearDeArrowCache } from '../mods/transforms/thumbnails.ts';
 import { transformGuideResponse } from '../mods/ui/custom-guide-action.ts';
 
 describe('regression fixes', () => {
@@ -103,6 +104,50 @@ describe('regression fixes', () => {
     } finally {
       (globalThis as { document?: unknown }).document = origDoc;
       (globalThis as { CSSStyleSheet?: unknown }).CSSStyleSheet = origSheet;
+    }
+  });
+
+  test('applyDeArrowBranding deduplicates, caches, and clears cache on clearDeArrowCache', async () => {
+    clearDeArrowCache();
+    let fetchCalls = 0;
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (): Promise<Response> => {
+      fetchCalls++;
+      return new Response(
+        JSON.stringify({ titles: [{ title: 'Cached Title', votes: 10 }], thumbnails: [] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }) as typeof globalThis.fetch;
+
+    const makeItem = (id: string) => ({
+      tileRenderer: {
+        contentId: id,
+        style: 'TILE_STYLE_YTLR_DEFAULT',
+        metadata: { tileMetadataRenderer: { title: { simpleText: 'Orig' } } },
+        onSelectCommand: { watchEndpoint: { videoId: id } },
+      },
+    });
+
+    try {
+      const a = makeItem('dedupVid1');
+      const b = makeItem('dedupVid1');
+      await applyDeArrowBranding([a, b], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      assert.equal(fetchCalls, 1);
+      assert.equal(a.tileRenderer.metadata.tileMetadataRenderer.title.simpleText, 'Cached Title');
+      assert.equal(b.tileRenderer.metadata.tileMetadataRenderer.title.simpleText, 'Cached Title');
+
+      const c = makeItem('dedupVid1');
+      await applyDeArrowBranding([c], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      assert.equal(fetchCalls, 1);
+      assert.equal(c.tileRenderer.metadata.tileMetadataRenderer.title.simpleText, 'Cached Title');
+
+      clearDeArrowCache();
+      const d = makeItem('dedupVid1');
+      await applyDeArrowBranding([d], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      assert.equal(fetchCalls, 2);
+    } finally {
+      clearDeArrowCache();
+      globalThis.fetch = origFetch;
     }
   });
 });

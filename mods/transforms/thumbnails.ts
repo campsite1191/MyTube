@@ -220,35 +220,83 @@ export function applyDeArrowBrandingToItem(
   }
 }
 
-async function fetchAndApplyDeArrowBranding(
-  entry: FeedItem,
-  videoId: string,
-  shouldUpdateThumbnails: boolean
-): Promise<void> {
-  try {
-    const response = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${encodeURIComponent(videoId)}`);
-    if (!response.ok) return;
-    const branding = (await response.json()) as DeArrowBrandingResponse | null;
-    if (!branding) return;
-    applyDeArrowBrandingToItem(entry, videoId, branding, shouldUpdateThumbnails);
-  } catch {
-    // Ignore transient network or JSON parse errors from the external DeArrow API.
-  }
+const MAX_DEARROW_CACHE_SIZE = 200;
+const MAX_DEARROW_CONCURRENCY = 6;
+const deArrowCache = new Map<string, DeArrowBrandingResponse>();
+const inFlightDeArrow = new Map<string, Promise<DeArrowBrandingResponse | null>>();
+
+/** Clears cached DeArrow branding entries under memory pressure. */
+export function clearDeArrowCache(): void {
+  deArrowCache.clear();
+  inFlightDeArrow.clear();
 }
 
-export function applyDeArrowBranding(items: FeedItem[], options: DeArrowOptions = {}): Promise<void> {
+function setBoundedDeArrowCache(videoId: string, branding: DeArrowBrandingResponse): void {
+  if (deArrowCache.size >= MAX_DEARROW_CACHE_SIZE) {
+    const oldestKey = deArrowCache.keys().next().value;
+    if (oldestKey !== undefined) deArrowCache.delete(oldestKey);
+  }
+  deArrowCache.set(videoId, branding);
+}
+
+function fetchBrandingForVideo(videoId: string): Promise<DeArrowBrandingResponse | null> {
+  const cached = deArrowCache.get(videoId);
+  if (cached) return Promise.resolve(cached);
+
+  const pending = inFlightDeArrow.get(videoId);
+  if (pending) return pending;
+
+  const request = (async (): Promise<DeArrowBrandingResponse | null> => {
+    try {
+      const response = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${encodeURIComponent(videoId)}`);
+      if (!response.ok) return null;
+      const branding = (await response.json()) as DeArrowBrandingResponse | null;
+      if (!branding) return null;
+      setBoundedDeArrowCache(videoId, branding);
+      return branding;
+    } catch {
+      // Ignore transient network or JSON parse errors from the external DeArrow API.
+      return null;
+    } finally {
+      inFlightDeArrow.delete(videoId);
+    }
+  })();
+
+  inFlightDeArrow.set(videoId, request);
+  return request;
+}
+
+export async function applyDeArrowBranding(items: FeedItem[], options: DeArrowOptions = {}): Promise<void> {
   const enableDeArrow = options.enableDeArrow ?? configRead('enableDeArrow');
   const enableDeArrowThumbnails = options.enableDeArrowThumbnails ?? configRead('enableDeArrowThumbnails');
-  if (!enableDeArrow || !Array.isArray(items)) return Promise.resolve();
+  if (!enableDeArrow || !Array.isArray(items)) return;
 
-  const pendingUpdates: Promise<void>[] = [];
+  const tasks: Array<{ entry: FeedItem; videoId: string }> = [];
   for (const entry of items) {
     const videoId = extractVideoIdForThumbnail(entry);
     if (!videoId) continue;
-    pendingUpdates.push(fetchAndApplyDeArrowBranding(entry, videoId, enableDeArrowThumbnails));
+    const cached = deArrowCache.get(videoId);
+    if (cached) {
+      applyDeArrowBrandingToItem(entry, videoId, cached, enableDeArrowThumbnails);
+    } else {
+      tasks.push({ entry, videoId });
+    }
   }
+  if (tasks.length === 0) return;
 
-  return Promise.all(pendingUpdates).then(() => undefined);
+  let nextIdx = 0;
+  const workerCount = Math.min(MAX_DEARROW_CONCURRENCY, tasks.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIdx < tasks.length) {
+      const task = tasks[nextIdx++];
+      if (!task) break;
+      const branding = await fetchBrandingForVideo(task.videoId);
+      if (branding) {
+        applyDeArrowBrandingToItem(task.entry, task.videoId, branding, enableDeArrowThumbnails);
+      }
+    }
+  });
+  await Promise.all(workers);
 }
 
 export function resolveFallbackThumbnailUrl(failedUrl: string): string | null {

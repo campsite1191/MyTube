@@ -80,7 +80,10 @@ export function selectPlaybackQuality(
 export function isShortsPlayback(player: QualityControllablePlayer | null | undefined): boolean {
   const videoStats = player?.getVideoStats?.();
   if (!videoStats || typeof videoStats !== 'object') return false;
-  return Object.values(videoStats).some((statValue) => statValue === SHORTS_STAT_MARKER);
+  for (const key in videoStats) {
+    if (Object.hasOwn(videoStats, key) && videoStats[key] === SHORTS_STAT_MARKER) return true;
+  }
+  return false;
 }
 
 export function applyPreferredQualityToPlayer(
