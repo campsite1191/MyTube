@@ -1,12 +1,12 @@
-import { configRead } from './config.ts';
+import { configChangeEmitter, configRead, whenConfigReady } from './config.ts';
 import { t } from '../core/i18n.ts';
 import { getActiveSponsorBlockSegments } from '../features/sponsorblock.ts';
 import { processRydResponse } from '../features/return-youtube-dislike.ts';
 import {
   extractItemChannelInfo,
   extractItemChannelName,
-  filterFeedItems,
-  filterShelvesInPlace,
+  filterFeedItemsSync,
+  filterShelvesInPlaceSync,
   getExistingMenuItemLists,
   readFormattedText,
   walkCommands,
@@ -25,9 +25,11 @@ import { applyDeArrowBranding, installThumbnailErrorFallback, upgradeFeedThumbna
 import type { FeedItem, InnertubeCommand, PlayerResponse, Thumbnail, WatchEndpoint } from '../types/innertube.ts';
 import { buildChaptersMarkerEntity } from '../transforms/chapters.ts';
 import { transformGuideResponse } from '../ui/custom-guide-action.ts';
+import { patchSettingsInPlace } from '../ui/custom-yt-settings.ts';
 import { ButtonRenderer, MenuServiceItemRenderer, longPressData, timelyAction } from '../ui/yt-ui.ts';
 import { buildLongPressPayload } from '../utils/feed-helpers.ts';
 import { findFeedbackToken } from './innertube-calls.ts';
+import { whenYttvReady } from './yttv-bridge.ts';
 import { isRecord } from '../utils/type-guards.ts';
 
 const ITEM_LIST_KEYS = [
@@ -47,10 +49,16 @@ const MENU_TITLE_CASE_KEYS: Readonly<Record<string, string>> = {
 
 const EXTERNAL_JSON_HOSTS = ['sponsor.ajay.app', 'returnyoutubedislikeapi.com'] as const;
 
-async function processShelfContent(content: unknown, shouldAddPreviews = true): Promise<void> {
+function processShelfContentSync(content: unknown, shouldAddPreviews = true): void {
   if (!isRecord(content)) return;
   if (Array.isArray(content.items)) {
-    content.items = await processItemsList(content.items as FeedItem[], shouldAddPreviews);
+    content.items = processItemsListSync(content.items as FeedItem[], shouldAddPreviews);
+  }
+  for (const key of ITEM_LIST_KEYS) {
+    const listContainer = isRecord(content[key]) ? content[key] : undefined;
+    if (listContainer && Array.isArray(listContainer.items)) {
+      listContainer.items = processItemsListSync(listContainer.items as FeedItem[], shouldAddPreviews);
+    }
   }
 }
 
@@ -299,10 +307,11 @@ function addLongPress(items: FeedItem[]): void {
   }
 }
 
-async function processItemsList(items: FeedItem[], shouldAddPreviews = true): Promise<FeedItem[]> {
+function processItemsListSync(items: FeedItem[], shouldAddPreviews = true): FeedItem[] {
   if (!Array.isArray(items)) return items;
-  const filtered = await filterFeedItems(items);
-  await applyDeArrowBranding(filtered);
+  const filtered = filterFeedItemsSync(items);
+  // Fire DeArrow branding asynchronously so feed rendering never blocks on external API latency.
+  void applyDeArrowBranding(filtered);
   upgradeFeedThumbnails(filtered);
   addLongPress(filtered);
   addPreviews(filtered, shouldAddPreviews);
@@ -313,24 +322,24 @@ async function processItemsList(items: FeedItem[], shouldAddPreviews = true): Pr
  * Unifies processing of feed content, ensuring each node is processed exactly once
  * to avoid duplicacy and conflicting in-place mutations.
  */
-async function processContentNode(node: unknown, shouldAddPreviews = true): Promise<void> {
+function processContentNodeSync(node: unknown, shouldAddPreviews = true): void {
   if (!isRecord(node)) return;
 
   // Handle shelf-like renderers
   if (isRecord(node.shelfRenderer)) {
-    await processShelfContent(node.shelfRenderer.content, shouldAddPreviews);
+    processShelfContentSync(node.shelfRenderer.content, shouldAddPreviews);
   } else {
     const isr = isRecord(node.itemSectionRenderer) ? node.itemSectionRenderer : undefined;
     if (isr && Array.isArray(isr.contents)) {
-      await processShelves(isr.contents as FeedItem[], shouldAddPreviews);
+      processShelvesSync(isr.contents as FeedItem[], shouldAddPreviews);
     } else if (node.richSectionRenderer) {
       const richSectionRecord = isRecord(node.richSectionRenderer) ? node.richSectionRenderer : undefined;
       const richContent = isRecord(richSectionRecord?.content) ? richSectionRecord.content : undefined;
       const richContentRecord = isRecord(richContent) ? richContent : undefined;
       if (richContentRecord?.richShelfRenderer && Array.isArray((richContentRecord.richShelfRenderer as Record<string, unknown>).contents)) {
-        await processShelves((richContentRecord.richShelfRenderer as Record<string, unknown>).contents as FeedItem[], shouldAddPreviews);
+        processShelvesSync((richContentRecord.richShelfRenderer as Record<string, unknown>).contents as FeedItem[], shouldAddPreviews);
       } else if (richContentRecord) {
-        await processShelfContent(richContentRecord, shouldAddPreviews);
+        processShelfContentSync(richContentRecord, shouldAddPreviews);
       }
     }
   }
@@ -339,16 +348,16 @@ async function processContentNode(node: unknown, shouldAddPreviews = true): Prom
   for (const key of ITEM_LIST_KEYS) {
     const listContainer = isRecord(node[key]) ? node[key] : undefined;
     if (listContainer && Array.isArray(listContainer.items)) {
-      listContainer.items = await processItemsList(listContainer.items as FeedItem[], shouldAddPreviews);
+      listContainer.items = processItemsListSync(listContainer.items as FeedItem[], shouldAddPreviews);
     }
   }
 }
 
 // Unified Shelf Processor
-async function processShelves(shelves: FeedItem[], shouldAddPreviews = true): Promise<void> {
+function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void {
   if (!Array.isArray(shelves)) return;
-  await filterShelvesInPlace(shelves);
-  
+  filterShelvesInPlaceSync(shelves);
+
   const directItems: FeedItem[] = [];
 
   for (const entry of shelves) {
@@ -356,38 +365,38 @@ async function processShelves(shelves: FeedItem[], shouldAddPreviews = true): Pr
 
     // Delegate to unified processor
     if (entry.shelfRenderer || entry.itemSectionRenderer || entry.richSectionRenderer) {
-      await processContentNode(entry, shouldAddPreviews);
+      processContentNodeSync(entry, shouldAddPreviews);
     } else if (entry.sectionListRenderer || entry.richGridRenderer || ITEM_LIST_KEYS.some((k) => entry[k])) {
-      await processContentNode(entry, shouldAddPreviews);
+      processContentNodeSync(entry, shouldAddPreviews);
     } else if (entry.tileRenderer || entry.lockupViewModel || entry.shortsLockupViewModel || entry.richItemRenderer?.content) {
       directItems.push((entry.richItemRenderer?.content ?? entry) as FeedItem);
     }
   }
 
   if (directItems.length > 0) {
-    await processItemsList(directItems, shouldAddPreviews);
+    processItemsListSync(directItems, shouldAddPreviews);
   }
 }
 
-async function processBrowseActions(actions: unknown, shouldAddPreviews = true): Promise<void> {
+function processBrowseActionsSync(actions: unknown, shouldAddPreviews = true): void {
   if (!Array.isArray(actions)) return;
   for (const action of actions) {
     if (!isRecord(action)) continue;
     const reload = isRecord(action.reloadContinuationItemsCommand) ? action.reloadContinuationItemsCommand : undefined;
     if (Array.isArray(reload?.continuationItems)) {
-      await processShelves(reload.continuationItems as FeedItem[], shouldAddPreviews);
+      processShelvesSync(reload.continuationItems as FeedItem[], shouldAddPreviews);
     }
     const append = isRecord(action.appendContinuationItemsAction) ? action.appendContinuationItemsAction : undefined;
     if (Array.isArray(append?.continuationItems)) {
-      await processShelves(append.continuationItems as FeedItem[], shouldAddPreviews);
+      processShelvesSync(append.continuationItems as FeedItem[], shouldAddPreviews);
     }
     const replaceContainer = isRecord(action.replaceEnclosingAction) ? action.replaceEnclosingAction : undefined;
     const replace = isRecord(replaceContainer?.item) ? replaceContainer.item : undefined;
     if (replace) {
-      if (replace.tileRenderer || replace.lockupViewModel || replace.shortsLockupViewModel || isRecord(replace.richItemRenderer) && replace.richItemRenderer.content) {
-        await processItemsList([replace as FeedItem], shouldAddPreviews);
+      if (replace.tileRenderer || replace.lockupViewModel || replace.shortsLockupViewModel || (isRecord(replace.richItemRenderer) && replace.richItemRenderer.content)) {
+        processItemsListSync([replace as FeedItem], shouldAddPreviews);
       } else {
-        await processShelves([replace as FeedItem], shouldAddPreviews);
+        processShelvesSync([replace as FeedItem], shouldAddPreviews);
       }
     }
   }
@@ -546,6 +555,52 @@ function transformChannelHeaderButtons(r: Record<string, unknown>, tvSurface: Re
   });
 }
 
+const processedPayloads = new WeakSet<object>();
+
+function isSettingsPayload(r: Record<string, unknown>, items: readonly unknown[]): boolean {
+  if (items.some((entry) => isRecord(entry) && isRecord(entry.settingCategoryCollectionRenderer))) {
+    return true;
+  }
+  const title = isRecord(r.title) ? r.title : undefined;
+  return Boolean(
+    Array.isArray(title?.runs) &&
+      !items.some((entry) => isRecord(entry) && isRecord(entry.guideSectionRenderer))
+  );
+}
+
+function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefined): void {
+  if (!Array.isArray(secondaryNav?.sections)) return;
+  const seenTabs = new Set<string>();
+  const sortAlpha = Boolean(configRead('sortSubscriptionsByAlphabet'));
+  for (const rawSection of secondaryNav.sections) {
+    if (!isRecord(rawSection)) continue;
+    const section = isRecord(rawSection.tvSecondaryNavSectionRenderer)
+      ? rawSection.tvSecondaryNavSectionRenderer
+      : undefined;
+    if (!section || !Array.isArray(section.tabs)) continue;
+
+    section.tabs = dedupeAndSortSubscriptionTabs(section.tabs as SubscriptionTab[], seenTabs, sortAlpha);
+    for (const tab of section.tabs as SubscriptionTab[]) {
+      const content = tab.tabRenderer?.content?.tvSurfaceContentRenderer?.content;
+      if (content) processBrowseContentSync(content, true);
+    }
+  }
+}
+
+function processBrowseContentSync(node: unknown, shouldAddPreviews = true): void {
+  if (!isRecord(node)) return;
+  processContentNodeSync(node, shouldAddPreviews);
+
+  const slr = isRecord(node.sectionListRenderer) ? node.sectionListRenderer : undefined;
+  if (slr && Array.isArray(slr.contents)) {
+    processShelvesSync(slr.contents as FeedItem[], shouldAddPreviews);
+  }
+  const rgr = isRecord(node.richGridRenderer) ? node.richGridRenderer : undefined;
+  if (rgr && Array.isArray(rgr.contents)) {
+    processShelvesSync(rgr.contents as FeedItem[], shouldAddPreviews);
+  }
+}
+
 function hasRelevantInnertubeKey(r: Record<string, unknown>): boolean {
   return Boolean(
     r.items ||
@@ -557,6 +612,7 @@ function hasRelevantInnertubeKey(r: Record<string, unknown>): boolean {
       r.streamingData ||
       r.captions ||
       r.contents ||
+      r.tvBrowseContent ||
       r.continuationContents ||
       r.onResponseReceivedActions ||
       r.endscreen ||
@@ -564,16 +620,26 @@ function hasRelevantInnertubeKey(r: Record<string, unknown>): boolean {
       r.title ||
       r.playerOverlays ||
       r.transportControls ||
-      r.videoDetails
+      r.videoDetails ||
+      r.playerResponse
   );
 }
 
-export async function transformInnertubeResponse(r: unknown): Promise<unknown> {
-  if (!isRecord(r) || !hasRelevantInnertubeKey(r)) return r;
+/**
+ * Synchronously mutates parsed InnerTube payloads across `fetch` (`Response.json`),
+ * `JSON.parse`, and `_yttv` internal JSON parsers without double-processing objects.
+ */
+export function transformInnertubeResponseSync(r: unknown): unknown {
+  if (!isRecord(r) || processedPayloads.has(r) || !hasRelevantInnertubeKey(r)) return r;
+  processedPayloads.add(r);
 
   try {
     if (Array.isArray(r.items)) {
-      await transformGuideResponse(r);
+      if (isSettingsPayload(r, r.items)) {
+        patchSettingsInPlace(r);
+      } else {
+        void transformGuideResponse(r);
+      }
     }
 
     if ((r.adPlacements || r.playerAds || r.adSlots || r.entries) && configRead('enableAdBlock')) {
@@ -597,43 +663,78 @@ export async function transformInnertubeResponse(r: unknown): Promise<unknown> {
 
     disableAutoCaptionsInPayload(r);
 
+    if (r.endscreen && configRead('enableHideEndScreenCards')) {
+      r.endscreen = null;
+    }
+
+    if (Array.isArray(r.messages) && !configRead('enableYouThereRenderer')) {
+      r.messages = r.messages.filter((msg) => !isRecord(msg) || !msg.youThereRenderer);
+    }
+
     const contents = isRecord(r.contents) ? r.contents : undefined;
     if (contents) {
-      await processContentNode(contents, true);
-      // Fallback for older layouts
-      const slr = isRecord(contents.sectionListRenderer) ? contents.sectionListRenderer : undefined;
-      if (slr && Array.isArray(slr.contents)) {
-        await processShelves(slr.contents as FeedItem[], true);
+      processBrowseContentSync(contents, true);
+
+      const tvBrowse = isRecord(contents.tvBrowseRenderer) ? contents.tvBrowseRenderer : undefined;
+      const tvBrowseInner = isRecord(tvBrowse?.content) ? tvBrowse.content : undefined;
+      const tvSurfaceContent = isRecord(tvBrowseInner?.tvSurfaceContentRenderer)
+        ? tvBrowseInner.tvSurfaceContentRenderer
+        : undefined;
+      if (tvSurfaceContent?.content) {
+        processBrowseContentSync(tvSurfaceContent.content, true);
       }
-      const rgr = isRecord(contents.richGridRenderer) ? contents.richGridRenderer : undefined;
-      if (rgr && Array.isArray(rgr.contents)) {
-        await processShelves(rgr.contents as FeedItem[], true);
+      processSecondaryNavSync(
+        isRecord(tvBrowseInner?.tvSecondaryNavRenderer) ? tvBrowseInner.tvSecondaryNavRenderer : undefined
+      );
+
+      const singleColTabs = isRecord(contents.singleColumnBrowseResultsRenderer)
+        ? contents.singleColumnBrowseResultsRenderer.tabs
+        : undefined;
+      if (Array.isArray(singleColTabs)) {
+        for (const tab of singleColTabs) {
+          const tabRenderer = isRecord(tab) && isRecord(tab.tabRenderer) ? tab.tabRenderer : undefined;
+          if (tabRenderer?.content) {
+            processBrowseContentSync(tabRenderer.content, true);
+          }
+        }
       }
     }
 
     const tvBrowseContent = isRecord(r.tvBrowseContent) ? r.tvBrowseContent : undefined;
     const tvSurface = isRecord(tvBrowseContent?.tvSurfaceRenderer)
       ? tvBrowseContent.tvSurfaceRenderer
-      : undefined;
-    const secondaryNav = isRecord(tvBrowseContent?.tvSecondaryNavRenderer)
-      ? tvBrowseContent.tvSecondaryNavRenderer
-      : undefined;
-    if (Array.isArray(secondaryNav?.sections)) {
-      const seenTabs = new Set<string>();
-      const sortAlpha = Boolean(configRead('sortSubscriptionsByAlphabet'));
-      for (const rawSection of secondaryNav.sections) {
-        if (!isRecord(rawSection)) continue;
-        const section = isRecord(rawSection.tvSecondaryNavSectionRenderer)
-          ? rawSection.tvSecondaryNavSectionRenderer
-          : undefined;
-        if (!section || !Array.isArray(section.tabs)) continue;
+      : isRecord(tvBrowseContent?.tvSurfaceContentRenderer)
+        ? tvBrowseContent.tvSurfaceContentRenderer
+        : undefined;
+    if (tvSurface?.content) {
+      processBrowseContentSync(tvSurface.content, true);
+    }
+    processSecondaryNavSync(
+      isRecord(tvBrowseContent?.tvSecondaryNavRenderer) ? tvBrowseContent.tvSecondaryNavRenderer : undefined
+    );
 
-        section.tabs = dedupeAndSortSubscriptionTabs(section.tabs as SubscriptionTab[], seenTabs, sortAlpha);
-        for (const tab of section.tabs as SubscriptionTab[]) {
-          const content = tab.tabRenderer?.content?.tvSurfaceContentRenderer?.content;
-          if (content) await processShelfContent(content);
-        }
+    const cont = isRecord(r.continuationContents) ? r.continuationContents : undefined;
+    if (cont) {
+      const sectionListCont = isRecord(cont.sectionListContinuation) ? cont.sectionListContinuation : undefined;
+      if (Array.isArray(sectionListCont?.contents)) {
+        processShelvesSync(sectionListCont.contents as FeedItem[], true);
       }
+      const horizCont = isRecord(cont.horizontalListContinuation) ? cont.horizontalListContinuation : undefined;
+      if (Array.isArray(horizCont?.items)) {
+        horizCont.items = processItemsListSync(horizCont.items as FeedItem[], true);
+      }
+      const gridCont = isRecord(cont.gridContinuation) ? cont.gridContinuation : undefined;
+      if (Array.isArray(gridCont?.items)) {
+        gridCont.items = processItemsListSync(gridCont.items as FeedItem[], true);
+      }
+      const surfaceCont = isRecord(cont.tvSurfaceContentContinuation) ? cont.tvSurfaceContentContinuation : undefined;
+      if (surfaceCont?.content) {
+        processBrowseContentSync(surfaceCont.content, true);
+      }
+    }
+
+    if (Array.isArray(r.onResponseReceivedActions)) {
+      processBrowseActionsSync(r.onResponseReceivedActions, true);
     }
 
     const watchNext = isRecord(contents?.singleColumnWatchNextResults)
@@ -647,13 +748,13 @@ export async function transformInnertubeResponse(r: unknown): Promise<unknown> {
         pivotContents = pivotContents.filter((elm) => !isRecord(elm) || !elm.alertWithActionsRenderer);
         pivotSectionList.contents = pivotContents;
       }
-      await processShelves(pivotContents as FeedItem[], false);
+      processShelvesSync(pivotContents as FeedItem[], false);
     }
 
     injectChapters(r);
     transformPlayerOverlays(r);
     transformTransportControls(r);
-    processRydResponse(r as PlayerResponse);
+    void processRydResponse(r as PlayerResponse);
     transformChannelHeaderButtons(r, tvSurface);
   } catch (error) {
     console.error('[InnertubeInterceptor] Failed to process JSON payload:', error);
@@ -662,8 +763,79 @@ export async function transformInnertubeResponse(r: unknown): Promise<unknown> {
   return r;
 }
 
+export async function transformInnertubeResponse(r: unknown): Promise<unknown> {
+  return transformInnertubeResponseSync(r);
+}
+
+function patchPlaybackContextBody(rawBody: string): string | null {
+  if (!rawBody.includes('contentPlaybackContext')) return null;
+  try {
+    const body = JSON.parse(rawBody);
+    if (!isRecord(body) || !body.playbackContext) return null;
+    const playbackCtx = isRecord(body.playbackContext) ? body.playbackContext : undefined;
+    const contentCtx = isRecord(playbackCtx?.contentPlaybackContext) ? playbackCtx.contentPlaybackContext : undefined;
+    if (!contentCtx || contentCtx.isInlinePlaybackNoAd) return null;
+    return JSON.stringify({
+      ...body,
+      playbackContext: {
+        ...playbackCtx,
+        contentPlaybackContext: {
+          ...contentCtx,
+          isInlinePlaybackNoAd: true,
+        },
+      },
+    });
+  } catch (e) {
+    console.error('[InnertubeInterceptor] Failed to patch request body:', e);
+    return null;
+  }
+}
+
+const wrappedJsonParsers = new WeakSet<Function>();
+
+function wrapJsonParseFn(origParse: typeof JSON.parse): typeof JSON.parse {
+  if (wrappedJsonParsers.has(origParse)) return origParse;
+  const wrappedParse = function (
+    this: unknown,
+    text: string,
+    reviver?: (this: unknown, key: string, value: unknown) => unknown
+  ): unknown {
+    const parsed = origParse.call(this, text, reviver);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return transformInnertubeResponseSync(parsed);
+    }
+    return parsed;
+  } as typeof JSON.parse;
+  wrappedJsonParsers.add(origParse);
+  wrappedJsonParsers.add(wrappedParse);
+  return wrappedParse;
+}
+
+function syncYttvPreviewAndJson(): void {
+  if (typeof window === 'undefined' || !window._yttv) return;
+  const enablePreviews = Boolean(configRead('enablePreviews'));
+  for (const entry of Object.values(window._yttv)) {
+    if (entry instanceof Map && entry.has('ENABLE_PREVIEWS_WITH_SOUND')) {
+      entry.set('ENABLE_PREVIEWS_WITH_SOUND', enablePreviews);
+    }
+    if (isRecord(entry) && isRecord(entry.JSON) && typeof entry.JSON.parse === 'function') {
+      entry.JSON.parse = wrapJsonParseFn(entry.JSON.parse as typeof JSON.parse);
+    }
+  }
+}
+
+let interceptorInstalled = false;
+
 export function installInnertubeInterceptor(): void {
-  // 1. Intercept Response.json() (Main JSON response processing)
+  if (interceptorInstalled) return;
+  interceptorInstalled = true;
+
+  // 1. Wrap JSON.parse so XHR, Response.text(), and inline XSSI-stripped payloads transform synchronously.
+  if (typeof JSON !== 'undefined' && typeof JSON.parse === 'function') {
+    JSON.parse = wrapJsonParseFn(JSON.parse);
+  }
+
+  // 2. Intercept Response.json() (native V8 JSON path that bypasses JSON.parse).
   if (typeof Response !== 'undefined' && typeof Response.prototype?.json === 'function') {
     const origResponseJson = Response.prototype.json;
     Response.prototype.json = (async function (this: Response) {
@@ -672,50 +844,49 @@ export function installInnertubeInterceptor(): void {
       if (url && EXTERNAL_JSON_HOSTS.some((host) => url.includes(host))) {
         return data;
       }
-      return transformInnertubeResponse(data);
+      return transformInnertubeResponseSync(data);
     }) as typeof Response.prototype.json;
   }
 
-  // 2. Intercept fetch() for outgoing request modifications (replacing JSON.stringify patch)
+  // 3. Intercept fetch() & XMLHttpRequest.send() for outgoing playbackContext modifications.
   if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
     const origFetch = window.fetch;
     window.fetch = (resource, init) => {
       if (init && typeof init.body === 'string') {
-        try {
-          const body = JSON.parse(init.body);
-          if (isRecord(body) && body.playbackContext) {
-            const playbackCtx = isRecord(body.playbackContext) ? body.playbackContext : undefined;
-            const contentCtx = isRecord(playbackCtx?.contentPlaybackContext) ? playbackCtx.contentPlaybackContext : undefined;
-            if (contentCtx && !contentCtx.isInlinePlaybackNoAd) {
-              const patched = {
-                ...body,
-                playbackContext: {
-                  ...playbackCtx,
-                  contentPlaybackContext: {
-                    ...contentCtx,
-                    isInlinePlaybackNoAd: true,
-                  },
-                },
-              };
-              init.body = JSON.stringify(patched);
-            }
-          }
-        } catch (e) {
-          console.error('[InnertubeInterceptor] Failed to patch request body:', e);
-        }
+        const patchedBody = patchPlaybackContextBody(init.body);
+        if (patchedBody !== null) init.body = patchedBody;
       }
       return origFetch(resource, init);
     };
   }
 
-  // 3. Keep environment specific patches (window._yttv) if required
-  if (typeof window !== 'undefined' && window._yttv) {
-    for (const entry of Object.values(window._yttv)) {
-      if (entry instanceof Map && entry.has('ENABLE_PREVIEWS_WITH_SOUND')) {
-        entry.set('ENABLE_PREVIEWS_WITH_SOUND', false);
+  if (typeof XMLHttpRequest !== 'undefined' && typeof XMLHttpRequest.prototype?.send === 'function') {
+    const origXhrSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (
+      this: XMLHttpRequest,
+      body?: Document | XMLHttpRequestBodyInit | null
+    ): void {
+      if (typeof body === 'string') {
+        const patchedBody = patchPlaybackContextBody(body);
+        if (patchedBody !== null) {
+          origXhrSend.call(this, patchedBody);
+          return;
+        }
       }
-    }
+      origXhrSend.call(this, body);
+    };
   }
+
+  // 4. Sync feature flags & _yttv-scoped JSON.parse once YouTube TV runtime initializes, plus on toggle.
+  configChangeEmitter.addEventListener('configChange', (event) => {
+    if (event.detail.key === 'enablePreviews') {
+      syncYttvPreviewAndJson();
+    }
+  });
+  whenYttvReady(() => {
+    syncYttvPreviewAndJson();
+    void whenConfigReady().then(syncYttvPreviewAndJson);
+  });
 
   installThumbnailErrorFallback();
 }

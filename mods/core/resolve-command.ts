@@ -32,8 +32,9 @@ export function findFunction(funcName: string): ((...args: unknown[]) => unknown
   return undefined;
 }
 
-async function handleSetClientSetting(endpoint: Record<string, unknown>): Promise<boolean> {
+function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
   const settingDatas = Array.isArray(endpoint.settingDatas) ? endpoint.settingDatas : [];
+  let handledCustomSetting = false;
   for (const rawSetting of settingDatas) {
     if (!isRecord(rawSetting)) continue;
     const enumObj = isRecord(rawSetting.clientSettingEnum) ? rawSetting.clientSettingEnum : undefined;
@@ -55,10 +56,11 @@ async function handleSetClientSetting(endpoint: Record<string, unknown>): Promis
           const idx = arr.indexOf(rawVal);
           if (idx !== -1) arr.splice(idx, 1);
           else arr.push(rawVal);
-          await configWrite(sKey, arr as ConfigSchema[typeof sKey]);
+          void configWrite(sKey, arr as ConfigSchema[typeof sKey]);
         } else {
-          await configWrite(sKey, rawVal as ConfigSchema[typeof sKey]);
+          void configWrite(sKey, rawVal as ConfigSchema[typeof sKey]);
         }
+        handledCustomSetting = true;
       }
     } else if (itemKey === 'I18N_LANGUAGE') {
       const lang = typeof rawSetting.stringValue === 'string' ? rawSetting.stringValue : '';
@@ -69,7 +71,7 @@ async function handleSetClientSetting(endpoint: Record<string, unknown>): Promis
       return true;
     }
   }
-  return false;
+  return handledCustomSetting;
 }
 
 function patchPlaybackSettingsPopup(cmd: Record<string, unknown>): void {
@@ -119,24 +121,28 @@ function extractCustomAction(cmd: Record<string, unknown>): { action: string; pa
   return null;
 }
 
+const patchedResolveInstances = new WeakSet<object>();
+
 export function patchResolveCommand(): void {
   if (typeof window === 'undefined' || !window._yttv) return;
   for (const entry of Object.values(window._yttv)) {
     if (!isRecord(entry) || !isRecord(entry.instance) || typeof entry.instance.resolveCommand !== 'function') {
       continue;
     }
+    if (patchedResolveInstances.has(entry.instance)) continue;
+    patchedResolveInstances.add(entry.instance);
 
-    const instance = entry.instance as { resolveCommand: (cmd: unknown, arg?: unknown) => Promise<unknown> | unknown };
+    const instance = entry.instance as { resolveCommand: (cmd: unknown, arg?: unknown) => unknown };
     const ogResolve = instance.resolveCommand;
-    instance.resolveCommand = async function (this: unknown, rawCmd: unknown, arg?: unknown): Promise<unknown> {
+    instance.resolveCommand = function (this: unknown, rawCmd: unknown, arg?: unknown): unknown {
       if (!isRecord(rawCmd)) return ogResolve.call(this, rawCmd, arg);
 
       if (isRecord(rawCmd.setClientSettingEndpoint)) {
-        if (await handleSetClientSetting(rawCmd.setClientSettingEndpoint)) return true;
+        if (handleSetClientSetting(rawCmd.setClientSettingEndpoint)) return true;
       } else {
         const extracted = extractCustomAction(rawCmd);
         if (extracted) {
-          await customAction(extracted.action, extracted.parameters);
+          void customAction(extracted.action, extracted.parameters);
           return true;
         }
         const openPopup = isRecord(rawCmd.openPopupAction) ? rawCmd.openPopupAction : undefined;
@@ -152,7 +158,7 @@ export function patchResolveCommand(): void {
         for (const subCmd of cmdExec.commands) {
           const extracted = isRecord(subCmd) ? extractCustomAction(subCmd) : null;
           if (extracted) {
-            await customAction(extracted.action, extracted.parameters);
+            void customAction(extracted.action, extracted.parameters);
           } else {
             instance.resolveCommand(subCmd, arg);
           }

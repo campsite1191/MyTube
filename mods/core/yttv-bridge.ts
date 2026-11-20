@@ -44,6 +44,90 @@ export function findResolveCommandHost(): YttvResolveCommandHost | null {
   return null;
 }
 
+const yttvReadyCallbacks = new Set<() => void>();
+let yttvWatcherActive = false;
+
+function isYttvPopulated(): boolean {
+  if (typeof window === 'undefined' || !window._yttv) return false;
+  return Boolean(findResolveCommandHost()) || (typeof document !== 'undefined' && document.readyState === 'complete' && Object.keys(window._yttv).length > 0);
+}
+
+/**
+ * Invokes `callback` once `window._yttv` and its command host finish initializing.
+ */
+export function whenYttvReady(callback: () => void): void {
+  if (isYttvPopulated()) {
+    callback();
+    return;
+  }
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  yttvReadyCallbacks.add(callback);
+  if (yttvWatcherActive) return;
+  yttvWatcherActive = true;
+
+  let attempts = 0;
+  const maxAttempts = 60;
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let observer: MutationObserver | null = null;
+
+  const cleanup = (): void => {
+    if (pollTimer !== null) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    observer?.disconnect();
+    observer = null;
+    window.removeEventListener('load', check);
+    document.removeEventListener('DOMContentLoaded', check);
+  };
+
+  const flush = (): void => {
+    cleanup();
+    yttvWatcherActive = false;
+    const callbacks = [...yttvReadyCallbacks];
+    yttvReadyCallbacks.clear();
+    for (const cb of callbacks) {
+      try {
+        cb();
+      } catch (err) {
+        console.error('[YttvBridge] Ready callback failed:', err);
+      }
+    }
+  };
+
+  const check = (): void => {
+    if (isYttvPopulated()) {
+      flush();
+      return;
+    }
+    attempts++;
+    if (attempts >= maxAttempts) {
+      if (window._yttv && Object.keys(window._yttv).length > 0) {
+        flush();
+      } else {
+        cleanup();
+        yttvWatcherActive = false;
+        yttvReadyCallbacks.clear();
+      }
+      return;
+    }
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = setTimeout(check, 200);
+  };
+
+  if (typeof MutationObserver !== 'undefined') {
+    const target = document.documentElement ?? document;
+    observer = new MutationObserver(() => {
+      if (isYttvPopulated()) flush();
+    });
+    observer.observe(target, { childList: true, subtree: true });
+  }
+  window.addEventListener('load', check, { once: true });
+  document.addEventListener('DOMContentLoaded', check, { once: true });
+  pollTimer = setTimeout(check, 50);
+}
+
 export function getCommandExecutor(): YttvCommandExecutor | null {
   const yttv = window._yttv;
   if (!yttv) return null;

@@ -1,4 +1,5 @@
 import { configChangeEmitter, configRead } from '../core/config.ts';
+import { onVideo } from '../core/player-observer.ts';
 
 const CLOCK_ID = 'custom-clock';
 const MAX_VOD_DURATION_SEC = 86400 * 7;
@@ -132,7 +133,7 @@ function pickActiveVideo(): HTMLVideoElement | null {
   return fallback;
 }
 
-const VIDEO_SYNC_EVENTS = ['play', 'pause', 'seeked', 'ratechange', 'durationchange', 'ended'] as const;
+const VIDEO_SYNC_EVENTS = ['loadedmetadata', 'play', 'pause', 'seeked', 'ratechange', 'durationchange', 'ended'] as const;
 
 function syncVideoListeners(video: HTMLVideoElement | null, onUpdate: () => void): void {
   if (listenedVideo === video) return;
@@ -201,7 +202,9 @@ export function toggleClock(enabled: boolean): void {
   inner.appendChild(clockTimeEl);
   inner.appendChild(endTimeEl);
   clock.appendChild(inner);
-  document.body?.appendChild(clock);
+  const host = document.body ?? document.documentElement;
+  if (!host) return;
+  host.appendChild(clock);
 
   const renderAndSchedule = (): void => {
     clearScheduledTick();
@@ -231,8 +234,8 @@ export function toggleClock(enabled: boolean): void {
     const onWatchPage = location.hash.includes('watch') || location.hash.includes('v=');
     let nextEnd = '';
     if (onWatchPage) {
-      const video = pickActiveVideo();
-      if (video !== listenedVideo) {
+      const video = pickActiveVideo() ?? document.querySelector('video');
+      if (video && video !== listenedVideo) {
         syncVideoListeners(video, renderAndSchedule);
       }
       if (video && !video.ended) {
@@ -254,6 +257,10 @@ export function toggleClock(enabled: boolean): void {
   updateHandler = renderAndSchedule;
   window.addEventListener('hashchange', renderAndSchedule);
   document.addEventListener('visibilitychange', renderAndSchedule);
+  onVideo((videoEl) => {
+    syncVideoListeners(videoEl, renderAndSchedule);
+    renderAndSchedule();
+  });
   renderAndSchedule();
 }
 

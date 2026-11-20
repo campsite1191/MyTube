@@ -1,10 +1,19 @@
-import { configRead } from '../core/config.ts';
+import { configRead, whenConfigReady } from '../core/config.ts';
+import { waitForDomReady } from '../core/idle-scheduler.ts';
 import { onVideo } from '../core/player-observer.ts';
-import { getCommandExecutor } from '../core/yttv-bridge.ts';
+import { getCommandExecutor, whenYttvReady } from '../core/yttv-bridge.ts';
 import resolveCommand, { patchResolveCommand } from '../core/resolve-command.ts';
 import css from './ui.min.css';
 
+let stylesInstalled = false;
+let uiInitialized = false;
+
 function installGlobalStyles(): void {
+  if (stylesInstalled || typeof document === 'undefined') return;
+  const targetRoot = document.head ?? document.documentElement;
+  if (!targetRoot) return;
+  stylesInstalled = true;
+
   try {
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(css);
@@ -21,13 +30,16 @@ function installGlobalStyles(): void {
   }
   const style = document.createElement('style');
   style.textContent = css;
-  (document.head ?? document.documentElement)?.appendChild(style);
+  targetRoot.appendChild(style);
 }
 
 function initUi(): void {
   installGlobalStyles();
+  if (uiInitialized) return;
+  uiInitialized = true;
 
-  if (configRead('reloadHomeOnStartup')) {
+  const isWatchRoute = typeof location !== 'undefined' && location.hash.includes('watch');
+  if (configRead('reloadHomeOnStartup') && !isWatchRoute) {
     const launchTo = configRead('launchToOnStartup');
     if (launchTo) {
       try {
@@ -52,8 +64,13 @@ function initUi(): void {
 }
 
 if (typeof document !== 'undefined') {
-  onVideo(() => {
-    initUi();
+  void waitForDomReady().then(installGlobalStyles);
+  whenYttvReady(() => {
     patchResolveCommand();
+    void whenConfigReady().then(initUi);
+  });
+  onVideo(() => {
+    patchResolveCommand();
+    void whenConfigReady().then(initUi);
   });
 }

@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
+  installInnertubeInterceptor,
+  transformInnertubeResponseSync,
+} from '../mods/core/innertube-interceptor.ts';
+import {
   dedupeAndSortSubscriptionTabs,
   disableAutoCaptionsInPayload,
   extractBrowseIdFromResponse,
@@ -9,6 +13,7 @@ import {
   getAudioTier,
   stripAdsFromPayload,
 } from '../mods/transforms/innertube-player.ts';
+import { patchSettingsInPlace } from '../mods/ui/custom-yt-settings.ts';
 import type { AudioFormatEntry, SubscriptionTab } from '../mods/transforms/innertube-player.ts';
 
 describe('getAudioTier and filterStreamingFormats', () => {
@@ -153,5 +158,102 @@ describe('stripAdsFromPayload', () => {
     assert.equal(payload.playerAds, false);
     assert.deepEqual(payload.adSlots, []);
     assert.equal((payload.entries as unknown[]).length, 2);
+  });
+});
+
+describe('patchSettingsInPlace and TV browse/JSON.parse transforms', () => {
+  test('prepends custom settings category once for YouTube TV settings payloads', () => {
+    const payload = {
+      title: { runs: [{ text: 'Settings' }] },
+      items: [
+        {
+          settingCategoryCollectionRenderer: {
+            categoryId: 'GENERAL',
+            items: [],
+          },
+        },
+      ],
+    };
+
+    assert.equal(patchSettingsInPlace(payload), true);
+    assert.equal(payload.items.length, 2);
+    const inserted = (payload.items[0] as Record<string, Record<string, unknown>>)
+      .settingCategoryCollectionRenderer;
+    assert.equal(inserted?.categoryId, 'custom_settings_category');
+
+    // Calling again (or via transformInnertubeResponseSync) must not duplicate the entry.
+    assert.equal(patchSettingsInPlace(payload), false);
+    assert.equal(payload.items.length, 2);
+  });
+
+  test('transforms tvBrowseRenderer home feed shelves synchronously via JSON.parse', (t) => {
+    const prevParse = JSON.parse;
+    installInnertubeInterceptor();
+    t.after(() => {
+      JSON.parse = prevParse;
+    });
+
+    const rawHomeJson = JSON.stringify({
+      contents: {
+        tvBrowseRenderer: {
+          content: {
+            tvSurfaceContentRenderer: {
+              content: {
+                sectionListRenderer: {
+                  contents: [
+                    { feedNudgeRenderer: {} },
+                    { adSlotRenderer: {} },
+                    {
+                      shelfRenderer: {
+                        content: {
+                          horizontalListRenderer: {
+                            items: [
+                              { adSlotRenderer: {} },
+                              {
+                                tileRenderer: {
+                                  contentId: 'abc123',
+                                  style: 'TILE_STYLE_YTLR_DEFAULT',
+                                  onSelectCommand: {
+                                    watchEndpoint: { videoId: 'abc123' },
+                                  },
+                                  header: {
+                                    tileHeaderRenderer: {
+                                      thumbnail: {
+                                        thumbnails: [{ url: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg', width: 480 }],
+                                      },
+                                    },
+                                  },
+                                },
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const parsed = JSON.parse(rawHomeJson) as Record<string, any>;
+    const shelves = parsed.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content.sectionListRenderer.contents;
+    assert.equal(shelves.length, 1);
+
+    const items = shelves[0].shelfRenderer.content.horizontalListRenderer.items;
+    assert.equal(items.length, 1);
+    assert.equal(items[0].tileRenderer.onFocusCommand?.startInlinePlaybackCommand?.playbackEndpoint?.watchEndpoint?.videoId, 'abc123');
+    assert.equal(items[0].tileRenderer.header.tileHeaderRenderer.thumbnail.thumbnails[0].url, 'https://i.ytimg.com/vi/abc123/hq720.jpg');
+
+    // Ensure settings payload parses cleanly through transformInnertubeResponseSync too.
+    const settingsPayload = {
+      title: { runs: [{ text: 'Settings' }] },
+      items: [{ settingCategoryCollectionRenderer: { categoryId: 'ABOUT', items: [] } }],
+    };
+    transformInnertubeResponseSync(settingsPayload);
+    assert.equal(settingsPayload.items.length, 2);
   });
 });

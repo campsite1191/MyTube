@@ -121,12 +121,21 @@ export const defaultConfig: ConfigSchema = {
 };
 
 let localConfig: ConfigSchema = { ...defaultConfig };
+let configReadyPromise: Promise<void> | null = null;
 
-export async function initConfig(): Promise<void> {
-  const stored = await get<ConfigSchema>(CONFIG_KEY);
-  if (stored) {
-    localConfig = { ...defaultConfig, ...stored };
+export function initConfig(): Promise<void> {
+  if (!configReadyPromise) {
+    configReadyPromise = get<ConfigSchema>(CONFIG_KEY).then((stored) => {
+      if (stored) {
+        localConfig = { ...defaultConfig, ...stored };
+      }
+    });
   }
+  return configReadyPromise;
+}
+
+export function whenConfigReady(): Promise<void> {
+  return initConfig();
 }
 
 export function configRead<K extends ConfigKey>(key: K): ConfigSchema[K] {

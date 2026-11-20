@@ -1,26 +1,15 @@
-import { configRead } from '../core/config.ts';
+import { configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
-import { onVideo } from '../core/player-observer.ts';
+import { whenYttvReady } from '../core/yttv-bridge.ts';
 import { applyDislikeCountToActions } from '../features/return-youtube-dislike.ts';
 import { extractPlayerActionMethodNames } from '../utils/ast-parser.ts';
 import { isRecord } from '../utils/type-guards.ts';
 import { ButtonRenderer } from './yt-ui.ts';
 
+let patchesApplied = false;
+
 function applyPatches(): void {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  if (!window._yttv) {
-    if (typeof MutationObserver !== 'undefined') {
-      const target = document.documentElement ?? document;
-      const obs = new MutationObserver(() => {
-        if (window._yttv) {
-          obs.disconnect();
-          applyPatches();
-        }
-      });
-      obs.observe(target, { childList: true, subtree: true });
-    }
-    return;
-  }
+  if (patchesApplied || typeof window === 'undefined' || !window._yttv) return;
 
   const methods = Object.keys(window._yttv).filter((key) => {
     const entry = window._yttv?.[key];
@@ -29,6 +18,7 @@ function applyPatches(): void {
 
   const targetKey = methods[0];
   if (!targetKey) return;
+  patchesApplied = true;
 
   const origMethod = window._yttv?.[targetKey] as (new (...args: unknown[]) => Record<string, unknown>) &
     ((...args: unknown[]) => unknown);
@@ -144,5 +134,7 @@ function applyPatches(): void {
 }
 
 if (typeof document !== 'undefined') {
-  onVideo(applyPatches);
+  whenYttvReady(() => {
+    void whenConfigReady().then(applyPatches);
+  });
 }
