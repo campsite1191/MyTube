@@ -128,12 +128,17 @@ export async function getGuide(): Promise<unknown> {
   if (guideCache) return guideCache;
 
   const response = await new Promise((resolve) => {
-    client.fetch({ path: '/youtubei/v1/guide', signal: getAbortSignal() }).subscribe((res: unknown) => {
-      resolve(res);
-    });
+    client.fetch({ path: '/youtubei/v1/guide', signal: getAbortSignal() }).subscribe(
+      (res: unknown) => {
+        resolve(res);
+      },
+      () => {
+        resolve(null);
+      }
+    );
   });
-  
-  guideCache = response;
+
+  if (response !== null) guideCache = response;
   return response;
 }
 

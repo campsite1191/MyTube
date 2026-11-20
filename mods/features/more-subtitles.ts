@@ -1,5 +1,4 @@
 import { configRead } from '../core/config.ts';
-import { onPlayer } from '../core/player-observer.ts';
 import { findResolveCommandHost } from '../core/yttv-bridge.ts';
 import type { InnertubeCommand } from '../types/innertube.ts';
 import { isRecord } from '../utils/type-guards.ts';
@@ -216,16 +215,4 @@ export function installSubtitleAutoTranslatePatch(): boolean {
   host.instance.resolveCommand = wrappedResolveCommand;
 
   return true;
-}
-
-if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  const ensureInstalled = (): void => {
-    const host = findResolveCommandHost();
-    if (!host) {
-      setTimeout(ensureInstalled, 500);
-      return;
-    }
-    installSubtitleAutoTranslatePatch();
-  };
-  onPlayer(ensureInstalled);
 }

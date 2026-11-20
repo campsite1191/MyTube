@@ -8,6 +8,7 @@ type VideoWaiter = (video: HTMLVideoElement) => void;
 const playerWaiters: PlayerWaiter[] = [];
 const videoWaiters: VideoWaiter[] = [];
 let domObserver: MutationObserver | null = null;
+let domReadyListenerAttached = false;
 
 let pendingFlush = false;
 function flushWaiters(): void {
@@ -44,9 +45,12 @@ function ensureObserving(): void {
   if (domObserver || typeof MutationObserver === 'undefined' || typeof document === 'undefined') return;
   const target = document.body ?? document.documentElement;
   if (!target) {
+    if (domReadyListenerAttached) return;
+    domReadyListenerAttached = true;
     document.addEventListener(
       'DOMContentLoaded',
       () => {
+        domReadyListenerAttached = false;
         flushWaiters();
         ensureObserving();
       },

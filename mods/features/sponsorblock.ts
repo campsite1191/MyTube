@@ -1,4 +1,4 @@
-import { configChangeEmitter, configRead } from '../core/config.ts';
+import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
 import type { ConfigChangeListener, ConfigKey } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
 import { onVideo } from '../core/player-observer.ts';
@@ -493,20 +493,25 @@ export function getActiveSponsorBlockSegments(): readonly SponsorBlockSegment[] 
   return activeHandler?.getSegments() ?? [];
 }
 
+function destroyActiveHandler(): void {
+  if (!activeHandler) return;
+  try {
+    activeHandler.destroy();
+  } catch (error) {
+    console.warn('[SponsorBlock] Failed to destroy previous handler:', error);
+  }
+  activeHandler = null;
+}
+
 function handleHashChange(): void {
   const videoId = extractWatchVideoId(location.hash, location.href);
-  const needsReload = Boolean(videoId && (!activeHandler || activeHandler.videoId !== videoId));
-
-  if (!needsReload || !videoId) return;
-
-  if (activeHandler) {
-    try {
-      activeHandler.destroy();
-    } catch (error) {
-      console.warn('[SponsorBlock] Failed to destroy previous handler:', error);
-    }
-    activeHandler = null;
+  if (!videoId) {
+    destroyActiveHandler();
+    return;
   }
+
+  if (activeHandler && activeHandler.videoId === videoId) return;
+  destroyActiveHandler();
 
   if (configRead('enableSponsorBlock')) {
     activeHandler = new SponsorBlockHandler(videoId);
@@ -533,4 +538,5 @@ const handleConfigChange: ConfigChangeListener = (event) => {
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('hashchange', handleHashChange, false);
   configChangeEmitter.addEventListener('configChange', handleConfigChange);
+  void whenConfigReady().then(handleHashChange);
 }

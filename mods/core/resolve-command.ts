@@ -3,6 +3,7 @@ import type { ConfigKey, ConfigSchema, SidebarContentItem } from './config.ts';
 import { t } from './i18n.ts';
 import { findResolveCommandHost } from './yttv-bridge.ts';
 import { readFormattedText } from '../transforms/feed-filter.ts';
+import { patchAutoTranslateCommand } from '../features/more-subtitles.ts';
 import type { FormattedText, HiddenChannel, InnertubeCommand } from '../types/innertube.ts';
 import modernUI, { optionShow } from '../ui/settings.ts';
 import showGuideSettings from '../ui/sidebar-modification.ts';
@@ -148,6 +149,8 @@ export function patchResolveCommand(): void {
         const openPopup = isRecord(rawCmd.openPopupAction) ? rawCmd.openPopupAction : undefined;
         if (openPopup?.uniqueId === 'playback-settings') {
           patchPlaybackSettingsPopup(rawCmd);
+        } else if (openPopup?.uniqueId === 'CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE') {
+          patchAutoTranslateCommand(rawCmd);
         }
       }
 

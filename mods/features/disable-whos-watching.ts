@@ -1,4 +1,4 @@
-import { configChangeEmitter, configRead } from '../core/config.ts';
+import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
 import { get, set } from '../core/indexed-db.ts';
 import { isRecord } from '../utils/type-guards.ts';
 
@@ -63,5 +63,7 @@ if (typeof window !== 'undefined') {
     }
   });
 
-  handleWhosWatching(configRead('enableWhoIsWatchingMenu'));
+  void whenConfigReady().then(() => {
+    void handleWhosWatching(configRead('enableWhoIsWatchingMenu'));
+  });
 }
