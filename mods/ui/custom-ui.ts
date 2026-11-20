@@ -50,67 +50,48 @@ function applyPatches(): void {
     }
 
     if (engagementActionsMethod && typeof inst[engagementActionsMethod] === 'function') {
-      if (configRead('enableSpeedControlsButton')) {
-        const origEngagementActionButton = inst[engagementActionsMethod] as (...a: unknown[]) => unknown[];
-        inst[engagementActionsMethod] = function (this: unknown, ...callArgs: unknown[]) {
-          const res = origEngagementActionButton.apply(this, callArgs);
-          if (
-            Array.isArray(res) &&
-            !res.some((item) => isRecord(item) && item.type === 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPEED')
-          ) {
-            res.push({
-              type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPEED',
-              button: {
-                buttonRenderer: ButtonRenderer(false, t('player.playbackSpeed.button'), 'SPEEDOMETER', {
-                  customAction: { action: 'TT_SPEED_SETTINGS_SHOW' },
-                }),
-              },
-            });
-          }
-          return res;
-        };
-      }
-
-      const origSubFilter = inst[engagementActionsMethod] as (...a: unknown[]) => unknown;
+      const origEngagementActions = inst[engagementActionsMethod] as (...a: unknown[]) => unknown;
       inst[engagementActionsMethod] = function (this: unknown, ...callArgs: unknown[]) {
-        const res = origSubFilter.apply(this, callArgs);
+        const res = origEngagementActions.apply(this, callArgs);
         if (!Array.isArray(res)) return res;
-        return applyDislikeCountToActions(
-          res.filter((item) => {
-            if (!isRecord(item)) return true;
-            if (/SUBSCRIBE/i.test(String(item.type || ''))) return false;
-            const btn = isRecord(item.button) ? item.button : undefined;
-            return !item.subscribeButton && !item.subscribeButtonRenderer && !btn?.subscribeButtonRenderer;
-          })
-        );
+
+        const filtered = res.filter((item) => {
+          if (!isRecord(item)) return true;
+          const itemType = String(item.type || '');
+          if (/SUBSCRIBE/i.test(itemType)) return false;
+          const btn = isRecord(item.button) ? item.button : undefined;
+          if (item.subscribeButton || item.subscribeButtonRenderer || btn?.subscribeButtonRenderer) {
+            return false;
+          }
+          if (
+            !configRead('enableSuperThanksButton') &&
+            (itemType === 'TRANSPORT_CONTROLS_BUTTON_TYPE_SUPER_THANKS' ||
+              itemType === 'TRANSPORT_CONTROLS_BUTTON_TYPE_SHOPPING')
+          ) {
+            return false;
+          }
+          if (!configRead('enableAIAskButton') && itemType === 'TRANSPORT_CONTROLS_BUTTON_TYPE_YOUCHAT_BUTTON') {
+            return false;
+          }
+          return true;
+        });
+
+        if (
+          configRead('enableSpeedControlsButton') &&
+          !filtered.some((item) => isRecord(item) && item.type === 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPEED')
+        ) {
+          filtered.push({
+            type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPEED',
+            button: {
+              buttonRenderer: ButtonRenderer(false, t('player.playbackSpeed.button'), 'SPEEDOMETER', {
+                customAction: { action: 'TT_SPEED_SETTINGS_SHOW' },
+              }),
+            },
+          });
+        }
+
+        return applyDislikeCountToActions(filtered);
       };
-
-      if (!configRead('enableSuperThanksButton')) {
-        const origEngagementActionButton = inst[engagementActionsMethod] as (...a: unknown[]) => unknown[];
-        inst[engagementActionsMethod] = function (this: unknown, ...callArgs: unknown[]) {
-          const res = origEngagementActionButton.apply(this, callArgs);
-          return Array.isArray(res)
-            ? res.filter(
-                (item) =>
-                  !isRecord(item) ||
-                  (item.type !== 'TRANSPORT_CONTROLS_BUTTON_TYPE_SUPER_THANKS' &&
-                    item.type !== 'TRANSPORT_CONTROLS_BUTTON_TYPE_SHOPPING')
-              )
-            : res;
-        };
-      }
-
-      if (!configRead('enableAIAskButton')) {
-        const origEngagementActionButton = inst[engagementActionsMethod] as (...a: unknown[]) => unknown[];
-        inst[engagementActionsMethod] = function (this: unknown, ...callArgs: unknown[]) {
-          const res = origEngagementActionButton.apply(this, callArgs);
-          return Array.isArray(res)
-            ? res.filter(
-                (item) => !isRecord(item) || item.type !== 'TRANSPORT_CONTROLS_BUTTON_TYPE_YOUCHAT_BUTTON'
-              )
-            : res;
-        };
-      }
     }
 
     if (configRead('enablePreviousNextButtons') && previousButtonMethod && nextButtonMethod) {

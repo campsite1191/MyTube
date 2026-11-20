@@ -1,7 +1,6 @@
-import { getCurrentIdentityService, getKabukiInnerTubeClient, getYttvServicesMap } from './yttv-bridge.ts';
+import { getCurrentIdentityService, getKabukiInnerTubeClient } from './yttv-bridge.ts';
 import resolveCommand from './resolve-command.ts';
 import { isRecord } from '../utils/type-guards.ts';
-import type { CurrentIdentityService, KabukiInnerTubeClient } from '../types/yttv.ts';
 
 let guideCache: unknown | null = null;
 
@@ -13,15 +12,6 @@ function getAbortSignal(): AbortSignal {
   }
   currentAbortController = new AbortController();
   return currentAbortController.signal;
-}
-
-// Helper for UI tasks that should wait for idle time
-export function scheduleIdle(callback: () => void): void {
-  if ('requestIdleCallback' in window) {
-    (window as any).requestIdleCallback(callback);
-  } else {
-    setTimeout(callback, 1);
-  }
 }
 
 interface NextNavParams {
@@ -109,20 +99,8 @@ export function requestNextAndNavigateChannel(params: NextNavParams): void {
   });
 }
 
-function getInnerTubeServices(): {
-  identityService: CurrentIdentityService | null;
-  client: KabukiInnerTubeClient | null;
-} {
-  const mappings = getYttvServicesMap();
-  if (!mappings) return { identityService: null, client: null };
-  return {
-    identityService: (mappings.get('CurrentIdentityService') ?? null) as CurrentIdentityService | null,
-    client: (mappings.get('KabukiInnerTubeClient') ?? null) as KabukiInnerTubeClient | null,
-  };
-}
-
 export async function getGuide(): Promise<unknown> {
-  const { client } = getInnerTubeServices();
+  const client = getKabukiInnerTubeClient();
   if (!client) return Promise.resolve(null);
 
   if (guideCache) return guideCache;

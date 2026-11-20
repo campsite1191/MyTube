@@ -763,10 +763,6 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
   return r;
 }
 
-export async function transformInnertubeResponse(r: unknown): Promise<unknown> {
-  return transformInnertubeResponseSync(r);
-}
-
 function patchPlaybackContextBody(rawBody: string): string | null {
   if (!rawBody.includes('contentPlaybackContext')) return null;
   try {

@@ -1,6 +1,4 @@
 import { configRead } from '../core/config.ts';
-import { findResolveCommandHost } from '../core/yttv-bridge.ts';
-import type { InnertubeCommand } from '../types/innertube.ts';
 import { isRecord } from '../utils/type-guards.ts';
 
 export interface SubtitleLanguageDescriptor {
@@ -193,26 +191,4 @@ export function patchAutoTranslateCommand(
   if (!items) return false;
 
   return injectPinnedAutoTranslateLanguages(items) > 0;
-}
-
-export function installSubtitleAutoTranslatePatch(): boolean {
-  if (typeof window === 'undefined') return false;
-  const host = findResolveCommandHost();
-  if (!host) return false;
-
-  const originalResolveCommand = host.instance.resolveCommand;
-  if (originalResolveCommand.isPatchedBySubtitleLocalization) return false;
-
-  const wrappedResolveCommand: typeof originalResolveCommand = function (
-    this: unknown,
-    cmd: InnertubeCommand,
-    unused?: unknown
-  ) {
-    patchAutoTranslateCommand(cmd);
-    return originalResolveCommand.call(this, cmd, unused);
-  };
-  wrappedResolveCommand.isPatchedBySubtitleLocalization = true;
-  host.instance.resolveCommand = wrappedResolveCommand;
-
-  return true;
 }

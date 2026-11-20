@@ -26,9 +26,6 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Run Regression Tests
-        run: npm test
-
       - name: Install Build & Type Dependencies
         run: npm --prefix mods install --no-audit --no-fund
 
@@ -53,3 +50,6 @@ jobs:
         run: |
           npm run build:js
           ls -lh mods/dist/userscript.js
+
+      - name: Run Regression Tests
+        run: npm test

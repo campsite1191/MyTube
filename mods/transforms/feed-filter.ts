@@ -552,18 +552,7 @@ export function filterFeedItemsSync(items: FeedItem[], options: FeedFilterOption
  * Synchronously compacts a shelves array in place, dropping hidden shelves/entries.
  */
 export function filterShelvesInPlaceSync(shelves: FeedItem[], options: FeedFilterOptions = {}): FeedItem[] {
-  if (!Array.isArray(shelves)) return shelves;
-
-  let writeIndex = 0;
-  for (let readIndex = 0; readIndex < shelves.length; readIndex++) {
-    const item = shelves[readIndex] as FeedItem;
-    if (!shouldHideFeedItem(item, options)) {
-      shelves[writeIndex] = item;
-      writeIndex++;
-    }
-  }
-  shelves.length = writeIndex;
-  return shelves;
+  return compactInPlace(shelves, (item) => shouldHideFeedItem(item, options));
 }
 
 export async function filterFeedItems(items: FeedItem[], options: FeedFilterOptions = {}): Promise<FeedItem[]> {

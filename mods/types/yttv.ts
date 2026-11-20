@@ -39,9 +39,7 @@ export interface CurrentIdentityService {
 
 export interface YttvResolveCommandHost {
   instance: {
-    resolveCommand: ((cmd: InnertubeCommand, unused?: unknown) => unknown) & {
-      isPatchedBySubtitleLocalization?: boolean;
-    };
+    resolveCommand: (cmd: InnertubeCommand, unused?: unknown) => unknown;
   };
 }
 

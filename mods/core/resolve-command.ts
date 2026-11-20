@@ -23,16 +23,6 @@ export default async function resolveCommand(cmd: unknown, arg?: unknown): Promi
   return host ? host.instance.resolveCommand(cmd as InnertubeCommand, arg) : undefined;
 }
 
-export function findFunction(funcName: string): ((...args: unknown[]) => unknown) | undefined {
-  if (typeof window === 'undefined' || !window._yttv) return undefined;
-  for (const entry of Object.values(window._yttv)) {
-    if (isRecord(entry) && typeof entry[funcName] === 'function') {
-      return entry[funcName] as (...args: unknown[]) => unknown;
-    }
-  }
-  return undefined;
-}
-
 function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
   const settingDatas = Array.isArray(endpoint.settingDatas) ? endpoint.settingDatas : [];
   let handledCustomSetting = false;

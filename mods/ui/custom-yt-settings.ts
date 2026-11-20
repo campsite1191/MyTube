@@ -40,13 +40,3 @@ export function patchSettingsInPlace(settingsObject: Record<string, unknown>): b
   currentItems.unshift(buildCustomSettingsCategory());
   return true;
 }
-
-export function getPatchedSettings(settingsObject: Record<string, unknown>): Record<string, unknown> {
-  const currentItems = Array.isArray(settingsObject.items) ? settingsObject.items : [];
-  if (hasCustomSettingsCategory(currentItems)) return settingsObject;
-
-  return {
-    ...settingsObject,
-    items: [buildCustomSettingsCategory(), ...currentItems],
-  };
-}
