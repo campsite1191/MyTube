@@ -370,7 +370,9 @@ export function hasBlockedBadge(item: FeedItem | null | undefined): boolean {
     return false;
   };
 
-  return (meta.hasBlockedBadge = checkBlocked(target));
+  const result = checkBlocked(target);
+  meta.hasBlockedBadge = result;
+  return result;
 }
 
 export function hasPaidOfferEndpoint(item: FeedItem | null | undefined): boolean {
@@ -381,14 +383,17 @@ export function hasPaidOfferEndpoint(item: FeedItem | null | undefined): boolean
   if (meta.hasPaidOffer !== undefined) return meta.hasPaidOffer;
 
   if (target.tileRenderer?.onSelectCommand?.ypcGetOffersEndpoint) {
-    return (meta.hasPaidOffer = true);
+    meta.hasPaidOffer = true;
+    return true;
   }
 
   const onTap: unknown = target.lockupViewModel?.rendererContext?.commandContext?.onTap;
-  if (!isRecord(onTap)) return (meta.hasPaidOffer = false);
-  if (onTap.ypcGetOffersEndpoint) return (meta.hasPaidOffer = true);
-
-  return (meta.hasPaidOffer = walkCommands(onTap, (cmd) => Boolean(cmd.ypcGetOffersEndpoint)));
+  let result = false;
+  if (isRecord(onTap)) {
+    result = Boolean(onTap.ypcGetOffersEndpoint) || walkCommands(onTap, (cmd) => Boolean(cmd.ypcGetOffersEndpoint));
+  }
+  meta.hasPaidOffer = result;
+  return result;
 }
 
 export function isChannelHidden(

@@ -176,7 +176,7 @@ function cleanupClockListeners(): void {
   updateHandler = null;
 }
 
-export function toggleClock(enabled: boolean): void {
+function toggleClock(enabled: boolean): void {
   if (typeof document === 'undefined') return;
   const existingClock = document.getElementById(CLOCK_ID);
   if (enabled && existingClock) return;

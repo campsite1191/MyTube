@@ -3,7 +3,7 @@ const STORE_NAME = 'settings';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-export async function getDb(): Promise<IDBDatabase> {
+async function getDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);

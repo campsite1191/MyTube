@@ -150,7 +150,7 @@ export function attachPreferredQualityController(
   };
 }
 
-export function initPreferredVideoQuality(): void {
+function initPreferredVideoQuality(): void {
   onPlayer((player) => {
     attachPreferredQualityController(player);
   });

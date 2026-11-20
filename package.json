@@ -4,6 +4,8 @@
   "description": "Custom Cobalt APK builder with TypeScript ES2022 userscript and native Cobalt patch overlay",
   "scripts": {
     "test": "node --experimental-strip-types --test 'tests/*.test.ts'",
+    "test:coverage": "node --experimental-strip-types --experimental-test-coverage --test 'tests/*.test.ts'",
+    "check:dead-exports": "node scripts/check-dead-exports.mjs",
     "typecheck": "npm --prefix mods run typecheck",
     "build:js": "npm --prefix mods run build"
   }

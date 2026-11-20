@@ -67,7 +67,7 @@ export type ConfigChangeListener = (event: CustomEvent<ConfigChangeDetail>) => v
 
 const CONFIG_KEY = 'ytaf-configuration';
 
-export const defaultConfig: ConfigSchema = {
+const defaultConfig: ConfigSchema = {
   enableAdBlock: true,
   enableSponsorBlock: true,
   enableSponsorBlockToasts: true,

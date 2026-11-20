@@ -432,13 +432,12 @@ function injectChapters(r: Record<string, unknown>): void {
   const chapterData = buildChaptersMarkerEntity(r);
   if (!chapterData) return;
 
-  const fwUpdates = isRecord(r.frameworkUpdates) ? r.frameworkUpdates : (r.frameworkUpdates = {});
-  const batchUpdate = isRecord(fwUpdates.entityBatchUpdate)
-    ? fwUpdates.entityBatchUpdate
-    : (fwUpdates.entityBatchUpdate = {});
-  const mutations: unknown[] = Array.isArray(batchUpdate.mutations)
-    ? batchUpdate.mutations
-    : (batchUpdate.mutations = []);
+  const fwUpdates: Record<string, unknown> = isRecord(r.frameworkUpdates) ? r.frameworkUpdates : {};
+  r.frameworkUpdates = fwUpdates;
+  const batchUpdate: Record<string, unknown> = isRecord(fwUpdates.entityBatchUpdate) ? fwUpdates.entityBatchUpdate : {};
+  fwUpdates.entityBatchUpdate = batchUpdate;
+  const mutations: unknown[] = Array.isArray(batchUpdate.mutations) ? batchUpdate.mutations : [];
+  batchUpdate.mutations = mutations;
   mutations.push(chapterData);
   resolveCommand({
     clickTrackingParams: null,

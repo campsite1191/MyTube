@@ -6,7 +6,7 @@ import type {
 } from '../types/yttv.ts';
 import { isRecord } from '../utils/type-guards.ts';
 
-export function getYttvServicesMap(): Map<string, unknown> | null {
+function getYttvServicesMap(): Map<string, unknown> | null {
   const yttv = window._yttv;
   if (!yttv) return null;
   for (const entry of Object.values(yttv)) {

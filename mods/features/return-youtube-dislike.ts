@@ -49,7 +49,7 @@ export function clearRydCache(): void {
   inFlight.clear();
 }
 
-export function getActiveVideoId(): string | null {
+function getActiveVideoId(): string | null {
   if (typeof location === 'undefined') return null;
   const m = (location.hash || '').match(/[?&]v=([^&]+)/);
   return m?.[1] ?? null;
@@ -63,7 +63,7 @@ function setBoundedCache<V>(cache: Map<string, V>, key: string, value: V, maxSiz
   cache.set(key, value);
 }
 
-export function prefetchRyd(videoId: string): void {
+function prefetchRyd(videoId: string): void {
   if (!videoId || rydCache.has(videoId) || inFlight.has(videoId) || typeof fetch !== 'function') return;
   inFlight.add(videoId);
   fetch(`https://returnyoutubedislikeapi.com/Votes?videoId=${encodeURIComponent(videoId)}`)

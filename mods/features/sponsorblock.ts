@@ -50,7 +50,7 @@ const SPONSORBLOCK_API_URL = 'https://sponsor.ajay.app/api';
 const REPEAT_SKIP_WINDOW_MS = 1000;
 const SCHEDULE_LOOKBACK_SECONDS = 0.3;
 
-export const SPONSORBLOCK_CATEGORIES: readonly SponsorBlockCategory[] = [
+const SPONSORBLOCK_CATEGORIES: readonly SponsorBlockCategory[] = [
   'sponsor',
   'intro',
   'outro',

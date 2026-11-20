@@ -43,7 +43,7 @@ export function showToast(title: string, subtitle: string, thumbnails?: Thumbnai
   });
 }
 
-export function Modal(
+function Modal(
   header: string | ModalTitle,
   content: unknown,
   id: string,

@@ -32,10 +32,15 @@ jobs:
       - name: Typecheck TypeScript
         run: npm run typecheck
 
+      - name: Check Dead Exports
+        run: npm run check:dead-exports
+
       - name: Lint Source Files with Biome
         run: |
           echo '{"files":{"includes":["**","!!**/tiny-sha256.js"]}}' > biome.json
-          npx --yes @biomejs/biome@2.3.8 lint --only=correctness --diagnostic-level=error \
+          npx --yes @biomejs/biome@2.3.8 lint \
+            --only=correctness --only=suspicious --only=complexity --only=performance \
+            --diagnostic-level=error \
             mods/core/config.ts \
             mods/index.ts \
             mods/core \
@@ -51,5 +56,5 @@ jobs:
           npm run build:js
           ls -lh mods/dist/userscript.js
 
-      - name: Run Regression Tests
-        run: npm test
+      - name: Run Regression & E2E Tests with Coverage
+        run: npm run test:coverage
