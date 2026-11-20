@@ -1,4 +1,4 @@
-import QuickLRU from 'quick-lru';
+import { createLruCache } from '../core/cache.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 import { readFormattedText } from '../transforms/feed-filter.ts';
@@ -37,10 +37,9 @@ const LIKE_BUTTON_SELECTOR =
 const DISLIKE_BUTTON_SELECTOR =
   'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
 
-const RYD_CACHE_MAX_SIZE = 1000;
-const rydCache = new QuickLRU<string, RydCacheEntry | null>({ maxSize: RYD_CACHE_MAX_SIZE });
+const rydCache = createLruCache<RydCacheEntry | null>();
 const inFlight = new Set<string>();
-const likeCache = new QuickLRU<string, string>({ maxSize: RYD_CACHE_MAX_SIZE });
+const likeCache = createLruCache<string>();
 let stylesInstalled = false;
 let badgeSyncPending = false;
 let watchControlsObserver: MutationObserver | null = null;

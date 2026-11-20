@@ -1,3 +1,4 @@
+import { createLruCache } from '../core/cache.ts';
 import type { ConfigChangeListener, ConfigKey } from '../core/config.ts';
 import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
@@ -230,6 +231,13 @@ export function getSuppressionDecision(
   return { suppress: false, showToast: false, newState };
 }
 
+const sponsorBlockCache = createLruCache<SponsorBlockSegment[]>();
+
+/** Clears cached SponsorBlock segment lookups under memory pressure. */
+export function clearSponsorBlockCache(): void {
+  sponsorBlockCache.clear();
+}
+
 class SponsorBlockHandler {
   readonly videoId: string;
   private video: HTMLVideoElement | null = null;
@@ -275,6 +283,13 @@ class SponsorBlockHandler {
 
   async init(): Promise<void> {
     try {
+      const cached = sponsorBlockCache.get(this.videoId);
+      if (cached !== undefined) {
+        if (cached.length === 0 || !this.active) return;
+        this.applyLoadedSegments(cached);
+        return;
+      }
+
       const videoHash = await computeSha256HexPrefix(this.videoId, 4);
       if (!this.active) return;
 
@@ -282,6 +297,10 @@ class SponsorBlockHandler {
       const resp = await fetch(`${SPONSORBLOCK_API_URL}/skipSegments/${videoHash}?categories=${categoriesParam}`, {
         signal: this.abortController.signal,
       });
+      if (resp.status === 404) {
+        sponsorBlockCache.set(this.videoId, []);
+        return;
+      }
       if (!resp.ok) return;
 
       const results = (await resp.json()) as SkipSegmentsVideoEntry[];
@@ -289,22 +308,29 @@ class SponsorBlockHandler {
 
       const entry = results.find((v) => v.videoID === this.videoId);
       if (!entry?.segments?.length) {
+        sponsorBlockCache.set(this.videoId, []);
         return;
       }
 
-      this.segments = [...entry.segments].sort((a, b) => a.segment[0] - b.segment[0]);
-      this.refreshCategoryPreferences();
-
-      onVideo((video) => {
-        if (!this.active) return;
-        this.bindVideo(video);
-        this.buildOverlay();
-        this.syncOldUiOverlayTop();
-      });
+      const sortedSegments = [...entry.segments].sort((a, b) => a.segment[0] - b.segment[0]);
+      sponsorBlockCache.set(this.videoId, sortedSegments);
+      this.applyLoadedSegments(sortedSegments);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       console.warn('[SponsorBlock] Failed to load segments:', error);
     }
+  }
+
+  private applyLoadedSegments(segments: SponsorBlockSegment[]): void {
+    this.segments = segments;
+    this.refreshCategoryPreferences();
+
+    onVideo((video) => {
+      if (!this.active) return;
+      this.bindVideo(video);
+      this.buildOverlay();
+      this.syncOldUiOverlayTop();
+    });
   }
 
   refreshCategoryPreferences(): void {

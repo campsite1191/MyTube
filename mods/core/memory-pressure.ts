@@ -1,4 +1,5 @@
 import { clearRydCache } from '../features/return-youtube-dislike.ts';
+import { clearSponsorBlockCache } from '../features/sponsorblock.ts';
 import { clearDeArrowCache } from '../transforms/thumbnails.ts';
 import { clearGuideCache } from './innertube-calls.ts';
 
@@ -9,6 +10,7 @@ export function setupMemoryPressureListener(): void {
       console.warn('Memory pressure detected, clearing caches...');
       clearGuideCache();
       clearRydCache();
+      clearSponsorBlockCache();
       clearDeArrowCache();
     });
   }

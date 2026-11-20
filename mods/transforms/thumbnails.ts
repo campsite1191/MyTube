@@ -1,5 +1,5 @@
 import pLimit from 'p-limit';
-import QuickLRU from 'quick-lru';
+import { createLruCache } from '../core/cache.ts';
 import { configRead } from '../core/config.ts';
 import type { FeedItem, FormattedText, Thumbnail } from '../types/innertube.ts';
 
@@ -219,12 +219,11 @@ export function applyDeArrowBrandingToItem(
   }
 }
 
-const DEARROW_CACHE_MAX_SIZE = 2000;
 const MAX_DEARROW_CONCURRENCY = 6;
 const EMPTY_DEARROW_BRANDING: DeArrowBrandingResponse = { titles: [], thumbnails: [] };
 
 const deArrowLimit = pLimit(MAX_DEARROW_CONCURRENCY);
-const deArrowCache = new QuickLRU<string, DeArrowBrandingResponse>({ maxSize: DEARROW_CACHE_MAX_SIZE });
+const deArrowCache = createLruCache<DeArrowBrandingResponse>();
 const inFlightDeArrow = new Map<string, Promise<DeArrowBrandingResponse | null>>();
 let activeNavigationController: AbortController | null =
   typeof AbortController === 'function' ? new AbortController() : null;
