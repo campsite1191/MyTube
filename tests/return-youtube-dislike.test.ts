@@ -99,11 +99,17 @@ describe('return-youtube-dislike', () => {
       observe(): void {}
       disconnect(): void {}
     };
-    globals.fetch = (async () =>
-      new Response(JSON.stringify({ likes: 12500, dislikes: 420 }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      })) as typeof fetch;
+    let fetchSettled: Promise<void> | undefined;
+    globals.fetch = (() => {
+      const respPromise = Promise.resolve(
+        new Response(JSON.stringify({ likes: 12500, dislikes: 420 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      );
+      fetchSettled = respPromise.then(() => undefined);
+      return respPromise;
+    }) as typeof fetch;
 
     globals.location = { hash: '#/watch?v=testVid123' };
     globals.window = {
@@ -125,11 +131,18 @@ describe('return-youtube-dislike', () => {
     };
 
     installReturnYouTubeDislike();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await fetchSettled;
+    // Allow microtasks from response.json() and cache population to flush.
+    await new Promise((resolve) => setTimeout(resolve, 25));
 
     // Simulate lazy OSD mount after RYD API response already resolved.
     controlsMounted = true;
     observerCb?.();
+
+    const deadline = Date.now() + 2000;
+    while ((likeButton.dataset.ttCount !== '12.5K' || dislikeButton.dataset.ttCount !== '420') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
 
     assert.equal(likeButton.dataset.ttCount, '12.5K');
     assert.equal(dislikeButton.dataset.ttCount, '420');

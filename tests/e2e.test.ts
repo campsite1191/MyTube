@@ -168,6 +168,16 @@ function createMockElement(tagName: string, docRef: { root: MockElement | null }
   return el;
 }
 
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 describe('End-to-end userscript bundle lifecycle', () => {
   test('executes bundled userscript from document-start through Home feeds, Settings, Watch overlays, and cleanup', async (t) => {
     const activeTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -475,7 +485,11 @@ describe('End-to-end userscript bundle lifecycle', () => {
     fakeDocument.readyState = 'complete';
     (fakeDocument.dispatchEvent as (e: { type: string }) => void)({ type: 'DOMContentLoaded' });
 
-    await new Promise((r) => setTimeout(r, 30));
+    await waitFor(
+      () =>
+        Boolean((fakeDocument.getElementById as (id: string) => MockElement | null)('custom-clock')) &&
+        headEl.children.filter((c) => c.tagName === 'LINK' && c.rel === 'preconnect').length === 2
+    );
 
     // Clock & preconnect hints should now be installed.
     const clockEl = (fakeDocument.getElementById as (id: string) => MockElement | null)('custom-clock');
@@ -517,7 +531,14 @@ describe('End-to-end userscript bundle lifecycle', () => {
       yttvMod: { JSON: { parse: yttvJsonParse, stringify: JSON.stringify } },
     };
     for (const obs of [...observers]) obs.cb();
-    await new Promise((r) => setTimeout(r, 40));
+    await waitFor(
+      () =>
+        flagsMap.get('ENABLE_PREVIEWS_WITH_SOUND') === true &&
+        executedActions.includes('reloadGuideAction') &&
+        resolvedCommands.some(
+          (c) => (c as { browseEndpoint?: { browseId?: string } }).browseEndpoint?.browseId === 'FEtopics'
+        )
+    );
 
     assert.equal(flagsMap.get('ENABLE_PREVIEWS_WITH_SOUND'), true);
     assert.ok(executedActions.includes('reloadGuideAction'));
@@ -601,15 +622,17 @@ describe('End-to-end userscript bundle lifecycle', () => {
     });
     // Non-string customAction must fall through cleanly rather than recursing infinitely.
     assert.doesNotThrow(() => resolveHost.instance.resolveCommand({ customAction: { action: 123 } }));
-    await new Promise((r) => setTimeout(r, 30));
     const prevIdb = (globalThis as { indexedDB?: unknown }).indexedDB;
     (globalThis as { indexedDB?: unknown }).indexedDB = fakeIdb;
     let storedConfig: { enableAdBlock?: boolean; sponsorBlockManualSkips?: string[] } | undefined;
     try {
-      storedConfig = await idbGet<{ enableAdBlock?: boolean; sponsorBlockManualSkips?: string[] }>(
-        'ytaf-configuration',
-        createStore('MyTubeDB', 'settings')
-      );
+      await waitFor(async () => {
+        storedConfig = await idbGet<{ enableAdBlock?: boolean; sponsorBlockManualSkips?: string[] }>(
+          'ytaf-configuration',
+          createStore('MyTubeDB', 'settings')
+        );
+        return storedConfig?.enableAdBlock === false && storedConfig?.sponsorBlockManualSkips?.includes('outro') === false;
+      });
     } finally {
       (globalThis as { indexedDB?: unknown }).indexedDB = prevIdb;
     }
@@ -686,7 +709,14 @@ describe('End-to-end userscript bundle lifecycle', () => {
     (fakeWindow.dispatchEvent as (e: { type: string }) => void)({ type: 'hashchange' });
     for (const obs of [...observers]) obs.cb();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(
+      () =>
+        elapsedEl.textContent === '0:30 (-1:30) / 2:00' &&
+        Boolean(clockEl.children[0]?.children[1]?.textContent.startsWith('Ends ')) &&
+        likeBtn.dataset.ttCount === '5K' &&
+        dislikeBtn.dataset.ttCount === '120' &&
+        fetchCalls.some((c) => c.url.includes('sponsor.ajay.app/api/skipSegments'))
+    );
 
     assert.equal(elapsedEl.textContent, '0:30 (-1:30) / 2:00');
     assert.ok(clockEl.querySelectorAll('div').length >= 1);
