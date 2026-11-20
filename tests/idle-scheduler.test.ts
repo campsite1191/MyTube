@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { schedulePostFirstPaint } from '../mods/core/idle-scheduler.ts';
+import { preconnectOrigins, schedulePostFirstPaint } from '../mods/core/idle-scheduler.ts';
 
 describe('schedulePostFirstPaint', () => {
   test('runs synchronously when window is unavailable (SSR / Node)', () => {
@@ -54,5 +54,40 @@ describe('schedulePostFirstPaint', () => {
         (globalThis as Record<string, unknown>).window = prevWindow;
       }
     }
+  });
+});
+
+describe('preconnectOrigins', () => {
+  test('appends unique preconnect link tags into document.head and ignores missing DOM', () => {
+    assert.doesNotThrow(() => preconnectOrigins(['https://sponsor.ajay.app'], undefined));
+
+    const appended: Array<{ rel?: string; href?: string; crossOrigin?: string }> = [];
+    const fakeDoc = {
+      head: {
+        appendChild: (node: { rel?: string; href?: string; crossOrigin?: string }) => {
+          appended.push(node);
+          return node;
+        },
+      },
+      querySelector: (selector: string) =>
+        appended.find((item) => selector === `link[rel="preconnect"][href="${item.href}"]`) ?? null,
+      createElement: () => ({}),
+    } as unknown as Document;
+
+    preconnectOrigins(
+      ['https://sponsor.ajay.app', 'https://returnyoutubedislikeapi.com', 'https://sponsor.ajay.app'],
+      fakeDoc
+    );
+    assert.equal(appended.length, 2);
+    assert.deepEqual(appended[0], {
+      rel: 'preconnect',
+      href: 'https://sponsor.ajay.app',
+      crossOrigin: 'anonymous',
+    });
+    assert.deepEqual(appended[1], {
+      rel: 'preconnect',
+      href: 'https://returnyoutubedislikeapi.com',
+      crossOrigin: 'anonymous',
+    });
   });
 });

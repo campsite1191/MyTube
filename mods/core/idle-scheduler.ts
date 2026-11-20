@@ -20,3 +20,30 @@ export function schedulePostFirstPaint(task: () => void): void {
 
   setTimeout(task, 0);
 }
+
+/**
+ * Installs idempotent `<link rel="preconnect">` hints for external addon origins
+ * after first paint so DNS/TLS setup overlaps idle time before video playback.
+ */
+export function preconnectOrigins(
+  origins: readonly string[],
+  targetDocument: Document | undefined = typeof document !== 'undefined' ? document : undefined
+): void {
+  const head = targetDocument?.head;
+  if (!targetDocument || !head) return;
+
+  for (const origin of origins) {
+    if (!origin) continue;
+    const existing =
+      typeof targetDocument.querySelector === 'function'
+        ? targetDocument.querySelector(`link[rel="preconnect"][href="${origin}"]`)
+        : null;
+    if (existing) continue;
+
+    const link = targetDocument.createElement('link');
+    link.rel = 'preconnect';
+    link.href = origin;
+    link.crossOrigin = 'anonymous';
+    head.appendChild(link);
+  }
+}

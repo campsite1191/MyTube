@@ -1,6 +1,6 @@
 import './core/trusted-types.ts';
 import { initConfig } from './core/config.ts';
-import { schedulePostFirstPaint } from './core/idle-scheduler.ts';
+import { preconnectOrigins, schedulePostFirstPaint } from './core/idle-scheduler.ts';
 import './core/innertube-interceptor.ts';
 import { setupMemoryPressureListener } from './core/memory-pressure.ts';
 import { installRemainingTime } from './features/remaining-time.ts';
@@ -23,6 +23,7 @@ import './ui/custom-guide-action.ts';
 
 void configReady.then(() => {
   schedulePostFirstPaint(() => {
+    preconnectOrigins(['https://sponsor.ajay.app', 'https://returnyoutubedislikeapi.com']);
     initClock();
     installRemainingTime();
     installRewindOnPause();

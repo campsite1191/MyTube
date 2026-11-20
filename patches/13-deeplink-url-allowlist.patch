@@ -1,0 +1,37 @@
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
+index 51c56db..289ddc4 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
+@@ -560,6 +560,32 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+     }
+   }
+ 
++  @Override
++  protected String getIntentUrlAsString(Intent intent) {
++    if (intent == null) {
++      return "";
++    }
++    Uri intentUri = intent.getData();
++    if (intentUri == null) {
++      return "";
++    }
++    String scheme = intentUri.getScheme();
++    String host = intentUri.getHost();
++    if (scheme == null || !"https".equalsIgnoreCase(scheme) || host == null) {
++      Log.w(TAG, "Blocked deep link with unsupported scheme or missing host.");
++      return "";
++    }
++    String lowerHost = host.toLowerCase(Locale.US);
++    if (!"youtube.com".equals(lowerHost)
++        && !"www.youtube.com".equals(lowerHost)
++        && !"m.youtube.com".equals(lowerHost)
++        && !"youtu.be".equals(lowerHost)) {
++      Log.w(TAG, "Blocked deep link with untrusted host.");
++      return "";
++    }
++    return intentUri.toString();
++  }
++
+   @Override
+   protected void onCreate(Bundle savedInstanceState) {
+     super.onCreate(savedInstanceState);
