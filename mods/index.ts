@@ -4,6 +4,7 @@ import { preconnectOrigins, schedulePostFirstPaint, waitForDomReady } from './co
 import './core/innertube-interceptor.ts';
 import { setupMemoryPressureListener } from './core/memory-pressure.ts';
 import { installRemainingTime } from './features/remaining-time.ts';
+import { installReturnYouTubeDislike } from './features/return-youtube-dislike.ts';
 import { installRewindOnPause } from './features/rewind-on-pause.ts';
 import { initClock } from './ui/clock.ts';
 
@@ -26,6 +27,7 @@ void Promise.all([configReady, waitForDomReady()]).then(() => {
     preconnectOrigins(['https://sponsor.ajay.app', 'https://returnyoutubedislikeapi.com']);
     initClock();
     installRemainingTime();
+    installReturnYouTubeDislike();
     installRewindOnPause();
   });
 });

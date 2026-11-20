@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { applyDislikeCountToActions, clearRydCache, processRydResponse } from '../mods/features/return-youtube-dislike.ts';
+import {
+  applyDislikeCountToActions,
+  clearRydCache,
+  installReturnYouTubeDislike,
+  processRydResponse,
+} from '../mods/features/return-youtube-dislike.ts';
 import type { TransportActionItem } from '../mods/features/return-youtube-dislike.ts';
 
 describe('return-youtube-dislike', () => {
@@ -50,5 +55,83 @@ describe('return-youtube-dislike', () => {
       })
     );
     assert.doesNotThrow(() => clearRydCache());
+  });
+
+  test('installReturnYouTubeDislike populates data-tt-count when watch controls mount lazily', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevLocation = globals.location;
+    const prevFetch = globals.fetch;
+    const prevRaf = globals.requestAnimationFrame;
+    const prevMutationObserver = globals.MutationObserver;
+
+    clearRydCache();
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevLocation === undefined) delete globals.location;
+      else globals.location = prevLocation;
+      globals.fetch = prevFetch;
+      if (prevRaf === undefined) delete globals.requestAnimationFrame;
+      else globals.requestAnimationFrame = prevRaf;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+      clearRydCache();
+    });
+
+    const likeButton = { dataset: {} as Record<string, string> };
+    const dislikeButton = { dataset: {} as Record<string, string> };
+    const watchHost = { nodeName: 'YTLR-WATCH-DEFAULT' };
+    let observerCb: (() => void) | undefined;
+    let controlsMounted = false;
+
+    globals.requestAnimationFrame = (cb: () => void) => {
+      cb();
+      return 1;
+    };
+    globals.MutationObserver = class {
+      constructor(cb: () => void) {
+        observerCb = cb;
+      }
+      observe(): void {}
+      disconnect(): void {}
+    };
+    globals.fetch = (async () =>
+      new Response(JSON.stringify({ likes: 12500, dislikes: 420 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+
+    globals.location = { hash: '#/watch?v=testVid123' };
+    globals.window = {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    globals.document = {
+      body: {},
+      documentElement: {},
+      adoptedStyleSheets: [],
+      addEventListener: () => {},
+      querySelector: (selector: string) => {
+        if (selector === 'ytlr-watch-default') return watchHost;
+        if (!controlsMounted) return null;
+        if (selector.includes('dislike-button')) return dislikeButton;
+        if (selector.includes('like-button')) return likeButton;
+        return null;
+      },
+    };
+
+    installReturnYouTubeDislike();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Simulate lazy OSD mount after RYD API response already resolved.
+    controlsMounted = true;
+    observerCb?.();
+
+    assert.equal(likeButton.dataset.ttCount, '12.5K');
+    assert.equal(dislikeButton.dataset.ttCount, '420');
   });
 });

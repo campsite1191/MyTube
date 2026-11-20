@@ -1,3 +1,4 @@
+import { onVideo } from '../core/player-observer.ts';
 import { readFormattedText } from '../transforms/feed-filter.ts';
 import type { FormattedText, PlayerResponse } from '../types/innertube.ts';
 import { formatCompactCount } from '../utils/feed-helpers.ts';
@@ -29,10 +30,17 @@ export interface TransportActionItem {
   };
 }
 
+const LIKE_BUTTON_SELECTOR = 'ytlr-watch-default yt-button-container[idomkey="like-button"], ytlr-watch-default [idomkey="like-button"]';
+const DISLIKE_BUTTON_SELECTOR = 'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
+
 const rydCache = new Map<string, RydCacheEntry>();
 const inFlight = new Set<string>();
 const likeCache = new Map<string, string>();
 let stylesInstalled = false;
+let badgeSyncPending = false;
+let watchControlsObserver: MutationObserver | null = null;
+let observedWatchHost: Element | null = null;
+let rydInstalled = false;
 
 /** Clears cached RYD and like-count lookup entries to free memory under pressure. */
 export function clearRydCache(): void {
@@ -101,35 +109,33 @@ function isDislikeAction(item: unknown): item is TransportActionItem {
   return /DISLIKE/i.test(String(icon));
 }
 
+function updateButtonCountAttr(selector: string, count: string): void {
+  const el = document.querySelector<HTMLElement>(selector);
+  if (!el) return;
+  if (count) {
+    if (el.dataset.ttCount !== count) el.dataset.ttCount = count;
+  } else if ('ttCount' in el.dataset) {
+    delete el.dataset.ttCount;
+  }
+}
+
 function syncCountBadges(): void {
+  badgeSyncPending = false;
   if (typeof document === 'undefined') return;
   const activeId = getActiveVideoId();
   if (!activeId) return;
+  installCountBadgeStyles();
   const entry = rydCache.get(activeId);
   const likeCount = likeCache.get(activeId) || (entry && entry.likes !== null ? formatCompactCount(entry.likes) : '');
   const dislikeCount = entry ? formatCompactCount(entry.dislikes) : '';
 
-  const likeEl = document.querySelector<HTMLElement>('ytlr-watch-default yt-button-container[idomkey="like-button"]');
-  if (likeEl) {
-    if (likeCount) {
-      if (likeEl.dataset.ttCount !== likeCount) likeEl.dataset.ttCount = likeCount;
-    } else if ('ttCount' in likeEl.dataset) {
-      delete likeEl.dataset.ttCount;
-    }
-  }
-
-  const dislikeEl = document.querySelector<HTMLElement>('ytlr-watch-default yt-button-container[idomkey="dislike-button"]');
-  if (dislikeEl) {
-    if (dislikeCount) {
-      if (dislikeEl.dataset.ttCount !== dislikeCount) dislikeEl.dataset.ttCount = dislikeCount;
-    } else if ('ttCount' in dislikeEl.dataset) {
-      delete dislikeEl.dataset.ttCount;
-    }
-  }
+  updateButtonCountAttr(LIKE_BUTTON_SELECTOR, likeCount);
+  updateButtonCountAttr(DISLIKE_BUTTON_SELECTOR, dislikeCount);
 }
 
 function scheduleBadgeSync(): void {
-  if (typeof document === 'undefined') return;
+  if (typeof document === 'undefined' || badgeSyncPending) return;
+  badgeSyncPending = true;
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(syncCountBadges);
   else setTimeout(syncCountBadges, 0);
 }
@@ -140,11 +146,13 @@ function installCountBadgeStyles(): void {
   try {
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(`
-      ytlr-watch-default yt-button-container[data-tt-count] {
+      ytlr-watch-default [idomkey="like-button"][data-tt-count],
+      ytlr-watch-default [idomkey="dislike-button"][data-tt-count] {
         position: relative !important;
         overflow: visible !important;
       }
-      ytlr-watch-default yt-button-container[data-tt-count]::after {
+      ytlr-watch-default [idomkey="like-button"][data-tt-count]::after,
+      ytlr-watch-default [idomkey="dislike-button"][data-tt-count]::after {
         content: attr(data-tt-count);
         position: absolute;
         top: 100%;
@@ -160,10 +168,6 @@ function installCountBadgeStyles(): void {
         color: #f1f1f1;
         white-space: nowrap;
         pointer-events: none;
-      }
-      ytlr-watch-default yt-button-container[data-tt-count]:focus::after,
-      ytlr-watch-default yt-button-container[data-tt-count].zylon-focus::after {
-        display: none;
       }
     `);
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
@@ -219,13 +223,54 @@ export function applyDislikeCountToActions<T>(actions: T[], videoId: string | nu
   return actions;
 }
 
+function syncWatchObserver(): void {
+  if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+  const activeId = getActiveVideoId();
+  if (!activeId) {
+    watchControlsObserver?.disconnect();
+    observedWatchHost = null;
+    return;
+  }
+
+  prefetchRyd(activeId);
+  const watchHost = document.querySelector('ytlr-watch-default');
+  if (watchHost && watchHost !== observedWatchHost) {
+    watchControlsObserver?.disconnect();
+    observedWatchHost = watchHost;
+    watchControlsObserver = new MutationObserver(() => {
+      scheduleBadgeSync();
+    });
+    watchControlsObserver.observe(watchHost, { childList: true, subtree: true });
+  }
+  scheduleBadgeSync();
+}
+
+/**
+ * Installs listeners and a watch-scoped observer so like/dislike counts render
+ * whenever player transport controls mount or the watched video changes.
+ */
+export function installReturnYouTubeDislike(): void {
+  if (rydInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
+  rydInstalled = true;
+  installCountBadgeStyles();
+  window.addEventListener('hashchange', syncWatchObserver);
+  onVideo(() => {
+    syncWatchObserver();
+  });
+  syncWatchObserver();
+}
+
 /**
  * Extracts video IDs and transport controls from InnerTube responses to populate RYD counts.
  */
 export function processRydResponse(r: PlayerResponse | Record<string, unknown> | null | undefined): void {
   if (!r || typeof r !== 'object') return;
   const obj = r as Record<string, unknown>;
-  const transportControls = obj.transportControls as { transportControlsRenderer?: Record<string, unknown> } | undefined;
+  const overlayRenderer = (obj.playerOverlays as { playerOverlayRenderer?: Record<string, unknown> } | undefined)
+    ?.playerOverlayRenderer;
+  const transportControls = (obj.transportControls ?? overlayRenderer?.transportControls) as
+    | { transportControlsRenderer?: Record<string, unknown> }
+    | undefined;
   const tc = transportControls?.transportControlsRenderer;
   const videoDetails = obj.videoDetails as { videoId?: string } | undefined;
   const playerResponse = obj.playerResponse as { videoDetails?: { videoId?: string } } | undefined;
