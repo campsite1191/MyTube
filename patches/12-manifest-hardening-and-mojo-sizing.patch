@@ -42,15 +42,16 @@ index 52b5e4b..e0f6758 100644
      <!-- This is needed when targeting API 28+ to use foreground services -->
      <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
      <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-@@ -56,6 +51,7 @@
+@@ -56,6 +51,8 @@
              android:banner="@drawable/app_banner"
              android:zygotePreloadName="org.chromium.content_public.app.ZygotePreload"
              android:allowBackup="false"
++            android:extractNativeLibs="false"
 +            android:usesCleartextTraffic="false"
              android:debuggable="{{ debuggable }}"
              android:enableOnBackInvokedCallback="true"
              android:label="{% block application_label %}YouTube{% endblock %}">
-@@ -73,10 +69,6 @@
+@@ -73,10 +70,6 @@
              <meta-data android:name="cobalt.APP_URL" android:value="https://www.youtube.com/tv"/>
              <meta-data android:name="cobalt.ENABLE_SPLASH_SCREEN" android:value="true"/>
              <meta-data android:name="cobalt.EVERGREEN_LITE" android:value="false"/>
@@ -61,7 +62,7 @@ index 52b5e4b..e0f6758 100644
              <meta-data android:name="android.app.lib_name" android:value="cobalt"/>
              <intent-filter>
                <action android:name="android.intent.action.MAIN"/>
-@@ -89,7 +81,6 @@
+@@ -89,7 +82,6 @@
                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH"/>
                <category android:name="android.intent.category.DEFAULT"/>
                <category android:name="android.intent.category.BROWSABLE"/>
@@ -69,7 +70,7 @@ index 52b5e4b..e0f6758 100644
                <data android:scheme="https"/>
                <data android:host="youtube.com"/>
                <data android:host="www.youtube.com"/>
-@@ -140,7 +131,8 @@
+@@ -140,7 +132,8 @@
                     android:value="org.chromium.content.browser.SmartClipProvider" />
  
          <service android:name="org.chromium.content_shell_apk.ChildProcessLauncherTestHelperService"
