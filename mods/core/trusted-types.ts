@@ -3,11 +3,7 @@
 // which would conflict if YouTube TV registers its own default policy.
 try {
   let cachedNonce = '';
-  type CreateElementFn = (
-    this: Document,
-    tagName: string,
-    options?: ElementCreationOptions
-  ) => HTMLElement;
+  type CreateElementFn = (this: Document, tagName: string, options?: ElementCreationOptions) => HTMLElement;
   const originalCreateElement = Document.prototype.createElement as CreateElementFn;
   Document.prototype.createElement = function (
     this: Document,

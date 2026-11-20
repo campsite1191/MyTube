@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-
+import type { SponsorBlockSegment } from '../mods/features/sponsorblock.ts';
 import {
   BAR_TYPES,
   computeSegmentBarGeometry,
@@ -12,7 +12,6 @@ import {
   getEnabledSkipCategories,
   getSuppressionDecision,
 } from '../mods/features/sponsorblock.ts';
-import type { SponsorBlockSegment } from '../mods/features/sponsorblock.ts';
 
 describe('computeSha256HexPrefix', () => {
   test('computes native WebCrypto SHA-256 hex prefixes for SponsorBlock API lookup', async () => {
@@ -43,7 +42,10 @@ describe('getEnabledSkipCategories', () => {
     const enabledSet = new Set(['enableSponsorBlockSponsor', 'enableSponsorBlockOutro', 'enableSponsorBlockFiller']);
     const categories = getEnabledSkipCategories((key) => enabledSet.has(key));
     assert.deepEqual(categories, ['sponsor', 'outro', 'filler']);
-    assert.deepEqual(getEnabledSkipCategories(() => false), []);
+    assert.deepEqual(
+      getEnabledSkipCategories(() => false),
+      []
+    );
   });
 });
 
@@ -90,7 +92,7 @@ describe('computeSegmentBarGeometry', () => {
 describe('getSuppressionDecision', () => {
   test('suppresses rapid repeat skips within 1 second and shows toast once', () => {
     let state = { count: 1, firstSkipped: 1000, lastSkipped: 1000, hasShownToast: false };
-    
+
     const d1 = getSuppressionDecision(state, 1200, 1000);
     assert.deepEqual({ suppress: d1.suppress, showToast: d1.showToast }, { suppress: true, showToast: true });
     state = d1.newState;

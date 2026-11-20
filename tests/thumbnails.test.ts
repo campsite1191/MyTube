@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-
+import type { DeArrowBrandingResponse } from '../mods/transforms/thumbnails.ts';
 import {
   applyDeArrowBranding,
   applyDeArrowBrandingToItem,
@@ -11,7 +11,6 @@ import {
   upgradeFeedItemThumbnails,
   upgradeFeedThumbnails,
 } from '../mods/transforms/thumbnails.ts';
-import type { DeArrowBrandingResponse } from '../mods/transforms/thumbnails.ts';
 import type { FeedItem, LockupViewModel, Thumbnail, TileRenderer } from '../mods/types/innertube.ts';
 
 function createTileFeedItem(overrides: Partial<TileRenderer> = {}): {
@@ -71,13 +70,12 @@ describe('extractVideoIdForThumbnail', () => {
   test('resolves video IDs across tile, lockup, fallback paths, and richItemRenderer wrappers', () => {
     assert.equal(extractVideoIdForThumbnail(createTileFeedItem().entry), 'vid1');
     assert.equal(
-      extractVideoIdForThumbnail(createTileFeedItem({ style: undefined, contentType: 'TILE_CONTENT_TYPE_VIDEO' }).entry),
+      extractVideoIdForThumbnail(
+        createTileFeedItem({ style: undefined, contentType: 'TILE_CONTENT_TYPE_VIDEO' }).entry
+      ),
       'vid1'
     );
-    assert.equal(
-      extractVideoIdForThumbnail(createTileFeedItem({ onSelectCommand: {} }).entry),
-      'tile-fallback-id'
-    );
+    assert.equal(extractVideoIdForThumbnail(createTileFeedItem({ onSelectCommand: {} }).entry), 'tile-fallback-id');
     assert.equal(extractVideoIdForThumbnail(createLockupFeedItem().entry), 'lockup-vid-1');
     assert.equal(
       extractVideoIdForThumbnail(
@@ -90,10 +88,7 @@ describe('extractVideoIdForThumbnail', () => {
       ),
       'tap-vid-2'
     );
-    assert.equal(
-      extractVideoIdForThumbnail({ richItemRenderer: { content: createTileFeedItem().entry } }),
-      'vid1'
-    );
+    assert.equal(extractVideoIdForThumbnail({ richItemRenderer: { content: createTileFeedItem().entry } }), 'vid1');
     assert.equal(
       extractVideoIdForThumbnail({ richItemRenderer: { content: createLockupFeedItem().entry } }),
       'lockup-vid-1'
@@ -105,12 +100,26 @@ describe('extractVideoIdForThumbnail', () => {
     assert.equal(extractVideoIdForThumbnail(undefined), null);
     assert.equal(extractVideoIdForThumbnail({}), null);
     assert.equal(extractVideoIdForThumbnail(createTileFeedItem({ style: 'TILE_STYLE_YTLR_SHORTS' }).entry), null);
-    assert.equal(extractVideoIdForThumbnail(createTileFeedItem({ contentType: 'TILE_CONTENT_TYPE_SHORTS' }).entry), null);
-    assert.equal(extractVideoIdForThumbnail(createTileFeedItem({ contentType: 'TILE_CONTENT_TYPE_CHANNEL' }).entry), null);
-    assert.equal(extractVideoIdForThumbnail(createTileFeedItem({ contentType: 'TILE_CONTENT_TYPE_PLAYLIST' }).entry), null);
-    assert.equal(extractVideoIdForThumbnail(createTileFeedItem({ contentType: 'TILE_CONTENT_TYPE_VIDEO_AD' }).entry), null);
     assert.equal(
-      extractVideoIdForThumbnail(createTileFeedItem({ onSelectCommand: { reelWatchEndpoint: { videoId: 's1' } } }).entry),
+      extractVideoIdForThumbnail(createTileFeedItem({ contentType: 'TILE_CONTENT_TYPE_SHORTS' }).entry),
+      null
+    );
+    assert.equal(
+      extractVideoIdForThumbnail(createTileFeedItem({ contentType: 'TILE_CONTENT_TYPE_CHANNEL' }).entry),
+      null
+    );
+    assert.equal(
+      extractVideoIdForThumbnail(createTileFeedItem({ contentType: 'TILE_CONTENT_TYPE_PLAYLIST' }).entry),
+      null
+    );
+    assert.equal(
+      extractVideoIdForThumbnail(createTileFeedItem({ contentType: 'TILE_CONTENT_TYPE_VIDEO_AD' }).entry),
+      null
+    );
+    assert.equal(
+      extractVideoIdForThumbnail(
+        createTileFeedItem({ onSelectCommand: { reelWatchEndpoint: { videoId: 's1' } } }).entry
+      ),
       null
     );
     assert.equal(
@@ -248,7 +257,12 @@ describe('DeArrow branding helpers', () => {
 
     try {
       await applyDeArrowBranding(
-        [tileCase.entry, { richItemRenderer: { content: richLockupCase.entry } }, channelCase.entry, failingVideoCase.entry],
+        [
+          tileCase.entry,
+          { richItemRenderer: { content: richLockupCase.entry } },
+          channelCase.entry,
+          failingVideoCase.entry,
+        ],
         { enableDeArrow: true, enableDeArrowThumbnails: true }
       );
 
@@ -268,14 +282,8 @@ describe('DeArrow branding helpers', () => {
       'https://sponsor.ajay.app/api/branding?videoID=fail-vid',
     ]);
     assert.equal(tileCase.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Fetched Clean Title');
-    assert.equal(
-      richLockupCase.lockup.metadata?.lockupMetadataViewModel?.title?.content,
-      'Fetched Clean Title'
-    );
-    assert.equal(
-      failingVideoCase.tile.metadata?.tileMetadataRenderer?.title?.simpleText,
-      'Original Tile Title'
-    );
+    assert.equal(richLockupCase.lockup.metadata?.lockupMetadataViewModel?.title?.content, 'Fetched Clean Title');
+    assert.equal(failingVideoCase.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Original Tile Title');
   });
 });
 

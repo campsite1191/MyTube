@@ -11,6 +11,7 @@ on:
       - 'package.json'
       - 'tsconfig.json'
       - 'knip.json'
+      - 'biome.json'
       - '.github/workflows/lint_js.yml'
 
 jobs:
@@ -36,20 +37,8 @@ jobs:
       - name: Check Dead Files, Exports & Types with Knip
         run: npm run lint:knip
 
-      - name: Lint Source Files with Biome
-        run: |
-          npx --yes @biomejs/biome@2.3.8 lint \
-            --only=correctness --only=suspicious --only=complexity --only=performance \
-            --diagnostic-level=error \
-            mods/index.ts \
-            mods/core \
-            mods/interceptors \
-            mods/transforms \
-            mods/types \
-            mods/features \
-            mods/ui \
-            mods/utils \
-            tests
+      - name: Lint & Format Check with Biome
+        run: npx --yes @biomejs/biome@2.3.8 check --diagnostic-level=warn
 
       - name: Build Userscript Bundle
         run: |

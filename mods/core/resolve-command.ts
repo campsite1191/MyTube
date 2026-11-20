@@ -1,22 +1,16 @@
-import { configRead, configWrite } from './config.ts';
-import type { ConfigKey, ConfigSchema, SidebarContentItem } from './config.ts';
-import { t } from './i18n.ts';
-import { findResolveCommandHost } from './yttv-bridge.ts';
-import { readFormattedText } from '../transforms/feed-filter.ts';
 import { patchAutoTranslateCommand } from '../features/more-subtitles.ts';
+import { readFormattedText } from '../transforms/feed-filter.ts';
 import type { FormattedText, HiddenChannel, InnertubeCommand } from '../types/innertube.ts';
 import modernUI, { optionShow } from '../ui/settings.ts';
 import showGuideSettings from '../ui/sidebar-modification.ts';
 import { speedSettings } from '../ui/speed-ui.ts';
-import {
-  buttonItem,
-  overlayMessageRenderer,
-  overlayPanelItemListRenderer,
-  showModal,
-  showToast,
-} from '../ui/yt-ui.ts';
-import { getFeedbackPanelTokens, requestNextAndNavigateChannel, sendFeedbackToken } from './innertube-calls.ts';
+import { buttonItem, overlayMessageRenderer, overlayPanelItemListRenderer, showModal, showToast } from '../ui/yt-ui.ts';
 import { isRecord } from '../utils/type-guards.ts';
+import type { ConfigKey, ConfigSchema, SidebarContentItem } from './config.ts';
+import { configRead, configWrite } from './config.ts';
+import { t } from './i18n.ts';
+import { getFeedbackPanelTokens, requestNextAndNavigateChannel, sendFeedbackToken } from './innertube-calls.ts';
+import { findResolveCommandHost } from './yttv-bridge.ts';
 
 export default async function resolveCommand(cmd: unknown, arg?: unknown): Promise<unknown> {
   const host = findResolveCommandHost();
@@ -52,6 +46,7 @@ function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
       const lang = typeof rawSetting.stringValue === 'string' ? rawSetting.stringValue : '';
       const date = new Date();
       date.setFullYear(date.getFullYear() + 10);
+      // biome-ignore lint/suspicious/noDocumentCookie: YouTube TV reads PREF cookie synchronously before RELOAD_PAGE.
       document.cookie = `PREF=hl=${lang}; expires=${date.toUTCString()};`;
       resolveCommand({ signalAction: { signal: 'RELOAD_PAGE' } });
       return true;
@@ -238,11 +233,9 @@ async function customAction(action: string, parameters?: unknown): Promise<void>
     case 'OPEN_HIDDEN_CHANNELS': {
       const list = configRead('hiddenChannels');
       const btns: unknown[] = list.map((ch) =>
-        buttonItem(
-          { title: ch.name || ch.id || '', subtitle: 'Select to unhide' },
-          { icon: 'DELETE' },
-          [{ customAction: { action: 'UNHIDE_CHANNEL', parameters: ch } }]
-        )
+        buttonItem({ title: ch.name || ch.id || '', subtitle: 'Select to unhide' }, { icon: 'DELETE' }, [
+          { customAction: { action: 'UNHIDE_CHANNEL', parameters: ch } },
+        ])
       );
       if (btns.length > 0) {
         btns.push(
@@ -338,14 +331,10 @@ async function markFeedback(
     const buttons = reasons
       .filter((reason): reason is Record<string, unknown> => isRecord(reason))
       .map((reason) =>
-        buttonItem(
-          { title: readFormattedText(reason.title as FormattedText | string | undefined) },
-          null,
-          [
-            { signalAction: { signal: 'POPUP_BACK' } },
-            { customAction: { action: 'FEEDBACK_REASON', parameters: { token: reason.token } } },
-          ]
-        )
+        buttonItem({ title: readFormattedText(reason.title as FormattedText | string | undefined) }, null, [
+          { signalAction: { signal: 'POPUP_BACK' } },
+          { customAction: { action: 'FEEDBACK_REASON', parameters: { token: reason.token } } },
+        ])
       );
 
     showModal(

@@ -161,9 +161,7 @@ export function extractItemChannelName(item: FeedItem | null | undefined): strin
   return firstNonEmptyText(parts, (entry) => entry.text);
 }
 
-export function getExistingMenuItemLists(
-  item: FeedItem | null | undefined
-): Array<Array<Record<string, unknown>>> {
+export function getExistingMenuItemLists(item: FeedItem | null | undefined): Array<Array<Record<string, unknown>>> {
   const target = unwrapFeedItem(item);
   if (!target) return [];
 
@@ -219,11 +217,7 @@ export function extractItemChannelInfo(item: FeedItem | null | undefined): Hidde
 
   const metaVm: unknown = target.lockupViewModel?.metadata?.lockupMetadataViewModel;
   if (isRecord(metaVm)) {
-    const avatarContainer = isRecord(metaVm.image)
-      ? metaVm.image
-      : isRecord(metaVm.avatar)
-        ? metaVm.avatar
-        : undefined;
+    const avatarContainer = isRecord(metaVm.image) ? metaVm.image : isRecord(metaVm.avatar) ? metaVm.avatar : undefined;
     const decoratedAvatar = isRecord(avatarContainer?.decoratedAvatarViewModel)
       ? avatarContainer.decoratedAvatarViewModel
       : undefined;
@@ -357,11 +351,7 @@ function matchBadgeNode(node: unknown, depth = 0): boolean {
 
   const record = node as Record<string, unknown>;
   const rawStyle =
-    typeof record.style === 'string'
-      ? record.style
-      : typeof record.badgeStyle === 'string'
-        ? record.badgeStyle
-        : '';
+    typeof record.style === 'string' ? record.style : typeof record.badgeStyle === 'string' ? record.badgeStyle : '';
 
   if (isBlockedBadge(rawStyle, readBadgeNodeText(record))) {
     return true;
@@ -436,10 +426,7 @@ export function hasPaidOfferEndpoint(item: FeedItem | null | undefined): boolean
   return result;
 }
 
-export function isChannelHidden(
-  item: FeedItem | null | undefined,
-  hiddenChannels?: readonly HiddenChannel[]
-): boolean {
+export function isChannelHidden(item: FeedItem | null | undefined, hiddenChannels?: readonly HiddenChannel[]): boolean {
   const configuredHidden = hiddenChannels ?? configRead('hiddenChannels');
   if (!Array.isArray(configuredHidden) || configuredHidden.length === 0) return false;
 
@@ -605,14 +592,14 @@ export function filterShelvesInPlaceSync(shelves: FeedItem[], options: FeedFilte
 
 export async function filterFeedItems(items: FeedItem[], options: FeedFilterOptions = {}): Promise<FeedItem[]> {
   if (!Array.isArray(items)) return items;
-  
+
   const filtered: FeedItem[] = [];
   const BATCH_SIZE = 20;
 
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = items.slice(i, i + BATCH_SIZE);
     filtered.push(...batch.filter((item) => !shouldHideFeedItem(item, options)));
-    
+
     // Yield to the main thread
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
@@ -621,7 +608,7 @@ export async function filterFeedItems(items: FeedItem[], options: FeedFilterOpti
 
 export async function filterShelvesInPlace(shelves: FeedItem[], options: FeedFilterOptions = {}): Promise<FeedItem[]> {
   if (!Array.isArray(shelves)) return shelves;
-  
+
   let writeIndex = 0;
   const BATCH_SIZE = 20;
 
@@ -637,8 +624,7 @@ export async function filterShelvesInPlace(shelves: FeedItem[], options: FeedFil
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
-  
+
   shelves.length = writeIndex;
   return shelves;
 }
-

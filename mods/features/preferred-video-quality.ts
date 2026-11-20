@@ -1,5 +1,5 @@
-import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
 import type { ConfigChangeListener } from '../core/config.ts';
+import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
 import { onPlayer } from '../core/player-observer.ts';
 import type { YtPlayerStateObject, YtQualityData, YtVideoData } from '../types/yttv.ts';
 

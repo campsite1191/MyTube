@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import {
-  preconnectOrigins,
-  schedulePostFirstPaint,
-  waitForDomReady,
-} from '../mods/core/idle-scheduler.ts';
+import { preconnectOrigins, schedulePostFirstPaint, waitForDomReady } from '../mods/core/idle-scheduler.ts';
 
 describe('schedulePostFirstPaint', () => {
   test('runs synchronously when window is unavailable (SSR / Node)', () => {

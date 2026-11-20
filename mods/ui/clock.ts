@@ -128,7 +128,15 @@ function pickActiveVideo(): HTMLVideoElement | null {
   return fallback;
 }
 
-const VIDEO_SYNC_EVENTS = ['loadedmetadata', 'play', 'pause', 'seeked', 'ratechange', 'durationchange', 'ended'] as const;
+const VIDEO_SYNC_EVENTS = [
+  'loadedmetadata',
+  'play',
+  'pause',
+  'seeked',
+  'ratechange',
+  'durationchange',
+  'ended',
+] as const;
 
 function syncVideoListeners(video: HTMLVideoElement | null, onUpdate: () => void): void {
   if (listenedVideo === video) return;

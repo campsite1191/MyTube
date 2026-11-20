@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-
+import type { TransportActionItem } from '../mods/features/return-youtube-dislike.ts';
 import {
   applyDislikeCountToActions,
   clearRydCache,
   installReturnYouTubeDislike,
   processRydResponse,
 } from '../mods/features/return-youtube-dislike.ts';
-import type { TransportActionItem } from '../mods/features/return-youtube-dislike.ts';
 
 describe('return-youtube-dislike', () => {
   test('applies like count label onto like action button without throwing in Node', (t) => {
@@ -140,7 +139,10 @@ describe('return-youtube-dislike', () => {
     observerCb?.();
 
     const deadline = Date.now() + 2000;
-    while ((likeButton.dataset.ttCount !== '12.5K' || dislikeButton.dataset.ttCount !== '420') && Date.now() < deadline) {
+    while (
+      (likeButton.dataset.ttCount !== '12.5K' || dislikeButton.dataset.ttCount !== '420') &&
+      Date.now() < deadline
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 

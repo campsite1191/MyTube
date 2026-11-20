@@ -56,7 +56,10 @@ describe('chapters', () => {
     assert.ok(entity);
     assert.equal(entity.entityKey, 'vid1-key');
     const markersList = entity.payload.macroMarkersListEntity.markersList as {
-      markers: Array<{ durationMillis: string; thumbnailDetails: { thumbnails: Array<{ url: string; width: number; height: number }> } }>;
+      markers: Array<{
+        durationMillis: string;
+        thumbnailDetails: { thumbnails: Array<{ url: string; width: number; height: number }> };
+      }>;
     };
     assert.equal(markersList.markers.length, 2);
     assert.equal(markersList.markers[0]?.durationMillis, '60000');

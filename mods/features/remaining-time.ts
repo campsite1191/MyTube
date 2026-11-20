@@ -58,7 +58,9 @@ export function formatRemainingLabel(
   const elapsedSec = fallbackDur ? null : parseClockSeconds(m[1]);
   const effectiveDuration = durationOverrideSec ?? Math.floor(durationSec);
   const secondsLeft =
-    elapsedSec !== null ? Math.max(0, effectiveDuration - elapsedSec) : Math.max(0, effectiveDuration - Math.floor(currentTimeSec));
+    elapsedSec !== null
+      ? Math.max(0, effectiveDuration - elapsedSec)
+      : Math.max(0, effectiveDuration - Math.floor(currentTimeSec));
   const rem = `(-${formatClockTime(secondsLeft)})`;
   const suffix = m[2];
   if (suffix && /\S/.test(suffix)) {
@@ -180,7 +182,13 @@ function unlisten(el: HTMLVideoElement | null): void {
 }
 
 function liveVideo(): HTMLVideoElement | null {
-  if (video?.isConnected && Number.isFinite(video.duration) && video.duration > 0 && !video.paused && video.readyState > 0) {
+  if (
+    video?.isConnected &&
+    Number.isFinite(video.duration) &&
+    video.duration > 0 &&
+    !video.paused &&
+    video.readyState > 0
+  ) {
     return video;
   }
   const found = pickVideo();

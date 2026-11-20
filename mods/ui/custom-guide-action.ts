@@ -1,5 +1,5 @@
-import { configChangeEmitter, configRead, configWrite } from '../core/config.ts';
 import type { SidebarContentItem } from '../core/config.ts';
+import { configChangeEmitter, configRead, configWrite } from '../core/config.ts';
 import { clearGuideCache } from '../core/innertube-calls.ts';
 import { getCommandExecutor } from '../core/yttv-bridge.ts';
 import { isRecord } from '../utils/type-guards.ts';
@@ -60,11 +60,7 @@ export function transformGuideResponse(r: unknown): unknown {
     for (const orderItem of currentOrder) {
       if (typeof orderItem === 'object' && orderItem !== null) {
         copiedItems.push(
-          GuideEntryRenderer(
-            orderItem.title,
-            { browseEndpoint: { browseId: orderItem.browseId } },
-            'PERSON'
-          )
+          GuideEntryRenderer(orderItem.title, { browseEndpoint: { browseId: orderItem.browseId } }, 'PERSON')
         );
       }
     }
@@ -107,10 +103,7 @@ export function transformGuideResponse(r: unknown): unknown {
       const item = isRecord(entry) ? (entry.guideEntryRenderer as GuideEntryRendererData | undefined) : undefined;
       if (!item) continue;
       const itemId = getGuideItemId(item);
-      if (
-        (disabledSet.size > 0 && itemId && disabledSet.has(itemId)) ||
-        (disableChannelsOnSidebar && item.thumbnail)
-      ) {
+      if ((disabledSet.size > 0 && itemId && disabledSet.has(itemId)) || (disableChannelsOnSidebar && item.thumbnail)) {
         section.items.splice(j, 1);
       }
     }

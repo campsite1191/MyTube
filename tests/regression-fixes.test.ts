@@ -113,10 +113,10 @@ describe('regression fixes', () => {
     const origFetch = globalThis.fetch;
     globalThis.fetch = (async (): Promise<Response> => {
       fetchCalls++;
-      return new Response(
-        JSON.stringify({ titles: [{ title: 'Cached Title', votes: 10 }], thumbnails: [] }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ titles: [{ title: 'Cached Title', votes: 10 }], thumbnails: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }) as typeof globalThis.fetch;
 
     const makeItem = (id: string) => ({

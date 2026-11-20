@@ -72,10 +72,7 @@ export function hasAutoTranslateLanguage(
   });
 }
 
-export function createAutoTranslateLanguageOption(
-  languageCode: string,
-  languageName: string
-): Record<string, unknown> {
+export function createAutoTranslateLanguageOption(languageCode: string, languageName: string): Record<string, unknown> {
   return {
     compactLinkRenderer: {
       title: { simpleText: languageName },
@@ -182,10 +179,7 @@ function getAutoTranslateMenuItems(command: unknown): Record<string, unknown>[] 
   return Array.isArray(items) ? (items as Record<string, unknown>[]) : null;
 }
 
-export function patchAutoTranslateCommand(
-  command: unknown,
-  enabled = configRead('enableShowUserLanguage')
-): boolean {
+export function patchAutoTranslateCommand(command: unknown, enabled = configRead('enableShowUserLanguage')): boolean {
   if (!enabled) return false;
   const items = getAutoTranslateMenuItems(command);
   if (!items) return false;

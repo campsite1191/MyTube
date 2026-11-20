@@ -1,7 +1,7 @@
 import { t } from '../core/i18n.ts';
-import { readFormattedText } from './feed-filter.ts';
 import type { FormattedText } from '../types/innertube.ts';
 import { isRecord } from '../utils/type-guards.ts';
+import { readFormattedText } from './feed-filter.ts';
 
 export interface ChapterTimestamp {
   time: number;
@@ -140,9 +140,14 @@ function createMarkerEntity(videoId: string, markers: unknown[]): ChapterMarkerE
 /**
  * Builds a chapters macro-marker entity from a watch-next InnerTube response when description timestamps exist.
  */
-export function buildChaptersMarkerEntity(video: Record<string, unknown>, durationMsOverride?: number): ChapterMarkerEntity | null {
+export function buildChaptersMarkerEntity(
+  video: Record<string, unknown>,
+  durationMsOverride?: number
+): ChapterMarkerEntity | null {
   const contents = isRecord(video.contents) ? video.contents : undefined;
-  const watchNext = isRecord(contents?.singleColumnWatchNextResults) ? contents.singleColumnWatchNextResults : undefined;
+  const watchNext = isRecord(contents?.singleColumnWatchNextResults)
+    ? contents.singleColumnWatchNextResults
+    : undefined;
   const results = isRecord(watchNext?.results) ? watchNext.results : undefined;
   const innerResults = isRecord(results?.results) ? results.results : undefined;
   const sectionList = Array.isArray(innerResults?.contents) ? innerResults.contents : undefined;

@@ -29,10 +29,18 @@ class PauseStateManager {
   private pausedSrc = '';
   private pausedTime = 0;
 
-  get at() { return this.pausedAt; }
-  get video() { return this.pausedVideo; }
-  get src() { return this.pausedSrc; }
-  get time() { return this.pausedTime; }
+  get at() {
+    return this.pausedAt;
+  }
+  get video() {
+    return this.pausedVideo;
+  }
+  get src() {
+    return this.pausedSrc;
+  }
+  get time() {
+    return this.pausedTime;
+  }
 
   set(at: number, video: HTMLVideoElement, src: string, time: number): void {
     this.pausedAt = at;
@@ -60,7 +68,9 @@ function isWatchPage(): boolean {
 }
 
 function isVideoElement(target: EventTarget | null): target is HTMLVideoElement {
-  return Boolean(target && typeof target === 'object' && 'tagName' in target && (target as Element).tagName === 'VIDEO');
+  return Boolean(
+    target && typeof target === 'object' && 'tagName' in target && (target as Element).tagName === 'VIDEO'
+  );
 }
 
 let rewindInstalled = false;

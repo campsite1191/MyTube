@@ -1,5 +1,5 @@
-import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
 import type { ConfigChangeListener, ConfigKey } from '../core/config.ts';
+import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { showToast } from '../core/yttv-bridge.ts';
@@ -194,10 +194,7 @@ export function computeTargetTimeAfterSkip(segmentEnd: number, videoDuration: nu
   return Math.max(0, segmentEnd);
 }
 
-export function computeSegmentBarGeometry(
-  segment: SponsorBlockSegment,
-  videoDuration: number
-): SegmentBarGeometry {
+export function computeSegmentBarGeometry(segment: SponsorBlockSegment, videoDuration: number): SegmentBarGeometry {
   const [start, end] = segment.segment;
   const barType = BAR_TYPES[segment.category] ?? { color: 'blue', opacity: '0.7', name: segment.category };
   const leftPercent = videoDuration > 0 ? (100 * start) / videoDuration : 0;
@@ -332,7 +329,8 @@ class SponsorBlockHandler {
   private createOverlayElement(slider: Element, videoDuration: number): HTMLDivElement {
     const overlay = document.createElement('div');
     overlay.classList.add('ytLrProgressBarSlider', 'ytLrProgressBarSliderRectangularProgressBar');
-    overlay.style.cssText = 'z-index: 10 !important; background-color: rgba(0, 0, 0, 0) !important; width: 72rem !important; left: 4rem !important;';
+    overlay.style.cssText =
+      'z-index: 10 !important; background-color: rgba(0, 0, 0, 0) !important; width: 72rem !important; left: 4rem !important;';
 
     const sliderRect = slider.getBoundingClientRect();
     if (!slider.classList.contains('ytLrProgressBarSlider')) {
@@ -472,7 +470,10 @@ class SponsorBlockHandler {
         this.skippedCategories.set(segment.UUID, decision.newState);
         if (decision.suppress) {
           if (decision.showToast && configRead('enableSponsorBlockToasts')) {
-            showToast('SponsorBlock', t('sponsorblock.toasts.notSkipping', { segment: skipName, count: decision.newState.count }));
+            showToast(
+              'SponsorBlock',
+              t('sponsorblock.toasts.notSkipping', { segment: skipName, count: decision.newState.count })
+            );
           }
           return;
         }

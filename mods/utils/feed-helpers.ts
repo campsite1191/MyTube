@@ -1,6 +1,7 @@
 import type { FeedItem, WatchEndpoint } from '../types/innertube.ts';
-export { applyThumbnailUpgrade } from '../transforms/thumbnails.ts';
+
 export { isSurveyItem, shouldHideFeedItem as shouldHideItem } from '../transforms/feed-filter.ts';
+export { applyThumbnailUpgrade } from '../transforms/thumbnails.ts';
 
 export function compactInPlace<T>(items: T[], shouldRemove: (item: T) => boolean): T[] {
   if (!Array.isArray(items)) return items;

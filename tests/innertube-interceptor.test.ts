@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import {
-  installInnertubeInterceptor,
-  transformInnertubeResponseSync,
-} from '../mods/core/innertube-interceptor.ts';
+import { installInnertubeInterceptor, transformInnertubeResponseSync } from '../mods/core/innertube-interceptor.ts';
+import type { AudioFormatEntry, SubscriptionTab } from '../mods/transforms/innertube-player.ts';
 import {
   dedupeAndSortSubscriptionTabs,
   disableAutoCaptionsInPayload,
@@ -14,7 +12,6 @@ import {
   stripAdsFromPayload,
 } from '../mods/transforms/innertube-player.ts';
 import { patchSettingsInPlace } from '../mods/ui/custom-yt-settings.ts';
-import type { AudioFormatEntry, SubscriptionTab } from '../mods/transforms/innertube-player.ts';
 
 describe('getAudioTier and filterStreamingFormats', () => {
   test('ranks 7.1 > 5.1 > Voice Boost > Original Stereo > DRC', () => {
@@ -35,9 +32,24 @@ describe('getAudioTier and filterStreamingFormats', () => {
     const formats: AudioFormatEntry[] = [
       { itag: 137, mimeType: 'video/mp4; codecs="avc1.640028"' },
       { itag: 248, mimeType: 'video/webm; codecs="vp9"' },
-      { itag: 140, mimeType: 'audio/mp4', audioChannels: 2, audioTrack: { id: 'en.4', displayName: 'English original' } },
-      { itag: 258, mimeType: 'audio/mp4; codecs="ec-3"', audioChannels: 6, audioTrack: { id: 'en.4', displayName: 'English original' } },
-      { itag: 141, mimeType: 'audio/mp4; codecs="ec-3"', audioChannels: 6, audioTrack: { id: 'es.1', displayName: 'Spanish' } },
+      {
+        itag: 140,
+        mimeType: 'audio/mp4',
+        audioChannels: 2,
+        audioTrack: { id: 'en.4', displayName: 'English original' },
+      },
+      {
+        itag: 258,
+        mimeType: 'audio/mp4; codecs="ec-3"',
+        audioChannels: 6,
+        audioTrack: { id: 'en.4', displayName: 'English original' },
+      },
+      {
+        itag: 141,
+        mimeType: 'audio/mp4; codecs="ec-3"',
+        audioChannels: 6,
+        audioTrack: { id: 'es.1', displayName: 'Spanish' },
+      },
     ];
 
     const filtered = filterStreamingFormats(formats, 'vp9');
@@ -177,8 +189,7 @@ describe('patchSettingsInPlace and TV browse/JSON.parse transforms', () => {
 
     assert.equal(patchSettingsInPlace(payload), true);
     assert.equal(payload.items.length, 2);
-    const inserted = (payload.items[0] as Record<string, Record<string, unknown>>)
-      .settingCategoryCollectionRenderer;
+    const inserted = (payload.items[0] as Record<string, Record<string, unknown>>).settingCategoryCollectionRenderer;
     assert.equal(inserted?.categoryId, 'custom_settings_category');
 
     // Calling again (or via transformInnertubeResponseSync) must not duplicate the entry.
@@ -219,7 +230,9 @@ describe('patchSettingsInPlace and TV browse/JSON.parse transforms', () => {
                                   header: {
                                     tileHeaderRenderer: {
                                       thumbnail: {
-                                        thumbnails: [{ url: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg', width: 480 }],
+                                        thumbnails: [
+                                          { url: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg', width: 480 },
+                                        ],
                                       },
                                     },
                                   },
@@ -239,14 +252,56 @@ describe('patchSettingsInPlace and TV browse/JSON.parse transforms', () => {
       },
     });
 
-    const parsed = JSON.parse(rawHomeJson) as Record<string, any>;
-    const shelves = parsed.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content.sectionListRenderer.contents;
+    const parsed = JSON.parse(rawHomeJson) as {
+      contents: {
+        tvBrowseRenderer: {
+          content: {
+            tvSurfaceContentRenderer: {
+              content: {
+                sectionListRenderer: {
+                  contents: Array<{
+                    shelfRenderer: {
+                      content: {
+                        horizontalListRenderer: {
+                          items: Array<{
+                            tileRenderer: {
+                              onFocusCommand?: {
+                                startInlinePlaybackCommand?: {
+                                  playbackEndpoint?: { watchEndpoint?: { videoId?: string } };
+                                };
+                              };
+                              header: {
+                                tileHeaderRenderer: {
+                                  thumbnail: { thumbnails: Array<{ url: string }> };
+                                };
+                              };
+                            };
+                          }>;
+                        };
+                      };
+                    };
+                  }>;
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+    const shelves =
+      parsed.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content.sectionListRenderer.contents;
     assert.equal(shelves.length, 1);
 
-    const items = shelves[0].shelfRenderer.content.horizontalListRenderer.items;
-    assert.equal(items.length, 1);
-    assert.equal(items[0].tileRenderer.onFocusCommand?.startInlinePlaybackCommand?.playbackEndpoint?.watchEndpoint?.videoId, 'abc123');
-    assert.equal(items[0].tileRenderer.header.tileHeaderRenderer.thumbnail.thumbnails[0].url, 'https://i.ytimg.com/vi/abc123/hq720.jpg');
+    const items = shelves[0]?.shelfRenderer.content.horizontalListRenderer.items;
+    assert.equal(items?.length, 1);
+    assert.equal(
+      items?.[0]?.tileRenderer.onFocusCommand?.startInlinePlaybackCommand?.playbackEndpoint?.watchEndpoint?.videoId,
+      'abc123'
+    );
+    assert.equal(
+      items?.[0]?.tileRenderer.header.tileHeaderRenderer.thumbnail.thumbnails[0]?.url,
+      'https://i.ytimg.com/vi/abc123/hq720.jpg'
+    );
 
     // Ensure settings payload parses cleanly through transformInnertubeResponseSync too.
     const settingsPayload = {

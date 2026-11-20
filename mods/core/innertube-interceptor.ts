@@ -1,7 +1,8 @@
-import { configChangeEmitter, configRead, whenConfigReady } from './config.ts';
 import { t } from '../core/i18n.ts';
-import { getActiveSponsorBlockSegments } from '../features/sponsorblock.ts';
 import { processRydResponse } from '../features/return-youtube-dislike.ts';
+import { getActiveSponsorBlockSegments } from '../features/sponsorblock.ts';
+import { addPreviews } from '../interceptors/previews.ts';
+import { buildChaptersMarkerEntity } from '../transforms/chapters.ts';
 import {
   extractItemChannelInfo,
   extractItemChannelName,
@@ -11,7 +12,7 @@ import {
   readFormattedText,
   walkCommands,
 } from '../transforms/feed-filter.ts';
-import resolveCommand from './resolve-command.ts';
+import type { AudioFormatEntry, SubscriptionTab } from '../transforms/innertube-player.ts';
 import {
   dedupeAndSortSubscriptionTabs,
   disableAutoCaptionsInPayload,
@@ -19,18 +20,21 @@ import {
   filterStreamingFormats,
   stripAdsFromPayload,
 } from '../transforms/innertube-player.ts';
-import { addPreviews } from '../interceptors/previews.ts';
-import type { AudioFormatEntry, SubscriptionTab } from '../transforms/innertube-player.ts';
-import { applyDeArrowBranding, installThumbnailErrorFallback, upgradeFeedThumbnails } from '../transforms/thumbnails.ts';
+import {
+  applyDeArrowBranding,
+  installThumbnailErrorFallback,
+  upgradeFeedThumbnails,
+} from '../transforms/thumbnails.ts';
 import type { FeedItem, InnertubeCommand, PlayerResponse, Thumbnail, WatchEndpoint } from '../types/innertube.ts';
-import { buildChaptersMarkerEntity } from '../transforms/chapters.ts';
 import { transformGuideResponse } from '../ui/custom-guide-action.ts';
 import { patchSettingsInPlace } from '../ui/custom-yt-settings.ts';
-import { ButtonRenderer, MenuServiceItemRenderer, longPressData, timelyAction } from '../ui/yt-ui.ts';
+import { ButtonRenderer, longPressData, MenuServiceItemRenderer, timelyAction } from '../ui/yt-ui.ts';
 import { buildLongPressPayload } from '../utils/feed-helpers.ts';
-import { findFeedbackToken } from './innertube-calls.ts';
-import { whenYttvReady } from './yttv-bridge.ts';
 import { isRecord } from '../utils/type-guards.ts';
+import { configChangeEmitter, configRead, whenConfigReady } from './config.ts';
+import { findFeedbackToken } from './innertube-calls.ts';
+import resolveCommand from './resolve-command.ts';
+import { whenYttvReady } from './yttv-bridge.ts';
 
 const ITEM_LIST_KEYS = [
   'horizontalListRenderer',
@@ -205,7 +209,9 @@ function isFeedbackMenuItem(menuItem: Record<string, unknown>): boolean {
   const service = isRecord(menuItem.menuServiceItemRenderer) ? menuItem.menuServiceItemRenderer : undefined;
   const act = getCustomActionName(service?.serviceEndpoint);
   if (act === 'NOT_INTERESTED' || act === 'DONT_RECOMMEND_CHANNEL') return true;
-  const label = readMenuItemText(menuItem).toLowerCase().replace(/\u2019/g, "'");
+  const label = readMenuItemText(menuItem)
+    .toLowerCase()
+    .replace(/\u2019/g, "'");
   return label === 'not interested' || label === "don't recommend channel";
 }
 
@@ -280,7 +286,9 @@ function addLongPress(items: FeedItem[]): void {
       : (lv?.contentImage?.thumbnailViewModel?.image?.sources ??
         lv?.contentImage?.collectionThumbnailViewModel?.primaryThumbnail?.thumbnailViewModel?.image?.sources);
     const videoId = tr?.contentId || lv?.contentId;
-    const title = readFormattedText(tr ? tr.metadata?.tileMetadataRenderer?.title : lv?.metadata?.lockupMetadataViewModel?.title).trim();
+    const title = readFormattedText(
+      tr ? tr.metadata?.tileMetadataRenderer?.title : lv?.metadata?.lockupMetadataViewModel?.title
+    ).trim();
     const watchEndpointData = findWatchEndpoint(tr ? tr.onSelectCommand : lv?.rendererContext?.commandContext?.onTap);
     if (!videoId || !thumbnails || !title || !watchEndpointData) continue;
 
@@ -336,8 +344,14 @@ function processContentNodeSync(node: unknown, shouldAddPreviews = true): void {
       const richSectionRecord = isRecord(node.richSectionRenderer) ? node.richSectionRenderer : undefined;
       const richContent = isRecord(richSectionRecord?.content) ? richSectionRecord.content : undefined;
       const richContentRecord = isRecord(richContent) ? richContent : undefined;
-      if (richContentRecord?.richShelfRenderer && Array.isArray((richContentRecord.richShelfRenderer as Record<string, unknown>).contents)) {
-        processShelvesSync((richContentRecord.richShelfRenderer as Record<string, unknown>).contents as FeedItem[], shouldAddPreviews);
+      if (
+        richContentRecord?.richShelfRenderer &&
+        Array.isArray((richContentRecord.richShelfRenderer as Record<string, unknown>).contents)
+      ) {
+        processShelvesSync(
+          (richContentRecord.richShelfRenderer as Record<string, unknown>).contents as FeedItem[],
+          shouldAddPreviews
+        );
       } else if (richContentRecord) {
         processShelfContentSync(richContentRecord, shouldAddPreviews);
       }
@@ -368,7 +382,12 @@ function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void
       processContentNodeSync(entry, shouldAddPreviews);
     } else if (entry.sectionListRenderer || entry.richGridRenderer || ITEM_LIST_KEYS.some((k) => entry[k])) {
       processContentNodeSync(entry, shouldAddPreviews);
-    } else if (entry.tileRenderer || entry.lockupViewModel || entry.shortsLockupViewModel || entry.richItemRenderer?.content) {
+    } else if (
+      entry.tileRenderer ||
+      entry.lockupViewModel ||
+      entry.shortsLockupViewModel ||
+      entry.richItemRenderer?.content
+    ) {
       directItems.push((entry.richItemRenderer?.content ?? entry) as FeedItem);
     }
   }
@@ -393,7 +412,12 @@ function processBrowseActionsSync(actions: unknown, shouldAddPreviews = true): v
     const replaceContainer = isRecord(action.replaceEnclosingAction) ? action.replaceEnclosingAction : undefined;
     const replace = isRecord(replaceContainer?.item) ? replaceContainer.item : undefined;
     if (replace) {
-      if (replace.tileRenderer || replace.lockupViewModel || replace.shortsLockupViewModel || (isRecord(replace.richItemRenderer) && replace.richItemRenderer.content)) {
+      if (
+        replace.tileRenderer ||
+        replace.lockupViewModel ||
+        replace.shortsLockupViewModel ||
+        (isRecord(replace.richItemRenderer) && replace.richItemRenderer.content)
+      ) {
         processItemsListSync([replace as FeedItem], shouldAddPreviews);
       } else {
         processShelvesSync([replace as FeedItem], shouldAddPreviews);
@@ -412,11 +436,7 @@ function isUnwantedTransportButton(btn: unknown): boolean {
     : isRecord(btn.buttonRenderer)
       ? btn.buttonRenderer
       : undefined;
-  const nav = isRecord(br?.navigationEndpoint)
-    ? br.navigationEndpoint
-    : isRecord(br?.command)
-      ? br.command
-      : undefined;
+  const nav = isRecord(br?.navigationEndpoint) ? br.navigationEndpoint : isRecord(br?.command) ? br.command : undefined;
   const icon = isRecord(br?.icon) ? br.icon : undefined;
   const iconType = String(icon?.iconType || '');
   if (nav?.subscribeEndpoint || nav?.unsubscribeEndpoint || nav?.subscribeCommand || /SUBSCRIBE/i.test(iconType)) {
@@ -523,7 +543,10 @@ function transformTransportControls(r: Record<string, unknown>): void {
   });
 }
 
-function transformChannelHeaderButtons(r: Record<string, unknown>, tvSurface: Record<string, unknown> | undefined): void {
+function transformChannelHeaderButtons(
+  r: Record<string, unknown>,
+  tvSurface: Record<string, unknown> | undefined
+): void {
   const surfaceHeader = isRecord(tvSurface?.header) ? tvSurface.header : undefined;
   const channelHeader = isRecord(surfaceHeader?.channelHeaderRenderer)
     ? surfaceHeader.channelHeaderRenderer
@@ -562,8 +585,7 @@ function isSettingsPayload(r: Record<string, unknown>, items: readonly unknown[]
   }
   const title = isRecord(r.title) ? r.title : undefined;
   return Boolean(
-    Array.isArray(title?.runs) &&
-      !items.some((entry) => isRecord(entry) && isRecord(entry.guideSectionRenderer))
+    Array.isArray(title?.runs) && !items.some((entry) => isRecord(entry) && isRecord(entry.guideSectionRenderer))
   );
 }
 
@@ -833,14 +855,14 @@ export function installInnertubeInterceptor(): void {
   // 2. Intercept Response.json() (native V8 JSON path that bypasses JSON.parse).
   if (typeof Response !== 'undefined' && typeof Response.prototype?.json === 'function') {
     const origResponseJson = Response.prototype.json;
-    Response.prototype.json = (async function (this: Response) {
+    Response.prototype.json = async function (this: Response) {
       const data: unknown = await origResponseJson.call(this);
       const url = typeof this.url === 'string' ? this.url : '';
       if (url && EXTERNAL_JSON_HOSTS.some((host) => url.includes(host))) {
         return data;
       }
       return transformInnertubeResponseSync(data);
-    }) as typeof Response.prototype.json;
+    } as typeof Response.prototype.json;
   }
 
   // 3. Intercept fetch() & XMLHttpRequest.send() for outgoing playbackContext modifications.

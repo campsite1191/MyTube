@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
-  PINNED_SUBTITLE_LANGUAGES,
   createAutoTranslateLanguageOption,
   hasAutoTranslateLanguage,
   injectPinnedAutoTranslateLanguages,
+  PINNED_SUBTITLE_LANGUAGES,
   patchAutoTranslateCommand,
   resolveLanguageDisplayName,
 } from '../mods/features/more-subtitles.ts';

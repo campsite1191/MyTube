@@ -14,16 +14,34 @@ import {
 describe('compactInPlace', () => {
   test('removes matching entries in place and preserves survivor order', () => {
     const items = ['keep', 'remove', 'keep-2', 'remove-2'];
-    assert.equal(compactInPlace(items, (item) => item.startsWith('remove')), items);
+    assert.equal(
+      compactInPlace(items, (item) => item.startsWith('remove')),
+      items
+    );
     assert.deepEqual(items, ['keep', 'keep-2']);
   });
 
   test('handles invalid, empty, all-kept, and all-removed inputs', () => {
-    assert.equal(compactInPlace(null as unknown as string[], () => false), null);
-    assert.equal(compactInPlace('not an array' as unknown as string[], () => false), 'not an array');
-    assert.deepEqual(compactInPlace([], () => true), []);
-    assert.deepEqual(compactInPlace([1, 2], () => false), [1, 2]);
-    assert.deepEqual(compactInPlace([1, 2], () => true), []);
+    assert.equal(
+      compactInPlace(null as unknown as string[], () => false),
+      null
+    );
+    assert.equal(
+      compactInPlace('not an array' as unknown as string[], () => false),
+      'not an array'
+    );
+    assert.deepEqual(
+      compactInPlace([], () => true),
+      []
+    );
+    assert.deepEqual(
+      compactInPlace([1, 2], () => false),
+      [1, 2]
+    );
+    assert.deepEqual(
+      compactInPlace([1, 2], () => true),
+      []
+    );
   });
 });
 
@@ -42,11 +60,9 @@ describe('buildLongPressPayload', () => {
   });
 
   test('builds a minimal lockup payload readable by GO_TO_CHANNEL', () => {
-    const payload = buildLongPressPayload(
-      { lockupViewModel: { contentId: 'lockup-id' } },
-      'lockup-id',
-      { params: 'P2' }
-    );
+    const payload = buildLongPressPayload({ lockupViewModel: { contentId: 'lockup-id' } }, 'lockup-id', {
+      params: 'P2',
+    });
     assert.equal(payload.lockupViewModel?.contentId, 'lockup-id');
     assert.equal(
       payload.lockupViewModel?.rendererContext?.commandContext?.onTap?.innertubeCommand?.watchEndpoint?.params,
@@ -108,10 +124,7 @@ describe('isSurveyItem', () => {
   test('recognizes survey prompts in string, simpleText, and runs titles', () => {
     assert.equal(isSurveyItem({ shelfRenderer: { title: 'HELP US IMPROVE the app' } }), true);
     assert.equal(isSurveyItem({ title: { simpleText: 'Help us make YouTube better' } }), true);
-    assert.equal(
-      isSurveyItem({ title: { runs: [{ text: 'Help us ' }, { text: 'improve YouTube' }] } }),
-      true
-    );
+    assert.equal(isSurveyItem({ title: { runs: [{ text: 'Help us ' }, { text: 'improve YouTube' }] } }), true);
   });
 
   test('returns false for invalid and ordinary content', () => {

@@ -1,9 +1,9 @@
 import { configRead, whenConfigReady } from '../core/config.ts';
 import { waitForDomReady } from '../core/idle-scheduler.ts';
 import { onVideo } from '../core/player-observer.ts';
+import resolveCommand, { patchResolveCommand } from '../core/resolve-command.ts';
 import { injectCss } from '../core/styles.ts';
 import { getCommandExecutor, whenYttvReady } from '../core/yttv-bridge.ts';
-import resolveCommand, { patchResolveCommand } from '../core/resolve-command.ts';
 import css from './ui.min.css';
 
 let stylesInstalled = false;

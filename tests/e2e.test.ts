@@ -323,7 +323,9 @@ describe('End-to-end userscript bundle lifecycle', () => {
                                         header: {
                                           tileHeaderRenderer: {
                                             thumbnail: {
-                                              thumbnails: [{ url: 'https://i.ytimg.com/vi/homeVid1/hqdefault.jpg', width: 480 }],
+                                              thumbnails: [
+                                                { url: 'https://i.ytimg.com/vi/homeVid1/hqdefault.jpg', width: 480 },
+                                              ],
                                             },
                                           },
                                         },
@@ -494,10 +496,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
     // Clock & preconnect hints should now be installed.
     const clockEl = (fakeDocument.getElementById as (id: string) => MockElement | null)('custom-clock');
     assert.ok(clockEl, 'Clock element mounted after DOM ready');
-    assert.equal(
-      headEl.children.filter((c) => c.tagName === 'LINK' && c.rel === 'preconnect').length,
-      2
-    );
+    assert.equal(headEl.children.filter((c) => c.tagName === 'LINK' && c.rel === 'preconnect').length, 2);
 
     // 3. Initialize mock window._yttv and notify observers
     const flagsMap = new Map<string, unknown>([['ENABLE_PREVIEWS_WITH_SOUND', false]]);
@@ -597,20 +596,54 @@ describe('End-to-end userscript bundle lifecycle', () => {
       true
     );
 
-    const browseJson = (await browseRes.json()) as Record<string, any>;
+    const browseJson = (await browseRes.json()) as {
+      contents: {
+        tvBrowseRenderer: {
+          content: {
+            tvSurfaceContentRenderer: {
+              content: {
+                sectionListRenderer: {
+                  contents: Array<{
+                    shelfRenderer: {
+                      content: {
+                        horizontalListRenderer: {
+                          items: Array<{
+                            tileRenderer: {
+                              onFocusCommand: { startInlinePlaybackCommand?: unknown };
+                              header: {
+                                tileHeaderRenderer: {
+                                  thumbnail: { thumbnails: Array<{ url: string }> };
+                                };
+                              };
+                            };
+                          }>;
+                        };
+                      };
+                    };
+                  }>;
+                };
+              };
+            };
+          };
+        };
+      };
+    };
     const shelfItems =
       browseJson.contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content.sectionListRenderer.contents[0]
-        .shelfRenderer.content.horizontalListRenderer.items;
-    assert.equal(shelfItems.length, 1);
-    assert.ok(shelfItems[0].tileRenderer.onFocusCommand.startInlinePlaybackCommand);
+        ?.shelfRenderer.content.horizontalListRenderer.items;
+    assert.equal(shelfItems?.length, 1);
+    assert.ok(shelfItems?.[0]?.tileRenderer.onFocusCommand.startInlinePlaybackCommand);
     assert.equal(
-      shelfItems[0].tileRenderer.header.tileHeaderRenderer.thumbnail.thumbnails[0].url,
+      shelfItems?.[0]?.tileRenderer.header.tileHeaderRenderer.thumbnail.thumbnails[0]?.url,
       'https://i.ytimg.com/vi/homeVid1/hq720.jpg'
     );
 
     // 5. Test resolveCommand user actions (Custom Settings modal, toggle setting, speed menu, captions auto-translate)
     resolveHost.instance.resolveCommand({ customAction: { action: 'TT_SETTINGS_SHOW', parameters: [] } });
-    assert.equal((resolvedCommands.at(-1) as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId, 'tt-settings');
+    assert.equal(
+      (resolvedCommands.at(-1) as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId,
+      'tt-settings'
+    );
 
     resolveHost.instance.resolveCommand({
       setClientSettingEndpoint: {
@@ -631,7 +664,9 @@ describe('End-to-end userscript bundle lifecycle', () => {
           'ytaf-configuration',
           createStore('MyTubeDB', 'settings')
         );
-        return storedConfig?.enableAdBlock === false && storedConfig?.sponsorBlockManualSkips?.includes('outro') === false;
+        return (
+          storedConfig?.enableAdBlock === false && storedConfig?.sponsorBlockManualSkips?.includes('outro') === false
+        );
       });
     } finally {
       (globalThis as { indexedDB?: unknown }).indexedDB = prevIdb;
@@ -639,7 +674,36 @@ describe('End-to-end userscript bundle lifecycle', () => {
     assert.equal(storedConfig?.enableAdBlock, false);
     assert.equal(storedConfig?.sponsorBlockManualSkips?.includes('outro'), false);
 
-    const playbackCmd: Record<string, any> = {
+    const playbackCmd: {
+      openPopupAction: {
+        uniqueId: string;
+        popup: {
+          overlaySectionRenderer: {
+            overlay: {
+              overlayTwoPanelRenderer: {
+                actionPanel: {
+                  overlayPanelRenderer: {
+                    content: {
+                      overlayPanelItemListRenderer: {
+                        items: Array<{
+                          compactLinkRenderer: {
+                            icon: { iconType: string };
+                            subtitle: { simpleText: string };
+                            serviceEndpoint?: {
+                              signalAction?: { customAction?: { action?: string } };
+                            };
+                          };
+                        }>;
+                      };
+                    };
+                  };
+                };
+              };
+            };
+          };
+        };
+      };
+    } = {
       openPopupAction: {
         uniqueId: 'playback-settings',
         popup: {
@@ -671,8 +735,8 @@ describe('End-to-end userscript bundle lifecycle', () => {
     resolveHost.instance.resolveCommand(playbackCmd);
     assert.equal(
       playbackCmd.openPopupAction.popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel
-        .overlayPanelRenderer.content.overlayPanelItemListRenderer.items[0].compactLinkRenderer.serviceEndpoint
-        .signalAction.customAction.action,
+        .overlayPanelRenderer.content.overlayPanelItemListRenderer.items[0]?.compactLinkRenderer.serviceEndpoint
+        ?.signalAction?.customAction?.action,
       'TT_SPEED_SETTINGS_SHOW'
     );
 
@@ -729,7 +793,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
     assert.ok(fetchCalls.some((c) => c.url.includes('sponsor.ajay.app/api/skipSegments')));
 
     // Verify auto-translate popup pins English and Hindi via single resolveCommand hook
-    const autoTranslatePopup: Record<string, any> = {
+    const autoTranslatePopup = {
       openPopupAction: {
         uniqueId: 'CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE',
         popup: {

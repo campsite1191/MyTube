@@ -66,7 +66,7 @@ export function filterStreamingFormats(
     if (!fallbackId && id.endsWith('.4')) fallbackId = id;
   }
 
-  const targetId = hasMultiple ? (originalId || fallbackId) : null;
+  const targetId = hasMultiple ? originalId || fallbackId : null;
   let bestTier = Number.POSITIVE_INFINITY;
   let needsFilter = false;
 

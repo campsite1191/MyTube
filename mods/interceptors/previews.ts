@@ -1,7 +1,7 @@
 import { configRead } from '../core/config.ts';
-import { isRecord } from '../utils/type-guards.ts';
 import { walkCommands } from '../transforms/feed-filter.ts';
 import type { FeedItem } from '../types/innertube.ts';
+import { isRecord } from '../utils/type-guards.ts';
 
 export function addPreviews(items: FeedItem[], shouldInject = true): void {
   if (!Array.isArray(items)) return;

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-
-import { configChangeEmitter } from '../mods/core/config.ts';
 import type { ConfigChangeDetail } from '../mods/core/config.ts';
+import { configChangeEmitter } from '../mods/core/config.ts';
+import type { QualityControllablePlayer } from '../mods/features/preferred-video-quality.ts';
 import {
   applyPreferredQualityToPlayer,
   attachPreferredQualityController,
@@ -10,7 +10,6 @@ import {
   parseResolutionHeight,
   selectPlaybackQuality,
 } from '../mods/features/preferred-video-quality.ts';
-import type { QualityControllablePlayer } from '../mods/features/preferred-video-quality.ts';
 import type { YtPlayerStateObject, YtQualityData, YtVideoData } from '../mods/types/yttv.ts';
 
 interface MockPlayerOptions {
@@ -146,10 +145,7 @@ describe('isShortsPlayback', () => {
     assert.equal(isShortsPlayback({ addEventListener() {} }), false);
     assert.equal(isShortsPlayback(createMockPlayer({ videoStats: null }).player), false);
     assert.equal(isShortsPlayback(createMockPlayer({ videoStats: { fmt: '248' } }).player), false);
-    assert.equal(
-      isShortsPlayback(createMockPlayer({ videoStats: { origin: 'shortspage' } }).player),
-      true
-    );
+    assert.equal(isShortsPlayback(createMockPlayer({ videoStats: { origin: 'shortspage' } }).player), true);
   });
 });
 

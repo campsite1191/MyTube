@@ -49,7 +49,10 @@ let yttvWatcherActive = false;
 
 function isYttvPopulated(): boolean {
   if (typeof window === 'undefined' || !window._yttv) return false;
-  return Boolean(findResolveCommandHost()) || (typeof document !== 'undefined' && document.readyState === 'complete' && Object.keys(window._yttv).length > 0);
+  return (
+    Boolean(findResolveCommandHost()) ||
+    (typeof document !== 'undefined' && document.readyState === 'complete' && Object.keys(window._yttv).length > 0)
+  );
 }
 
 /**

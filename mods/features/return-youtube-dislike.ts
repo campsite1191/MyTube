@@ -31,8 +31,10 @@ export interface TransportActionItem {
   };
 }
 
-const LIKE_BUTTON_SELECTOR = 'ytlr-watch-default yt-button-container[idomkey="like-button"], ytlr-watch-default [idomkey="like-button"]';
-const DISLIKE_BUTTON_SELECTOR = 'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
+const LIKE_BUTTON_SELECTOR =
+  'ytlr-watch-default yt-button-container[idomkey="like-button"], ytlr-watch-default [idomkey="like-button"]';
+const DISLIKE_BUTTON_SELECTOR =
+  'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
 
 const rydCache = new Map<string, RydCacheEntry>();
 const inFlight = new Set<string>();
@@ -201,8 +203,12 @@ export function applyDislikeCountToActions<T>(actions: T[], videoId: string | nu
     if (isLikeAction(item)) {
       const lr = item.button?.likeButtonRenderer;
       likeLabel =
-        readFormattedText((lr?.likeCountText || lr?.likeCountWithLikeText || lr?.likeCountWithUnlikeText) as FormattedText | string | undefined) ||
-        (entry && entry.likes !== null ? formatCompactCount(entry.likes) : '');
+        readFormattedText(
+          (lr?.likeCountText || lr?.likeCountWithLikeText || lr?.likeCountWithUnlikeText) as
+            | FormattedText
+            | string
+            | undefined
+        ) || (entry && entry.likes !== null ? formatCompactCount(entry.likes) : '');
       if (likeLabel) setActionLabel(item, likeLabel);
     } else if (dislikeLabel && isDislikeAction(item)) {
       setActionLabel(item, dislikeLabel);
@@ -272,9 +278,7 @@ export function processRydResponse(r: PlayerResponse | Record<string, unknown> |
   const currentVideoEndpoint = obj.currentVideoEndpoint as { watchEndpoint?: { videoId?: string } } | undefined;
 
   const parsedId =
-    videoDetails?.videoId ||
-    playerResponse?.videoDetails?.videoId ||
-    currentVideoEndpoint?.watchEndpoint?.videoId;
+    videoDetails?.videoId || playerResponse?.videoDetails?.videoId || currentVideoEndpoint?.watchEndpoint?.videoId;
 
   if (!parsedId && !tc) return;
   const videoId = parsedId || getActiveVideoId();

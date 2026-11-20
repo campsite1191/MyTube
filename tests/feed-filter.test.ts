@@ -65,7 +65,10 @@ describe('Shorts detection and filtering', () => {
       assert.equal(shouldHideFeedItem(item, { enableShorts: true }), false);
     }
 
-    assert.equal(isShortsItem({ tileRenderer: { contentId: 'regular', contentType: 'TILE_CONTENT_TYPE_VIDEO' } }), false);
+    assert.equal(
+      isShortsItem({ tileRenderer: { contentId: 'regular', contentType: 'TILE_CONTENT_TYPE_VIDEO' } }),
+      false
+    );
   });
 });
 
@@ -174,7 +177,9 @@ describe('channel extraction and hidden channel filtering', () => {
         },
         menu: {
           menuRenderer: {
-            items: [{ menuNavigationItemRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'UC123456' } } } }],
+            items: [
+              { menuNavigationItemRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'UC123456' } } } },
+            ],
           },
         },
       },

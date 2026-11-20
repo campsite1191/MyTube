@@ -1,6 +1,6 @@
-import { getCurrentIdentityService, getKabukiInnerTubeClient } from './yttv-bridge.ts';
-import resolveCommand from './resolve-command.ts';
 import { isRecord } from '../utils/type-guards.ts';
+import resolveCommand from './resolve-command.ts';
+import { getCurrentIdentityService, getKabukiInnerTubeClient } from './yttv-bridge.ts';
 
 let guideCache: unknown | null = null;
 
@@ -87,9 +87,7 @@ export function requestNextAndNavigateChannel(params: NextNavParams): void {
       const metadataEntry = sectionContents?.find((item) => isRecord(item) && isRecord(item.videoMetadataRenderer)) as
         | Record<string, unknown>
         | undefined;
-      const metadata = isRecord(metadataEntry?.videoMetadataRenderer)
-        ? metadataEntry.videoMetadataRenderer
-        : undefined;
+      const metadata = isRecord(metadataEntry?.videoMetadataRenderer) ? metadataEntry.videoMetadataRenderer : undefined;
       const owner = isRecord(metadata?.owner) ? metadata.owner : undefined;
       const ownerRenderer = isRecord(owner?.videoOwnerRenderer) ? owner.videoOwnerRenderer : undefined;
       if (ownerRenderer?.navigationEndpoint) {
@@ -123,8 +121,6 @@ export async function getGuide(): Promise<unknown> {
 export function clearGuideCache(): void {
   guideCache = null;
 }
-
-
 
 /**
  * Recursively locates a `feedbackToken` string inside an InnerTube command or renderer object.

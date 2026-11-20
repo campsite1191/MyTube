@@ -20,7 +20,9 @@ function applyPatches(): void {
   if (!targetKey) return;
   patchesApplied = true;
 
-  const origMethod = window._yttv?.[targetKey] as (new (...args: unknown[]) => Record<string, unknown>) &
+  const origMethod = window._yttv?.[targetKey] as (new (
+    ...args: unknown[]
+  ) => Record<string, unknown>) &
     ((...args: unknown[]) => unknown);
   const { previousButtonMethod, nextButtonMethod, engagementActionsMethod } = extractPlayerActionMethodNames(
     origMethod.toString()

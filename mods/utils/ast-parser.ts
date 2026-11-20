@@ -6,7 +6,13 @@ export interface PlayerActionMethodNames {
   engagementActionsMethod: string | null;
 }
 
-const SKIPPED_TOKEN_TYPES = new Set(['WhiteSpace', 'LineTerminatorSequence', 'SingleLineComment', 'MultiLineComment', 'HashbangComment']);
+const SKIPPED_TOKEN_TYPES = new Set([
+  'WhiteSpace',
+  'LineTerminatorSequence',
+  'SingleLineComment',
+  'MultiLineComment',
+  'HashbangComment',
+]);
 const OPEN_BRACKETS = new Set(['(', '{', '[']);
 const CLOSE_BRACKETS = new Set([')', '}', ']']);
 
@@ -59,7 +65,11 @@ export function extractPlayerActionMethodNames(constructorSource: string): Playe
         } else if (depth === 0 && (tok.value === ';' || tok.value === ',')) {
           break;
         }
-      } else if (tok.type === 'IdentifierName' || tok.type === 'StringLiteral' || tok.type === 'NoSubstitutionTemplate') {
+      } else if (
+        tok.type === 'IdentifierName' ||
+        tok.type === 'StringLiteral' ||
+        tok.type === 'NoSubstitutionTemplate'
+      ) {
         if (tok.value.includes('skipNextButton')) hasSkipNext = true;
         if (tok.value.includes('skipPreviousButton')) hasSkipPrev = true;
         if (tok.value.includes('engagementActions')) hasEngagement = true;

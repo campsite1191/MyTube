@@ -43,17 +43,11 @@ export function showToast(title: string, subtitle: string, thumbnails?: Thumbnai
   });
 }
 
-function Modal(
-  header: string | ModalTitle,
-  content: unknown,
-  id: string,
-  update?: boolean
-): Record<string, unknown> {
+function Modal(header: string | ModalTitle, content: unknown, id: string, update?: boolean): Record<string, unknown> {
   const titleSubtitleObj: ModalTitle = typeof header === 'string' ? { title: header, subtitle: '' } : header;
-  const overlayPanelHeaderRenderer: Record<string, unknown> =
-    titleSubtitleObj.overlayPanelHeaderRenderer ?? {
-      title: { simpleText: titleSubtitleObj.title },
-    };
+  const overlayPanelHeaderRenderer: Record<string, unknown> = titleSubtitleObj.overlayPanelHeaderRenderer ?? {
+    title: { simpleText: titleSubtitleObj.title },
+  };
 
   if (titleSubtitleObj.subtitle) {
     overlayPanelHeaderRenderer.subtitle = { simpleText: titleSubtitleObj.subtitle };
@@ -136,13 +130,7 @@ export function buttonItem(title: ButtonItemTitle | null, icon: ButtonItemIcon |
   return { compactLinkRenderer };
 }
 
-export function timelyAction(
-  text: string,
-  icon: string,
-  command: unknown,
-  triggerTimeMs: number,
-  timeoutMs: number
-) {
+export function timelyAction(text: string, icon: string, command: unknown, triggerTimeMs: number, timeoutMs: number) {
   return {
     timelyActionRenderer: {
       actionButtons: [
@@ -300,12 +288,7 @@ export function ButtonRenderer(disabled: boolean, text: string, iconType: string
   };
 }
 
-export function GuideEntryRenderer(
-  simpleText: string,
-  navigationEndpoint: unknown,
-  icon?: string,
-  thumbnail?: string
-) {
+export function GuideEntryRenderer(simpleText: string, navigationEndpoint: unknown, icon?: string, thumbnail?: string) {
   const guideEntryRenderer: Record<string, unknown> = {
     navigationEndpoint,
     trackingParams: null,

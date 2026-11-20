@@ -68,9 +68,12 @@ export const EN_TRANSLATIONS = {
   'settings.options.uiSettings.options.disableSidebarContents.subtitle': 'Select sidebar contents to disable',
   'settings.options.uiSettings.options.disableSidebarContents.title': 'Disable Sidebar Contents',
   'settings.options.uiSettings.options.hideWatchedVideos.options.enableHideWatchedVideos': 'Enable Hide Watched Videos',
-  'settings.options.uiSettings.options.hideWatchedVideos.options.setPagesToHideWatchedVideos': 'Set Pages to Hide Watched Videos',
-  'settings.options.uiSettings.options.hideWatchedVideos.options.watchedVideosThreshold.subtitle': 'Set the percentage threshold for hiding watched videos',
-  'settings.options.uiSettings.options.hideWatchedVideos.options.watchedVideosThreshold.title': 'Watched Videos Threshold',
+  'settings.options.uiSettings.options.hideWatchedVideos.options.setPagesToHideWatchedVideos':
+    'Set Pages to Hide Watched Videos',
+  'settings.options.uiSettings.options.hideWatchedVideos.options.watchedVideosThreshold.subtitle':
+    'Set the percentage threshold for hiding watched videos',
+  'settings.options.uiSettings.options.hideWatchedVideos.options.watchedVideosThreshold.title':
+    'Watched Videos Threshold',
   'settings.options.uiSettings.options.hideWatchedVideos.title': 'Hide Watched Videos',
   'settings.options.uiSettings.options.launchToOnStartup.subtitle': 'Choose the default page opened on startup',
   'settings.options.uiSettings.options.launchToOnStartup.title': 'Launch To on Startup',
@@ -95,10 +98,12 @@ export const EN_TRANSLATIONS = {
   'settings.options.videoPlayer.options.patching.title': 'Patch Video Player UI',
   'settings.options.videoPlayer.options.preferredVideoCodec.subtitle': 'Choose the preferred video codec for playback',
   'settings.options.videoPlayer.options.preferredVideoCodec.title': 'Preferred Video Codec',
-  'settings.options.videoPlayer.options.preferredVideoQuality.subtitle': 'Choose the preferred or next best video quality applied when playback starts',
+  'settings.options.videoPlayer.options.preferredVideoQuality.subtitle':
+    'Choose the preferred or next best video quality applied when playback starts',
   'settings.options.videoPlayer.options.preferredVideoQuality.title': 'Preferred Video Quality',
   'settings.options.videoPlayer.options.qualityAuto': 'Auto',
-  'settings.options.videoPlayer.options.speedSettings.subtitle': 'Set the speed increments for video playback speed adjustments',
+  'settings.options.videoPlayer.options.speedSettings.subtitle':
+    'Set the speed increments for video playback speed adjustments',
   'settings.options.videoPlayer.options.speedSettings.title': 'Speed Settings Increments',
   'settings.options.videoPlayer.subtitle': 'Customize video player features',
   'settings.options.videoPlayer.title': 'Video Player Settings',

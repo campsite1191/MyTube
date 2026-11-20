@@ -139,10 +139,7 @@ export function upgradeFeedItemThumbnails(entry: FeedItem | null | undefined): b
   return true;
 }
 
-export function upgradeFeedThumbnails(
-  items: FeedItem[],
-  isEnabled: boolean = configRead('enableHqThumbnails')
-): void {
+export function upgradeFeedThumbnails(items: FeedItem[], isEnabled: boolean = configRead('enableHqThumbnails')): void {
   if (!isEnabled || !Array.isArray(items)) return;
   for (const entry of items) {
     upgradeFeedItemThumbnails(entry);
@@ -301,8 +298,7 @@ export async function applyDeArrowBranding(items: FeedItem[], options: DeArrowOp
 
 export function resolveFallbackThumbnailUrl(failedUrl: string): string | null {
   if (!failedUrl) return null;
-  const match =
-    failedUrl.match(YOUTUBE_HQ720_URL_PATTERN) ?? failedUrl.match(DEARROW_THUMBNAIL_URL_PATTERN);
+  const match = failedUrl.match(YOUTUBE_HQ720_URL_PATTERN) ?? failedUrl.match(DEARROW_THUMBNAIL_URL_PATTERN);
   return match?.[1] ? `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg` : null;
 }
 

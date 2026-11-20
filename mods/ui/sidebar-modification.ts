@@ -2,8 +2,8 @@ import { configRead, configWrite } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
 import { getGuide } from '../core/innertube-calls.ts';
 import { isRecord } from '../utils/type-guards.ts';
-import { getGuideItemId } from './custom-guide-action.ts';
 import type { GuideEntryRendererData } from './custom-guide-action.ts';
+import { getGuideItemId } from './custom-guide-action.ts';
 import { buttonItem, overlayPanelItemListRenderer, showModal } from './yt-ui.ts';
 
 interface GuideActionParams {
@@ -16,7 +16,9 @@ interface GuideActionParams {
 async function handleMoveGuideButton(params?: GuideActionParams): Promise<void> {
   const order = [...configRead('sidebarContentsOrder')];
   const browseId = getGuideItemId(params?.item?.guideEntryRenderer);
-  const index = order.findIndex((item) => (typeof item === 'object' && item !== null ? item.browseId : item) === browseId);
+  const index = order.findIndex(
+    (item) => (typeof item === 'object' && item !== null ? item.browseId : item) === browseId
+  );
 
   if (index === -1) {
     handleSidebarSettingsMenu('', true);
