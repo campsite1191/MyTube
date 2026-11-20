@@ -147,6 +147,3 @@ export function t(key: string, variables?: TranslationVariables): string {
     return value !== undefined ? String(value) : fullMatch;
   });
 }
-
-/** @deprecated Use t directly */
-export const translate = t;

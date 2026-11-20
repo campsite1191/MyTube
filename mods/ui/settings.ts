@@ -6,7 +6,7 @@ import { t } from '../core/i18n.ts';
 import resolveCommand from '../core/resolve-command.ts';
 
 
-export interface SettingOption {
+interface SettingOption {
   name: string;
   subtitle?: string;
   icon?: string;
@@ -21,7 +21,7 @@ export interface SettingOption {
   compactLinkRenderer?: unknown;
 }
 
-export interface OptionShowParameters {
+interface OptionShowParameters {
   options?: SettingOption[] | { title: string; subtitle?: string; content: unknown };
   selectedIndex?: number;
   menuId?: string;

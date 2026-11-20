@@ -1,0 +1,4 @@
+{
+  "entry": ["mods/index.ts", "tests/*.test.ts"],
+  "project": ["mods/**/*.ts", "tests/**/*.ts"]
+}

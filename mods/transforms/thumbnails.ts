@@ -16,12 +16,12 @@ const NON_VIDEO_TILE_CONTENT_TYPES = new Set([
   'TILE_CONTENT_TYPE_VIDEO_AD',
 ]);
 
-export interface DeArrowTitleEntry {
+interface DeArrowTitleEntry {
   title: string;
   votes: number;
 }
 
-export interface DeArrowThumbnailEntry {
+interface DeArrowThumbnailEntry {
   timestamp?: number;
   votes: number;
 }

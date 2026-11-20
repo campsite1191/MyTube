@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { EN_TRANSLATIONS, t, translate } from '../mods/core/i18n.ts';
+import { EN_TRANSLATIONS, t } from '../mods/core/i18n.ts';
 
 describe('typed English i18n lookup', () => {
-  test('resolves static translation keys and exposes translate alias', () => {
+  test('resolves static translation keys', () => {
     assert.equal(t('common.back'), 'Back');
     assert.equal(t('settings.ttSettings.title'), 'Custom Settings');
     assert.equal(t('videoMenu.dontRecommendChannel'), "Don't Recommend Channel");
-    assert.equal(translate, t);
   });
 
   test('interpolates single, multiple, and zero numeric variables', () => {

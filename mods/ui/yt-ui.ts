@@ -290,39 +290,6 @@ export function overlayMessageRenderer(simpleText: string) {
   };
 }
 
-export function ShelfRenderer(simpleText: string, items: unknown[], selectedIndex = 0) {
-  return {
-    shelfRenderer: {
-      shelfHeaderRenderer: {
-        title: { simpleText },
-      },
-      tvhtml5ShelfRendererType: 'TVHTML5_SHELF_RENDERER_TYPE_GRID',
-      content: {
-        horizontalListRenderer: {
-          items,
-          selectedIndex,
-          visibleItemCount: 3,
-        },
-      },
-    },
-  };
-}
-
-export function TileRenderer(simpleText: string, onSelectCommand: unknown) {
-  return {
-    tileRenderer: {
-      contentType: 'TILE_CONTENT_TYPE_VIDEO',
-      metadata: {
-        tileMetadataRenderer: {
-          title: { simpleText },
-        },
-      },
-      onSelectCommand,
-      style: 'TILE_STYLE_YTLR_DEFAULT',
-    },
-  };
-}
-
 export function ButtonRenderer(disabled: boolean, text: string, iconType: string, command: unknown) {
   return {
     isDisabled: disabled,

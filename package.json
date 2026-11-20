@@ -5,7 +5,7 @@
   "scripts": {
     "test": "node --experimental-strip-types --test 'tests/*.test.ts'",
     "test:coverage": "node --experimental-strip-types --experimental-test-coverage --test 'tests/*.test.ts'",
-    "check:dead-exports": "node scripts/check-dead-exports.mjs",
+    "lint:knip": "npx --yes knip@6.46.1",
     "typecheck": "npm --prefix mods run typecheck",
     "build:js": "npm --prefix mods run build"
   }

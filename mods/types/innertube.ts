@@ -1,4 +1,4 @@
-export interface TextRun {
+interface TextRun {
   text?: string;
 }
 
@@ -20,12 +20,12 @@ export interface WatchEndpoint {
   playlistId?: string;
 }
 
-export interface BrowseEndpoint {
+interface BrowseEndpoint {
   browseId?: string;
   params?: string;
 }
 
-export interface CustomActionPayload {
+interface CustomActionPayload {
   action: string;
   parameters?: unknown;
 }
@@ -66,7 +66,7 @@ export interface InnertubeCommand {
   [key: string]: unknown;
 }
 
-export interface BadgeNode {
+interface BadgeNode {
   label?: string;
   badgeText?: string;
   text?: string;
@@ -128,7 +128,7 @@ export interface LockupViewModel {
   [key: string]: unknown;
 }
 
-export interface ShelfRenderer {
+interface ShelfRenderer {
   title?: FormattedText | string;
   headerRenderer?: {
     shelfHeaderRenderer?: {
@@ -174,7 +174,7 @@ export interface AdaptiveFormat {
   [key: string]: unknown;
 }
 
-export interface StreamingData {
+interface StreamingData {
   formats?: AdaptiveFormat[];
   adaptiveFormats?: AdaptiveFormat[];
   [key: string]: unknown;

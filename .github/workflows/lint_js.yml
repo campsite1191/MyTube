@@ -32,8 +32,8 @@ jobs:
       - name: Typecheck TypeScript
         run: npm run typecheck
 
-      - name: Check Dead Exports
-        run: npm run check:dead-exports
+      - name: Check Dead Files, Exports & Types with Knip
+        run: npm run lint:knip
 
       - name: Lint Source Files with Biome
         run: |
