@@ -1,4 +1,12 @@
 {
-  "entry": ["mods/index.ts", "tests/*.test.ts"],
-  "project": ["mods/**/*.ts", "tests/**/*.ts"]
+  "workspaces": {
+    "mods": {
+      "project": ["**/*.ts"],
+      "ignoreDependencies": ["fake-indexeddb"]
+    },
+    ".": {
+      "entry": ["tests/*.test.ts"],
+      "project": ["tests/*.ts"]
+    }
+  }
 }

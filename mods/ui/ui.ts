@@ -1,6 +1,7 @@
 import { configRead, whenConfigReady } from '../core/config.ts';
 import { waitForDomReady } from '../core/idle-scheduler.ts';
 import { onVideo } from '../core/player-observer.ts';
+import { injectCss } from '../core/styles.ts';
 import { getCommandExecutor, whenYttvReady } from '../core/yttv-bridge.ts';
 import resolveCommand, { patchResolveCommand } from '../core/resolve-command.ts';
 import css from './ui.min.css';
@@ -13,24 +14,7 @@ function installGlobalStyles(): void {
   const targetRoot = document.head ?? document.documentElement;
   if (!targetRoot) return;
   stylesInstalled = true;
-
-  try {
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(css);
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-    return;
-  } catch {
-    // Fallback to an existing nonce-authorized style tag if constructable stylesheets are unavailable.
-  }
-
-  const existingStyle = document.querySelector('style[nonce]');
-  if (existingStyle) {
-    existingStyle.textContent = `${existingStyle.textContent ?? ''}${css}`;
-    return;
-  }
-  const style = document.createElement('style');
-  style.textContent = css;
-  targetRoot.appendChild(style);
+  injectCss(css, true);
 }
 
 function initUi(): void {

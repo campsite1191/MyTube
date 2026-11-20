@@ -1,4 +1,5 @@
 import type { HiddenChannel } from '../types/innertube.ts';
+import { isRecord } from '../utils/type-guards.ts';
 import { get, set } from './indexed-db.ts';
 
 export type SidebarContentItem = string | { browseId: string; title: string };
@@ -125,11 +126,15 @@ let configReadyPromise: Promise<void> | null = null;
 
 export function initConfig(): Promise<void> {
   if (!configReadyPromise) {
-    configReadyPromise = get<ConfigSchema>(CONFIG_KEY).then((stored) => {
-      if (stored) {
-        localConfig = { ...defaultConfig, ...stored };
-      }
-    });
+    configReadyPromise = get<unknown>(CONFIG_KEY)
+      .then((stored) => {
+        if (isRecord(stored)) {
+          localConfig = { ...defaultConfig, ...(stored as Partial<ConfigSchema>) };
+        }
+      })
+      .catch((error) => {
+        console.warn('[Config] Failed to load stored config; using defaults:', error);
+      });
   }
   return configReadyPromise;
 }
@@ -144,7 +149,11 @@ export function configRead<K extends ConfigKey>(key: K): ConfigSchema[K] {
 
 export async function configWrite<K extends ConfigKey>(key: K, value: ConfigSchema[K]): Promise<void> {
   localConfig[key] = value;
-  await set(CONFIG_KEY, localConfig);
+  try {
+    await set(CONFIG_KEY, localConfig);
+  } catch (error) {
+    console.warn(`[Config] Failed to persist config key "${String(key)}":`, error);
+  }
   configChangeEmitter.dispatchEvent(new CustomEvent('configChange', { detail: { key, value } }));
 }
 

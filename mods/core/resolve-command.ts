@@ -33,26 +33,21 @@ function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
     if (!itemKey) continue;
 
     if (!itemKey.includes('_')) {
-      for (const s of settingDatas) {
-        if (!isRecord(s)) continue;
-        const sEnum = isRecord(s.clientSettingEnum) ? s.clientSettingEnum : undefined;
-        const sKey = typeof sEnum?.item === 'string' ? (sEnum.item as ConfigKey) : undefined;
-        if (!sKey) continue;
-        const valName = Object.keys(s).find((k) => k.includes('Value'));
-        if (!valName) continue;
-        const rawVal = valName === 'intValue' ? Number(s[valName]) : s[valName];
-        if (valName === 'arrayValue') {
-          const current = configRead(sKey);
-          const arr: unknown[] = Array.isArray(current) ? [...current] : [];
-          const idx = arr.indexOf(rawVal);
-          if (idx !== -1) arr.splice(idx, 1);
-          else arr.push(rawVal);
-          void configWrite(sKey, arr as ConfigSchema[typeof sKey]);
-        } else {
-          void configWrite(sKey, rawVal as ConfigSchema[typeof sKey]);
-        }
-        handledCustomSetting = true;
+      const sKey = itemKey as ConfigKey;
+      const valName = Object.keys(rawSetting).find((k) => k.includes('Value'));
+      if (!valName) continue;
+      const rawVal = valName === 'intValue' ? Number(rawSetting[valName]) : rawSetting[valName];
+      if (valName === 'arrayValue') {
+        const current = configRead(sKey);
+        const arr: unknown[] = Array.isArray(current) ? [...current] : [];
+        const idx = arr.indexOf(rawVal);
+        if (idx !== -1) arr.splice(idx, 1);
+        else arr.push(rawVal);
+        void configWrite(sKey, arr as ConfigSchema[typeof sKey]);
+      } else {
+        void configWrite(sKey, rawVal as ConfigSchema[typeof sKey]);
       }
+      handledCustomSetting = true;
     } else if (itemKey === 'I18N_LANGUAGE') {
       const lang = typeof rawSetting.stringValue === 'string' ? rawSetting.stringValue : '';
       const date = new Date();
@@ -143,8 +138,6 @@ export function patchResolveCommand(): void {
           patchAutoTranslateCommand(rawCmd);
         }
       }
-
-      if (rawCmd.customAction) return instance.resolveCommand(rawCmd, arg);
 
       const cmdExec = isRecord(rawCmd.commandExecutorCommand) ? rawCmd.commandExecutorCommand : undefined;
       if (Array.isArray(cmdExec?.commands)) {

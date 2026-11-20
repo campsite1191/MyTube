@@ -1,7 +1,9 @@
+import { injectCss } from '../core/styles.ts';
+
 const TIME_LABEL_SELECTOR = 'ytlr-progress-bar [idomkey="time-label"]';
 const ELAPSED_SELECTOR = 'ytlr-progress-bar [idomkey="elapsedTime"]';
 const GUARD_SELECTOR = 'ytlr-progress-bar';
-const ATTACH_RETRY_MS = 100;
+const ATTACH_RETRY_MS = 250;
 const OURS = /\s*\(-\d+:\d{2}(?::\d{2})?\)/g;
 const CLOCK_RE = /\d+:\d{2}(?::\d{2})?/;
 const CLOCK_SPLIT_RE = /^(.*?\d+:\d{2}(?::\d{2})?)([\s\S]*)$/;
@@ -69,6 +71,7 @@ let video: HTMLVideoElement | null = null;
 let desiredText: string | null = null;
 let lastAppliedSec = -1;
 let attachRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+let waitObserver: MutationObserver | null = null;
 let guardObserver: MutationObserver | null = null;
 let observedContainer: Element | null = null;
 
@@ -219,6 +222,10 @@ function detach(): void {
     clearTimeout(attachRetryTimeout);
     attachRetryTimeout = null;
   }
+  if (waitObserver) {
+    waitObserver.disconnect();
+    waitObserver = null;
+  }
   if (guardObserver) {
     guardObserver.disconnect();
     guardObserver = null;
@@ -230,6 +237,20 @@ function detach(): void {
   video = null;
 }
 
+function scheduleAttachWait(): void {
+  const root = document.body ?? document.documentElement;
+  if (root && typeof MutationObserver !== 'undefined') {
+    waitObserver = new MutationObserver(() => {
+      if (pickVideo() && document.querySelector(GUARD_SELECTOR) && getElapsedTarget()) {
+        attach();
+      }
+    });
+    waitObserver.observe(root, { childList: true, subtree: true });
+    return;
+  }
+  attachRetryTimeout = setTimeout(attach, ATTACH_RETRY_MS);
+}
+
 function attach(): void {
   detach();
   if (!location.hash.includes('watch') && !location.hash.includes('v=')) return;
@@ -238,7 +259,7 @@ function attach(): void {
 
   if (!video || !container || !getElapsedTarget()) {
     video = null;
-    attachRetryTimeout = setTimeout(attach, ATTACH_RETRY_MS);
+    scheduleAttachWait();
     return;
   }
 
@@ -274,9 +295,7 @@ export function installRemainingTime(): void {
   if (remainingTimeInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
   remainingTimeInstalled = true;
 
-  try {
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(`
+  injectCss(`
       ytlr-progress-bar [idomkey="elapsedTime"],
       ytlr-progress-bar [idomkey="duration"] {
         font-size: 1rem !important;
@@ -285,10 +304,6 @@ export function installRemainingTime(): void {
         letter-spacing: normal !important;
       }
     `);
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-  } catch {
-    // Ignore environments without constructable stylesheets.
-  }
 
   window.addEventListener('hashchange', attach, false);
   attach();

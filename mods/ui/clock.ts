@@ -1,11 +1,13 @@
 import { configChangeEmitter, configRead } from '../core/config.ts';
 import { onVideo } from '../core/player-observer.ts';
+import { injectCss } from '../core/styles.ts';
 
 const CLOCK_ID = 'custom-clock';
 const MAX_VOD_DURATION_SEC = 86400 * 7;
 
 let clockTimeout: ReturnType<typeof setTimeout> | null = null;
 let watchAttrObserver: MutationObserver | null = null;
+let observedWatchDefault: Element | null = null;
 let stylesInstalled = false;
 let cachedWatchDefault: Element | null = null;
 let cachedVideo: HTMLVideoElement | null = null;
@@ -67,9 +69,7 @@ function installClockStyles(): void {
   if (stylesInstalled || typeof document === 'undefined') return;
   stylesInstalled = true;
   const { fontFamily, color } = resolveNativeTypography();
-  try {
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(`
+  injectCss(`
       #${CLOCK_ID} {
         position: fixed;
         z-index: 2147483647;
@@ -97,10 +97,6 @@ function installClockStyles(): void {
         display: none;
       }
     `);
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-  } catch {
-    // Ignore environments without constructable stylesheets.
-  }
 }
 
 function pickActiveVideo(): HTMLVideoElement | null {
@@ -148,8 +144,9 @@ function syncVideoListeners(video: HTMLVideoElement | null, onUpdate: () => void
 
 function syncWatchAttrObserver(watchEl: Element | null, onUpdate: () => void): void {
   if (!watchEl || typeof MutationObserver === 'undefined') return;
-  if (watchAttrObserver && cachedWatchDefault === watchEl) return;
+  if (watchAttrObserver && observedWatchDefault === watchEl) return;
   watchAttrObserver?.disconnect();
+  observedWatchDefault = watchEl;
   watchAttrObserver = new MutationObserver(onUpdate);
   watchAttrObserver.observe(watchEl, { attributes: true, attributeFilter: ['hybridnavfocusable'] });
 }
@@ -165,6 +162,7 @@ function cleanupClockListeners(): void {
   clearScheduledTick();
   watchAttrObserver?.disconnect();
   watchAttrObserver = null;
+  observedWatchDefault = null;
   if (listenedVideo && updateHandler) {
     for (const evt of VIDEO_SYNC_EVENTS) listenedVideo.removeEventListener(evt, updateHandler);
   }

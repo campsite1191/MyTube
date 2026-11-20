@@ -50,4 +50,21 @@ describe('extractPlayerActionMethodNames', () => {
       engagementActionsMethod: null,
     });
   });
+
+  test('ignores comments and regex literals containing braces or quotes', () => {
+    const ctorSource = `function TrickyActions(a) {
+      // ignore fake this.bad = () => this.engagementActions;
+      /* multiline comment with } and skipNextButton */
+      this.re = /[{}"']/g;
+      this.prev = () => [this.a.skipNextButton, this.a.skipPreviousButton];
+      this.next = () => [this.a.skipPreviousButton, this.a.skipNextButton];
+      this.eng = () => \`prefix-\${a}-suffix\` && this.a.engagementActions;
+    }`;
+
+    assert.deepEqual(extractPlayerActionMethodNames(ctorSource), {
+      previousButtonMethod: 'prev',
+      nextButtonMethod: 'next',
+      engagementActionsMethod: 'eng',
+    });
+  });
 });

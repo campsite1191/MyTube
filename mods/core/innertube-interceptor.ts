@@ -637,7 +637,7 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       if (isSettingsPayload(r, r.items)) {
         patchSettingsInPlace(r);
       } else {
-        void transformGuideResponse(r);
+        transformGuideResponse(r);
       }
     }
 
@@ -753,7 +753,7 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
     injectChapters(r);
     transformPlayerOverlays(r);
     transformTransportControls(r);
-    void processRydResponse(r as PlayerResponse);
+    processRydResponse(r as PlayerResponse);
     transformChannelHeaderButtons(r, tvSurface);
   } catch (error) {
     console.error('[InnertubeInterceptor] Failed to process JSON payload:', error);

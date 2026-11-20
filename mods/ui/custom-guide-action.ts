@@ -26,7 +26,7 @@ export function getGuideItemId(entry: GuideEntryRendererData | null | undefined)
   return entry?.icon?.iconType || null;
 }
 
-export async function transformGuideResponse(r: unknown): Promise<unknown> {
+export function transformGuideResponse(r: unknown): unknown {
   if (!isRecord(r) || !Array.isArray(r.items)) return r;
   const firstEntry = isRecord(r.items[0]) ? r.items[0] : undefined;
   const firstSection = isRecord(firstEntry?.guideSectionRenderer) ? firstEntry.guideSectionRenderer : undefined;
@@ -42,7 +42,7 @@ export async function transformGuideResponse(r: unknown): Promise<unknown> {
       orderChanged = true;
     }
   }
-  if (orderChanged) await configWrite('sidebarContentsOrder', order);
+  if (orderChanged) void configWrite('sidebarContentsOrder', order);
 
   const currentOrder = configRead('sidebarContentsOrder');
   if (currentOrder.length === 0) {
@@ -52,7 +52,7 @@ export async function transformGuideResponse(r: unknown): Promise<unknown> {
       const browseId = getGuideItemId(renderer);
       if (browseId) initialOrder.push(browseId);
     }
-    await configWrite('sidebarContentsOrder', initialOrder);
+    void configWrite('sidebarContentsOrder', initialOrder);
   } else {
     const copiedItems: unknown[] = [...firstSection.items];
     for (const orderItem of currentOrder) {

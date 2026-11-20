@@ -1,0 +1,86 @@
+name: Verify Cobalt Patches
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'patches/**'
+      - '.github/workflows/lint_patches.yml'
+
+jobs:
+  verify_patches:
+    name: "Verify Cobalt Patches & Manifest"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Jinja2
+        run: python -m pip install --quiet jinja2
+
+      - name: Verify Patch Application & Manifest Invariants
+        run: |
+          python - <<'PY'
+          import glob, os, subprocess, tempfile, urllib.request
+          import xml.etree.ElementTree as ET
+          from jinja2 import Environment
+
+          BASE_URL = "https://raw.githubusercontent.com/youtube/cobalt/27.lts/"
+          PATCHES = sorted(glob.glob("patches/*.patch"))
+          assert PATCHES, "No patches found"
+
+          targets = set()
+          for p in PATCHES:
+              with open(p, "r", encoding="utf-8") as f:
+                  for line in f:
+                      if line.startswith("+++ b/"):
+                          targets.add(line[6:].strip())
+
+          with tempfile.TemporaryDirectory() as tmpdir:
+              subprocess.run(["git", "init", "-q"], cwd=tmpdir, check=True)
+              for rel in sorted(targets):
+                  dest = os.path.join(tmpdir, rel)
+                  os.makedirs(os.path.dirname(dest), exist_ok=True)
+                  with urllib.request.urlopen(BASE_URL + rel, timeout=30) as resp:
+                      data = resp.read()
+                  with open(dest, "wb") as out:
+                      out.write(data)
+
+              for p in PATCHES:
+                  subprocess.run(["git", "apply", os.path.abspath(p)], cwd=tmpdir, check=True)
+                  print(f"OK: {os.path.basename(p)}")
+
+              manifest_path = os.path.join(tmpdir, "cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2")
+              with open(manifest_path, "r", encoding="utf-8") as f:
+                  tmpl = Environment().from_string(f.read())
+              rendered = tmpl.render(manifest_package="com.cobalt.mytube", build_type="gold").lstrip()
+              root = ET.fromstring(rendered)
+              ns = {"android": "http://schemas.android.com/apk/res/android"}
+              app = root.find("application")
+              assert app is not None
+              assert app.attrib.get(f"{{{ns['android']}}}allowBackup") == "false"
+              assert app.attrib.get(f"{{{ns['android']}}}debuggable") == "false"
+              assert app.attrib.get(f"{{{ns['android']}}}extractNativeLibs") == "false"
+              assert app.attrib.get(f"{{{ns['android']}}}usesCleartextTraffic") == "false"
+
+              perms = {el.attrib.get(f"{{{ns['android']}}}name") for el in root.findall("uses-permission")}
+              banned = {
+                  "android.permission.CAMERA",
+                  "android.permission.ACCESS_COARSE_LOCATION",
+                  "android.permission.GET_ACCOUNTS",
+                  "android.permission.WRITE_EXTERNAL_STORAGE",
+                  "com.google.android.gms.permission.AD_ID",
+              }
+              assert not (perms & banned), f"Banned permissions present: {perms & banned}"
+              schemes = {el.attrib.get(f"{{{ns['android']}}}scheme") for el in root.findall(".//intent-filter/data")}
+              assert "http" not in schemes, f"Unexpected http scheme in deep-link filter: {schemes}"
+              print("Manifest XML & hardening checks passed.")
+          PY

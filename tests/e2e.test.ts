@@ -1,8 +1,19 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import vm from 'node:vm';
+
+const requireFromMods = createRequire(new URL('../mods/package.json', import.meta.url));
+const { IDBFactory, IDBKeyRange } = requireFromMods('fake-indexeddb') as {
+  IDBFactory: typeof globalThis.IDBFactory;
+  IDBKeyRange: typeof globalThis.IDBKeyRange;
+};
+const { createStore, get: idbGet } = requireFromMods('idb-keyval') as {
+  createStore: (dbName: string, storeName: string) => unknown;
+  get: <T>(key: string, customStore?: unknown) => Promise<T | undefined>;
+};
 
 const BUNDLE_PATH = path.resolve(import.meta.dirname, '..', 'mods', 'dist', 'userscript.js');
 
@@ -173,7 +184,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
     const resolvedCommands: unknown[] = [];
     const executedActions: string[] = [];
     const pressureListeners: Array<() => void> = [];
-    const idbStore = new Map<string, unknown>();
+    const fakeIdb = new IDBFactory();
     const localStorageMap = new Map<string, string>([
       [
         'yt.leanback.default::recurring_actions',
@@ -333,52 +344,6 @@ describe('End-to-end userscript bundle lifecycle', () => {
       }
     }
 
-    const mockIndexedDB = {
-      open: () => {
-        const req: Record<string, unknown> = {
-          result: {
-            objectStoreNames: { contains: () => true },
-            createObjectStore: () => {},
-            transaction: () => ({
-              oncomplete: null as (() => void) | null,
-              onerror: null,
-              objectStore: () => ({
-                get: (k: string) => {
-                  const gReq: Record<string, unknown> = { result: idbStore.get(k), onsuccess: null };
-                  queueMicrotask(() => (gReq.onsuccess as (() => void) | null)?.());
-                  return gReq;
-                },
-                put: (v: unknown, k: string) => {
-                  idbStore.set(k, v);
-                  return {};
-                },
-              }),
-            }),
-          },
-          onupgradeneeded: null as (() => void) | null,
-          onsuccess: null as (() => void) | null,
-        };
-        queueMicrotask(() => {
-          (req.onupgradeneeded as (() => void) | null)?.();
-          (req.onsuccess as (() => void) | null)?.();
-        });
-        return req;
-      },
-    };
-
-    // Wrap transaction put completion synchronously after put microtask.
-    const origOpen = mockIndexedDB.open;
-    mockIndexedDB.open = () => {
-      const req = origOpen();
-      const origTx = (req.result as { transaction: () => Record<string, unknown> }).transaction;
-      (req.result as { transaction: () => Record<string, unknown> }).transaction = () => {
-        const tx = origTx();
-        queueMicrotask(() => (tx.oncomplete as (() => void) | null)?.());
-        return tx;
-      };
-      return req;
-    };
-
     const fakeLocation = { hash: '#/', href: 'https://www.youtube.com/tv#/' };
     const fakeLocalStorage = {
       getItem: (k: string) => localStorageMap.get(k) ?? null,
@@ -444,7 +409,8 @@ describe('End-to-end userscript bundle lifecycle', () => {
       document: fakeDocument,
       location: fakeLocation,
       localStorage: fakeLocalStorage,
-      indexedDB: mockIndexedDB,
+      indexedDB: fakeIdb,
+      IDBKeyRange,
       fetch: mockFetch,
       Response: MockResponse,
       Map: globalThis.Map,
@@ -627,11 +593,28 @@ describe('End-to-end userscript bundle lifecycle', () => {
 
     resolveHost.instance.resolveCommand({
       setClientSettingEndpoint: {
-        settingDatas: [{ clientSettingEnum: { item: 'enableAdBlock' }, boolValue: false }],
+        settingDatas: [
+          { clientSettingEnum: { item: 'enableAdBlock' }, boolValue: false },
+          { clientSettingEnum: { item: 'sponsorBlockManualSkips' }, arrayValue: 'outro' },
+        ],
       },
     });
-    await new Promise((r) => setTimeout(r, 15));
-    assert.equal((idbStore.get('ytaf-configuration') as { enableAdBlock?: boolean })?.enableAdBlock, false);
+    // Non-string customAction must fall through cleanly rather than recursing infinitely.
+    assert.doesNotThrow(() => resolveHost.instance.resolveCommand({ customAction: { action: 123 } }));
+    await new Promise((r) => setTimeout(r, 30));
+    const prevIdb = (globalThis as { indexedDB?: unknown }).indexedDB;
+    (globalThis as { indexedDB?: unknown }).indexedDB = fakeIdb;
+    let storedConfig: { enableAdBlock?: boolean; sponsorBlockManualSkips?: string[] } | undefined;
+    try {
+      storedConfig = await idbGet<{ enableAdBlock?: boolean; sponsorBlockManualSkips?: string[] }>(
+        'ytaf-configuration',
+        createStore('MyTubeDB', 'settings')
+      );
+    } finally {
+      (globalThis as { indexedDB?: unknown }).indexedDB = prevIdb;
+    }
+    assert.equal(storedConfig?.enableAdBlock, false);
+    assert.equal(storedConfig?.sponsorBlockManualSkips?.includes('outro'), false);
 
     const playbackCmd: Record<string, any> = {
       openPopupAction: {

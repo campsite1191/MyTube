@@ -1,4 +1,5 @@
 import { onVideo } from '../core/player-observer.ts';
+import { injectCss } from '../core/styles.ts';
 import { readFormattedText } from '../transforms/feed-filter.ts';
 import type { FormattedText, PlayerResponse } from '../types/innertube.ts';
 import { formatCompactCount } from '../utils/feed-helpers.ts';
@@ -143,9 +144,7 @@ function scheduleBadgeSync(): void {
 function installCountBadgeStyles(): void {
   if (stylesInstalled || typeof document === 'undefined') return;
   stylesInstalled = true;
-  try {
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(`
+  injectCss(`
       ytlr-watch-default [idomkey="like-button"][data-tt-count],
       ytlr-watch-default [idomkey="dislike-button"][data-tt-count] {
         position: relative !important;
@@ -170,10 +169,6 @@ function installCountBadgeStyles(): void {
         pointer-events: none;
       }
     `);
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-  } catch {
-    // Ignore environments without constructable stylesheets.
-  }
 }
 
 function setActionLabel(item: TransportActionItem, label: string): void {
