@@ -121,7 +121,7 @@ function toElapsedTarget(el: Element, fallbackDur = false): ElapsedTarget {
 let cachedTarget: ElapsedTarget | null = null;
 
 function getElapsedTarget(): ElapsedTarget | null {
-  if (cachedTarget && cachedTarget.node.isConnected) return cachedTarget;
+  if (cachedTarget?.node.isConnected) return cachedTarget;
   cachedTarget = findElapsedTarget();
   return cachedTarget;
 }
@@ -180,7 +180,7 @@ function unlisten(el: HTMLVideoElement | null): void {
 }
 
 function liveVideo(): HTMLVideoElement | null {
-  if (video && video.isConnected && Number.isFinite(video.duration) && video.duration > 0 && !video.paused && video.readyState > 0) {
+  if (video?.isConnected && Number.isFinite(video.duration) && video.duration > 0 && !video.paused && video.readyState > 0) {
     return video;
   }
   const found = pickVideo();

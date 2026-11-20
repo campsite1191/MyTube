@@ -125,9 +125,10 @@ export function addPreviews(items: FeedItem[], shouldInject = true): void {
       if (!hasPlayback && !hasOnFocus && allowInject && lvCmdCtx) {
         const ep = extractWatchOrReelEndpoint(lvCmdCtx.onTap);
         if (ep) {
-          const playbackTarget: Record<string, unknown> = isRecord(lv.itemPlayback)
-            ? lv.itemPlayback
-            : (lv.itemPlayback = {});
+          if (!isRecord(lv.itemPlayback)) {
+            lv.itemPlayback = {};
+          }
+          const playbackTarget = lv.itemPlayback as Record<string, unknown>;
           attachPreviewCmd(playbackTarget.playbackCommand, makePreviewCmd(ep), (cmd) => {
             playbackTarget.playbackCommand = cmd;
           });

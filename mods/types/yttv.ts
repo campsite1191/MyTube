@@ -59,6 +59,13 @@ declare global {
       };
       [key: string]: unknown;
     };
-    h5vcc?: Record<string, unknown>;
+    h5vcc?: {
+      system?: {
+        onMemoryPressure?: {
+          addListener?: (cb: () => void) => void;
+        };
+      };
+      [key: string]: unknown;
+    };
   }
 }

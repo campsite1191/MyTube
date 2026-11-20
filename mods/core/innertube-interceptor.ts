@@ -786,7 +786,7 @@ function patchPlaybackContextBody(rawBody: string): string | null {
   }
 }
 
-const wrappedJsonParsers = new WeakSet<Function>();
+const wrappedJsonParsers = new WeakSet<typeof JSON.parse>();
 
 function wrapJsonParseFn(origParse: typeof JSON.parse): typeof JSON.parse {
   if (wrappedJsonParsers.has(origParse)) return origParse;

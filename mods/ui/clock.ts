@@ -101,8 +101,7 @@ function installClockStyles(): void {
 
 function pickActiveVideo(): HTMLVideoElement | null {
   if (
-    cachedVideo &&
-    cachedVideo.isConnected &&
+    cachedVideo?.isConnected &&
     !cachedVideo.ended &&
     !cachedVideo.paused &&
     cachedVideo.readyState > 0 &&
