@@ -1,12 +1,17 @@
 import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
-import { get, set } from '../core/indexed-db.ts';
+import { whenYttvReady } from '../core/yttv-bridge.ts';
 import { isRecord } from '../utils/type-guards.ts';
 
 const RECURRING_ACTIONS_KEY = 'yt.leanback.default::recurring_actions';
 let interval: ReturnType<typeof setInterval> | null = null;
 
-async function handleWhosWatching(enabled: boolean): Promise<void> {
-  const raw = await get<string>(RECURRING_ACTIONS_KEY);
+function handleWhosWatching(enabled: boolean): void {
+  let raw: string | null = null;
+  try {
+    raw = typeof localStorage !== 'undefined' ? localStorage.getItem(RECURRING_ACTIONS_KEY) : null;
+  } catch {
+    return;
+  }
   if (!raw) return;
 
   let recurringActions: Record<string, unknown>;
@@ -25,14 +30,19 @@ async function handleWhosWatching(enabled: boolean): Promise<void> {
   const selectors = [
     innerData['startup-screen-account-selector-with-guest'],
     innerData.whos_watching_fullscreen_zero_accounts,
-    innerData['startup-screen-signed-out-welcome-back']
+    innerData['startup-screen-signed-out-welcome-back'],
   ].filter(isRecord);
+  if (selectors.length === 0) return;
 
-  const applyTimestamp = async (ts: number): Promise<void> => {
+  const applyTimestamp = (ts: number): void => {
     for (const selector of selectors) {
       selector.lastFired = ts;
     }
-    await set(RECURRING_ACTIONS_KEY, JSON.stringify(recurringActions));
+    try {
+      localStorage.setItem(RECURRING_ACTIONS_KEY, JSON.stringify(recurringActions));
+    } catch {
+      // Ignore storage quota / security errors.
+    }
   };
 
   if (interval !== null) {
@@ -41,29 +51,45 @@ async function handleWhosWatching(enabled: boolean): Promise<void> {
   }
 
   if (!enabled) {
-    // If disabled, set to future
+    // Push recurring timestamps 7 days ahead so YouTube skips the "Who's watching?" prompt.
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + 7);
-    await applyTimestamp(futureDate.getTime());
+    applyTimestamp(futureDate.getTime());
+    return;
+  }
+
+  const now = Date.now();
+  const shouldPermanent = Boolean(configRead('permanentlyEnableWhoIsWatchingMenu'));
+  const firstLastFired = typeof selectors[0]?.lastFired === 'number' ? selectors[0].lastFired : 0;
+  if (!shouldPermanent && now - firstLastFired > 0 && now - firstLastFired < 2 * 60 * 60 * 1000) {
+    return;
+  }
+
+  if (shouldPermanent) {
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 7);
+    applyTimestamp(pastDate.getTime());
+    interval = setInterval(() => {
+      const tickPast = new Date();
+      tickPast.setDate(tickPast.getDate() - 7);
+      applyTimestamp(tickPast.getTime());
+    }, 60 * 1000);
   } else {
-    // If enabled, apply now
-    const now = Date.now();
-    await applyTimestamp(now);
-    if (configRead('permanentlyEnableWhoIsWatchingMenu')) {
-      interval = setInterval(() => applyTimestamp(Date.now()), 60 * 1000);
-    }
+    applyTimestamp(now);
   }
 }
 
 if (typeof window !== 'undefined') {
   configChangeEmitter.addEventListener('configChange', (event) => {
-    const { key, value } = event.detail;
-    if (key === 'enableWhoIsWatchingMenu') {
-      handleWhosWatching(Boolean(value));
+    const key = event.detail?.key;
+    if (key === 'enableWhoIsWatchingMenu' || key === 'permanentlyEnableWhoIsWatchingMenu') {
+      handleWhosWatching(Boolean(configRead('enableWhoIsWatchingMenu')));
     }
   });
 
-  void whenConfigReady().then(() => {
-    void handleWhosWatching(configRead('enableWhoIsWatchingMenu'));
+  whenYttvReady(() => {
+    void whenConfigReady().then(() => {
+      handleWhosWatching(Boolean(configRead('enableWhoIsWatchingMenu')));
+    });
   });
 }

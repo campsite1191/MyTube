@@ -1,26 +1,6 @@
-interface TrustedTypePolicyFactoryLike {
-  defaultPolicy?: unknown;
-  createPolicy: (
-    name: string,
-    rules: {
-      createHTML?: (input: string) => string;
-      createScript?: (input: string) => string;
-      createScriptURL?: (input: string) => string;
-    }
-  ) => unknown;
-}
-
-try {
-  const trustedTypesFactory = (window as unknown as { trustedTypes?: TrustedTypePolicyFactoryLike }).trustedTypes;
-  if (trustedTypesFactory && !trustedTypesFactory.defaultPolicy) {
-    trustedTypesFactory.createPolicy('default', {
-      createHTML: (input: string) => input,
-      createScript: (input: string) => input,
-      createScriptURL: (input: string) => input,
-    });
-  }
-} catch (_) {}
-
+// Attach the active CSP nonce onto dynamically created `<style>` fallback elements
+// without claiming `trustedTypes.createPolicy('default', ...)` at document-start,
+// which would conflict if YouTube TV registers its own default policy.
 try {
   let cachedNonce = '';
   type CreateElementFn = (
