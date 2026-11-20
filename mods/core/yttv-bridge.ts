@@ -4,13 +4,13 @@ import type {
   YttvCommandExecutor,
   YttvResolveCommandHost,
 } from '../types/yttv.ts';
-import { isRecord } from '../utils/type-guards.ts';
+import { isObjectLike, isRecord } from '../utils/type-guards.ts';
 
 function getYttvServicesMap(): Map<string, unknown> | null {
   const yttv = typeof window !== 'undefined' ? window._yttv : undefined;
   if (!yttv) return null;
   for (const entry of Object.values(yttv)) {
-    if (isRecord(entry) && entry.mappings instanceof Map) {
+    if (isObjectLike(entry) && entry.mappings instanceof Map) {
       return entry.mappings as Map<string, unknown>;
     }
   }
@@ -19,7 +19,7 @@ function getYttvServicesMap(): Map<string, unknown> | null {
 
 export function getKabukiInnerTubeClient(): KabukiInnerTubeClient | null {
   const client = getYttvServicesMap()?.get('KabukiInnerTubeClient');
-  if (isRecord(client) && typeof client.fetch === 'function') {
+  if (isObjectLike(client) && typeof client.fetch === 'function') {
     return client as unknown as KabukiInnerTubeClient;
   }
   return null;
@@ -27,7 +27,7 @@ export function getKabukiInnerTubeClient(): KabukiInnerTubeClient | null {
 
 export function getCurrentIdentityService(): CurrentIdentityService | null {
   const service = getYttvServicesMap()?.get('CurrentIdentityService');
-  if (isRecord(service) && typeof service.get === 'function') {
+  if (isObjectLike(service) && typeof service.get === 'function') {
     return service as unknown as CurrentIdentityService;
   }
   return null;
@@ -37,7 +37,7 @@ export function findResolveCommandHost(): YttvResolveCommandHost | null {
   const yttv = typeof window !== 'undefined' ? window._yttv : undefined;
   if (!yttv) return null;
   for (const entry of Object.values(yttv)) {
-    if (isRecord(entry) && isRecord(entry.instance) && typeof entry.instance.resolveCommand === 'function') {
+    if (isObjectLike(entry) && isObjectLike(entry.instance) && typeof entry.instance.resolveCommand === 'function') {
       return entry as unknown as YttvResolveCommandHost;
     }
   }
@@ -135,7 +135,7 @@ export function getCommandExecutor(): YttvCommandExecutor | null {
   let executeFunction: ((command: unknown) => unknown) | null = null;
 
   for (const entry of Object.values(yttv)) {
-    if (!isRecord(entry) || typeof entry.getInstance !== 'function') continue;
+    if (!isObjectLike(entry) || typeof entry.getInstance !== 'function') continue;
     const rawEntry = entry as { getInstance: () => unknown; toString?: () => string };
     let candidateInstance: unknown;
     try {
@@ -144,11 +144,11 @@ export function getCommandExecutor(): YttvCommandExecutor | null {
       continue;
     }
     if (String(rawEntry).includes('ytlrActionRouter')) {
-      if (isRecord(candidateInstance)) instance = candidateInstance;
+      if (isObjectLike(candidateInstance)) instance = candidateInstance;
       continue;
     }
 
-    if (!isRecord(candidateInstance)) continue;
+    if (!isObjectLike(candidateInstance)) continue;
     const proto = Object.getPrototypeOf(candidateInstance);
     if (!isRecord(proto)) continue;
     for (const propName of Object.getOwnPropertyNames(proto)) {

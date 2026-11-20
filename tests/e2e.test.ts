@@ -501,12 +501,12 @@ describe('End-to-end userscript bundle lifecycle', () => {
     // 3. Initialize mock window._yttv and notify observers
     const flagsMap = new Map<string, unknown>([['ENABLE_PREVIEWS_WITH_SOUND', false]]);
     const yttvJsonParse = (s: string) => JSON.parse(s);
-    const resolveHost = {
-      instance: {
-        resolveCommand: (cmd: unknown) => {
-          resolvedCommands.push(cmd);
-          return true;
-        },
+    // Real YouTube TV exports Closure singleton constructors (`typeof entry === 'function'`) on `window._yttv`.
+    function resolveHost(): void {}
+    resolveHost.instance = {
+      resolveCommand: (cmd: unknown) => {
+        resolvedCommands.push(cmd);
+        return true;
       },
     };
     function ActionFn(this: { actionName: string }, actionName: string) {
@@ -519,9 +519,8 @@ describe('End-to-end userscript bundle lifecycle', () => {
         executedActions.push(action.actionName);
       }
     }
-    const executorHost = {
-      getInstance: () => new ExecutorInstance(),
-    };
+    function executorHost(): void {}
+    executorHost.getInstance = () => new ExecutorInstance();
     fakeWindow._yttv = {
       flagsMap,
       resolveHost,

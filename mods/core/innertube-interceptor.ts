@@ -30,7 +30,7 @@ import { transformGuideResponse } from '../ui/custom-guide-action.ts';
 import { patchSettingsInPlace } from '../ui/custom-yt-settings.ts';
 import { ButtonRenderer, longPressData, MenuServiceItemRenderer, timelyAction } from '../ui/yt-ui.ts';
 import { buildLongPressPayload } from '../utils/feed-helpers.ts';
-import { isRecord } from '../utils/type-guards.ts';
+import { isObjectLike, isRecord } from '../utils/type-guards.ts';
 import { configChangeEmitter, configRead, whenConfigReady } from './config.ts';
 import { findFeedbackToken } from './innertube-calls.ts';
 import resolveCommand, { patchResolveCommand } from './resolve-command.ts';
@@ -837,7 +837,7 @@ function syncYttvPreviewAndJson(): void {
     if (entry instanceof Map && entry.has('ENABLE_PREVIEWS_WITH_SOUND')) {
       entry.set('ENABLE_PREVIEWS_WITH_SOUND', enablePreviews);
     }
-    if (isRecord(entry) && isRecord(entry.JSON) && typeof entry.JSON.parse === 'function') {
+    if (isObjectLike(entry) && isObjectLike(entry.JSON) && typeof entry.JSON.parse === 'function') {
       entry.JSON.parse = wrapJsonParseFn(entry.JSON.parse as typeof JSON.parse);
     }
   }

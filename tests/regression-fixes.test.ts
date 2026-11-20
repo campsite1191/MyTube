@@ -190,12 +190,11 @@ describe('regression fixes', () => {
       assert.equal(readyCount, 0);
 
       const firstCalls: unknown[] = [];
-      const firstHost = {
-        instance: {
-          resolveCommand: (cmd: unknown) => {
-            firstCalls.push(cmd);
-            return 'orig-first';
-          },
+      function firstHost(): void {}
+      firstHost.instance = {
+        resolveCommand: (cmd: unknown) => {
+          firstCalls.push(cmd);
+          return 'orig-first';
         },
       };
       (fakeWindow._yttv as Record<string, unknown>).mainRouter = firstHost;

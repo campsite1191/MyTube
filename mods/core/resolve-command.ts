@@ -5,7 +5,7 @@ import modernUI, { optionShow } from '../ui/settings.ts';
 import showGuideSettings from '../ui/sidebar-modification.ts';
 import { speedSettings } from '../ui/speed-ui.ts';
 import { buttonItem, overlayMessageRenderer, overlayPanelItemListRenderer, showModal, showToast } from '../ui/yt-ui.ts';
-import { isRecord } from '../utils/type-guards.ts';
+import { isObjectLike, isRecord } from '../utils/type-guards.ts';
 import type { ConfigKey, ConfigSchema, SidebarContentItem } from './config.ts';
 import { configRead, configWrite } from './config.ts';
 import { t } from './i18n.ts';
@@ -20,7 +20,7 @@ function isLiveResolveInstance(instance: ResolveInstance | null): instance is Re
   if (!instance || typeof instance.resolveCommand !== 'function' || typeof window === 'undefined' || !window._yttv) {
     return false;
   }
-  return Object.values(window._yttv).some((entry) => isRecord(entry) && entry.instance === instance);
+  return Object.values(window._yttv).some((entry) => isObjectLike(entry) && entry.instance === instance);
 }
 
 export default async function resolveCommand(cmd: unknown, arg?: unknown): Promise<unknown> {
@@ -127,7 +127,7 @@ function runCustomAction(action: string, parameters?: unknown): void {
 export function patchResolveCommand(): void {
   if (typeof window === 'undefined' || !window._yttv) return;
   for (const entry of Object.values(window._yttv)) {
-    if (!isRecord(entry) || !isRecord(entry.instance) || typeof entry.instance.resolveCommand !== 'function') {
+    if (!isObjectLike(entry) || !isObjectLike(entry.instance) || typeof entry.instance.resolveCommand !== 'function') {
       continue;
     }
     const instance = entry.instance as { resolveCommand: (cmd: unknown, arg?: unknown) => unknown };
