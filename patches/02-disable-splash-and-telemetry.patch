@@ -12,7 +12,7 @@ index 90a4e2d..015676e 100644
  }
  
 diff --git a/cobalt/browser/features.cc b/cobalt/browser/features.cc
-index 4820de2..e6b6d43 100644
+index 4820de2..c5867a8 100644
 --- a/cobalt/browser/features.cc
 +++ b/cobalt/browser/features.cc
 @@ -63,7 +63,7 @@ BASE_FEATURE(kHangWatchThreadPoolDump,
@@ -42,6 +42,15 @@ index 4820de2..e6b6d43 100644
  
  #if BUILDFLAG(IS_IOS_TVOS)
  BASE_FEATURE(kForceVideoSplashScreen,
+@@ -149,7 +149,7 @@ BASE_FEATURE_PARAM(std::string,
+ #if BUILDFLAG(IS_ANDROID)
+ BASE_FEATURE(kEnablePictureInPicture,
+              "PictureInPicture",
+-             base::FEATURE_ENABLED_BY_DEFAULT);
++             base::FEATURE_DISABLED_BY_DEFAULT);
+ #else   // BUILDFLAG(IS_ANDROID)
+ BASE_FEATURE(kEnablePictureInPicture,
+              "PictureInPicture",
 @@ -199,7 +199,7 @@ const base::FeatureParam<int> kCobaltMemoryPressurePollIntervalSecondsParam{
  
  BASE_FEATURE(kCobaltSkipTrustedHeaderClient,
@@ -51,6 +60,15 @@ index 4820de2..e6b6d43 100644
  
  BASE_FEATURE(kCobaltFreezeOnBackground,
               "CobaltFreezeOnBackground",
+@@ -213,7 +213,7 @@ const base::FeatureParam<int> kCobaltFreezeOnBackgroundDelayMs{
+ #if BUILDFLAG(IS_ANDROID)
+ BASE_FEATURE(kCobaltProcessStateSummary,
+              "CobaltProcessStateSummary",
+-             base::FEATURE_ENABLED_BY_DEFAULT);
++             base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE_PARAM(base::TimeDelta,
+                    kProcessStateSummaryMinFlushIntervalParam,
 @@ -228,11 +228,11 @@ BASE_FEATURE(kCobaltStabilityMetricsDeduplication,
  
  BASE_FEATURE(kCobaltStartupPreconnect,

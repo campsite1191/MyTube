@@ -1,5 +1,5 @@
 diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
-index 6e1be48..c4e7b67 100644
+index 9c6df12..dd49e81 100644
 --- a/cobalt/android/androidtv_flag_map.cc
 +++ b/cobalt/android/androidtv_flag_map.cc
 @@ -241,8 +241,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
@@ -12,8 +12,18 @@ index 6e1be48..c4e7b67 100644
      std::string feature = network::features::kCobaltDynamicMojoPipeSizing.name;
      if (!mojo_pipe_params.empty()) {
        base::StrAppend(&feature, {":", base::JoinString(mojo_pipe_params, "/")});
+@@ -250,8 +249,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+     enable_features.push_back(std::move(feature));
+   }
+ 
+-  enable_feature_if_set(
+-      flags::kEnableCobaltContentLengthAwareMojoPipeSizing,
++  enable_features.emplace_back(
+       network::features::kCobaltContentLengthAwareMojoPipeSizing.name);
+ 
+   std::vector<std::string> interest_area_params;
 diff --git a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2 b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
-index 52b5e4b..e0f6758 100644
+index 4963006..93258b1 100644
 --- a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
 +++ b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
 @@ -1,5 +1,5 @@
@@ -51,7 +61,7 @@ index 52b5e4b..e0f6758 100644
              android:debuggable="{{ debuggable }}"
              android:enableOnBackInvokedCallback="true"
              android:label="{% block application_label %}YouTube{% endblock %}">
-@@ -73,10 +70,6 @@
+@@ -72,10 +69,6 @@
              <meta-data android:name="cobalt.APP_URL" android:value="https://www.youtube.com/tv"/>
              <meta-data android:name="cobalt.ENABLE_SPLASH_SCREEN" android:value="true"/>
              <meta-data android:name="cobalt.EVERGREEN_LITE" android:value="false"/>
@@ -62,7 +72,7 @@ index 52b5e4b..e0f6758 100644
              <meta-data android:name="android.app.lib_name" android:value="cobalt"/>
              <intent-filter>
                <action android:name="android.intent.action.MAIN"/>
-@@ -89,7 +82,6 @@
+@@ -88,7 +81,6 @@
                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH"/>
                <category android:name="android.intent.category.DEFAULT"/>
                <category android:name="android.intent.category.BROWSABLE"/>
@@ -70,7 +80,7 @@ index 52b5e4b..e0f6758 100644
                <data android:scheme="https"/>
                <data android:host="youtube.com"/>
                <data android:host="www.youtube.com"/>
-@@ -140,7 +132,8 @@
+@@ -139,7 +131,8 @@
                     android:value="org.chromium.content.browser.SmartClipProvider" />
  
          <service android:name="org.chromium.content_shell_apk.ChildProcessLauncherTestHelperService"

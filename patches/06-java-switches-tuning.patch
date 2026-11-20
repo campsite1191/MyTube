@@ -1,5 +1,5 @@
 diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
-index 0b83390..7429887 100644
+index 0b83390..61d4122 100644
 --- a/cobalt/android/androidtv_flag_map.cc
 +++ b/cobalt/android/androidtv_flag_map.cc
 @@ -52,8 +52,11 @@ constexpr char kAreaBasedVideoBufferBudgetFeature[] =
@@ -51,12 +51,20 @@ index 0b83390..7429887 100644
  
    std::vector<std::string> mojo_pipe_params;
    add_numeric_param(
-@@ -268,8 +272,8 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+@@ -263,13 +267,12 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+ 
+   append_switch_if_set(flags::kAvoidCcReuseResource,
+                        ::switches::kAvoidCCReuseResource);
+-  enable_feature_if_set(
+-      flags::kCobaltBypassResourceLoadScheduler,
++  enable_features.emplace_back(
        blink::features::kCobaltBypassResourceLoadScheduler.name);
-   enable_feature_if_set(flags::kCobaltBypassHtmlPreloadScanner,
-                         blink::features::kCobaltBypassHTMLPreloadScanner.name);
+-  enable_feature_if_set(flags::kCobaltBypassHtmlPreloadScanner,
+-                        blink::features::kCobaltBypassHTMLPreloadScanner.name);
 -  enable_feature_if_set(flags::kEnableCobaltMmapFontCache,
 -                        kCobaltMmapFontCacheFeature);
++  enable_features.emplace_back(
++      blink::features::kCobaltBypassHTMLPreloadScanner.name);
 +  enable_features.emplace_back(kEnableAv1StartupOptimizationFeature);
 +  enable_features.emplace_back(kCobaltMmapFontCacheFeature);
    enable_feature_if_set(flags::kAreaBasedVideoBufferBudget,
