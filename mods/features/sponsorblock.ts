@@ -238,6 +238,38 @@ export function clearSponsorBlockCache(): void {
   sponsorBlockCache.clear();
 }
 
+/** Fetches sorted SponsorBlock segments for `videoId`, caching hits and 404/empty misses in LRU memory. */
+export async function fetchSponsorBlockSegments(videoId: string, signal?: AbortSignal): Promise<SponsorBlockSegment[]> {
+  const cached = sponsorBlockCache.get(videoId);
+  if (cached !== undefined) return cached;
+
+  const videoHash = await computeSha256HexPrefix(videoId, 4);
+  if (signal?.aborted) return [];
+
+  const categoriesParam = encodeURIComponent(JSON.stringify(SPONSORBLOCK_CATEGORIES));
+  const resp = await fetch(`${SPONSORBLOCK_API_URL}/skipSegments/${videoHash}?categories=${categoriesParam}`, {
+    signal,
+  });
+  if (resp.status === 404) {
+    sponsorBlockCache.set(videoId, []);
+    return [];
+  }
+  if (!resp.ok) return [];
+
+  const results = (await resp.json()) as SkipSegmentsVideoEntry[];
+  if (!Array.isArray(results)) return [];
+
+  const entry = results.find((v) => v.videoID === videoId);
+  if (!entry?.segments?.length) {
+    sponsorBlockCache.set(videoId, []);
+    return [];
+  }
+
+  const sortedSegments = [...entry.segments].sort((a, b) => a.segment[0] - b.segment[0]);
+  sponsorBlockCache.set(videoId, sortedSegments);
+  return sortedSegments;
+}
+
 class SponsorBlockHandler {
   readonly videoId: string;
   private video: HTMLVideoElement | null = null;
@@ -283,38 +315,9 @@ class SponsorBlockHandler {
 
   async init(): Promise<void> {
     try {
-      const cached = sponsorBlockCache.get(this.videoId);
-      if (cached !== undefined) {
-        if (cached.length === 0 || !this.active) return;
-        this.applyLoadedSegments(cached);
-        return;
-      }
-
-      const videoHash = await computeSha256HexPrefix(this.videoId, 4);
-      if (!this.active) return;
-
-      const categoriesParam = encodeURIComponent(JSON.stringify(SPONSORBLOCK_CATEGORIES));
-      const resp = await fetch(`${SPONSORBLOCK_API_URL}/skipSegments/${videoHash}?categories=${categoriesParam}`, {
-        signal: this.abortController.signal,
-      });
-      if (resp.status === 404) {
-        sponsorBlockCache.set(this.videoId, []);
-        return;
-      }
-      if (!resp.ok) return;
-
-      const results = (await resp.json()) as SkipSegmentsVideoEntry[];
-      if (!this.active || !Array.isArray(results)) return;
-
-      const entry = results.find((v) => v.videoID === this.videoId);
-      if (!entry?.segments?.length) {
-        sponsorBlockCache.set(this.videoId, []);
-        return;
-      }
-
-      const sortedSegments = [...entry.segments].sort((a, b) => a.segment[0] - b.segment[0]);
-      sponsorBlockCache.set(this.videoId, sortedSegments);
-      this.applyLoadedSegments(sortedSegments);
+      const segments = await fetchSponsorBlockSegments(this.videoId, this.abortController.signal);
+      if (!this.active || segments.length === 0) return;
+      this.applyLoadedSegments(segments);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       console.warn('[SponsorBlock] Failed to load segments:', error);

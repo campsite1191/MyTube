@@ -3,11 +3,13 @@ import { describe, test } from 'node:test';
 import type { SponsorBlockSegment } from '../mods/features/sponsorblock.ts';
 import {
   BAR_TYPES,
+  clearSponsorBlockCache,
   computeSegmentBarGeometry,
   computeSha256HexPrefix,
   computeSkipDelayMs,
   computeTargetTimeAfterSkip,
   extractWatchVideoId,
+  fetchSponsorBlockSegments,
   findNextSegment,
   getEnabledSkipCategories,
   getSuppressionDecision,
@@ -105,5 +107,67 @@ describe('getSuppressionDecision', () => {
 
     const d3 = getSuppressionDecision(state, 2500, 1000);
     assert.deepEqual({ suppress: d3.suppress, showToast: d3.showToast }, { suppress: false, showToast: false });
+  });
+});
+
+describe('fetchSponsorBlockSegments caching', () => {
+  test('caches sorted hits and 404 misses, retries transient 500s, and resets via clearSponsorBlockCache', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevFetch = globals.fetch;
+    let fetchCount = 0;
+    let serverStatus = 500;
+
+    t.after(() => {
+      globals.fetch = prevFetch;
+      clearSponsorBlockCache();
+    });
+
+    clearSponsorBlockCache();
+    globals.fetch = (async (): Promise<Response> => {
+      fetchCount++;
+      if (serverStatus === 404) return new Response(null, { status: 404 });
+      if (serverStatus !== 200) return new Response(null, { status: serverStatus });
+      return new Response(
+        JSON.stringify([
+          {
+            videoID: 'sbCacheVid',
+            segments: [
+              { UUID: 's2', category: 'outro', segment: [90, 100] },
+              { UUID: 's1', category: 'sponsor', segment: [5, 15] },
+            ],
+          },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }) as typeof fetch;
+
+    // 500 is transient and must not be cached.
+    assert.deepEqual(await fetchSponsorBlockSegments('sbCacheVid'), []);
+    assert.equal(fetchCount, 1);
+
+    // Next attempt returns 200 -> sorted & cached.
+    serverStatus = 200;
+    const loaded = await fetchSponsorBlockSegments('sbCacheVid');
+    assert.deepEqual(
+      loaded.map((s) => s.UUID),
+      ['s1', 's2']
+    );
+    assert.equal(fetchCount, 2);
+
+    // Repeat call hits LRU cache without fetch.
+    const cachedHit = await fetchSponsorBlockSegments('sbCacheVid');
+    assert.equal(cachedHit.length, 2);
+    assert.equal(fetchCount, 2);
+
+    // 404 negative miss is cached too until clearSponsorBlockCache.
+    serverStatus = 404;
+    assert.deepEqual(await fetchSponsorBlockSegments('sb404Vid'), []);
+    assert.equal(fetchCount, 3);
+    assert.deepEqual(await fetchSponsorBlockSegments('sb404Vid'), []);
+    assert.equal(fetchCount, 3);
+
+    clearSponsorBlockCache();
+    await fetchSponsorBlockSegments('sb404Vid');
+    assert.equal(fetchCount, 4);
   });
 });
