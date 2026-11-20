@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Jinja2
-        run: python -m pip install --quiet jinja2
+        run: python -m pip install --retries 5 --timeout 30 --quiet jinja2
 
       - name: Verify Patch Application & Manifest Invariants
         run: |

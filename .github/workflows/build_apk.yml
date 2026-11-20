@@ -242,7 +242,7 @@ jobs:
           OUT_DIR="out/${PLATFORM}_${BUILD_TYPE}"
 
           export CCACHE_DIR="$HOME/.cache/ccache"
-          export CCACHE_MAXSIZE=7G
+          export CCACHE_MAXSIZE=9G
           export CCACHE_COMPRESS=true
           export CCACHE_COMPRESSLEVEL=1
           export CCACHE_COMPILERCHECK=content
@@ -250,7 +250,7 @@ jobs:
           export CCACHE_BASEDIR="$PWD"
           export CCACHE_NOHASHDIR=true
           export CCACHE_CPP2=yes
-          ccache -M 7G
+          ccache -M 9G
           ccache -z
 
           # Reserve 30m before the 360m job cap so quiescing, Save ccache, and Auto-Retry always complete.
