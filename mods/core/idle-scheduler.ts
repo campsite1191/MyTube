@@ -22,6 +22,19 @@ export function schedulePostFirstPaint(task: () => void): void {
 }
 
 /**
+ * Resolves once the DOM has a root/body ready (immediately in non-DOM test
+ * environments or when `document.readyState !== 'loading'`).
+ */
+export function waitForDomReady(): Promise<void> {
+  if (typeof document === 'undefined' || document.readyState !== 'loading') {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
+  });
+}
+
+/**
  * Installs idempotent `<link rel="preconnect">` hints for external addon origins
  * after first paint so DNS/TLS setup overlaps idle time before video playback.
  */

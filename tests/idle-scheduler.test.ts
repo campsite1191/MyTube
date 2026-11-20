@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { preconnectOrigins, schedulePostFirstPaint } from '../mods/core/idle-scheduler.ts';
+import {
+  preconnectOrigins,
+  schedulePostFirstPaint,
+  waitForDomReady,
+} from '../mods/core/idle-scheduler.ts';
 
 describe('schedulePostFirstPaint', () => {
   test('runs synchronously when window is unavailable (SSR / Node)', () => {
@@ -89,5 +93,63 @@ describe('preconnectOrigins', () => {
       href: 'https://returnyoutubedislikeapi.com',
       crossOrigin: 'anonymous',
     });
+  });
+});
+
+describe('waitForDomReady', () => {
+  test('resolves immediately when document is missing or not loading', async (t) => {
+    const prevDocument = (globalThis as Record<string, unknown>).document;
+    t.after(() => {
+      if (prevDocument === undefined) {
+        delete (globalThis as Record<string, unknown>).document;
+      } else {
+        (globalThis as Record<string, unknown>).document = prevDocument;
+      }
+    });
+
+    await waitForDomReady();
+
+    (globalThis as Record<string, unknown>).document = { readyState: 'interactive' };
+    await waitForDomReady();
+
+    (globalThis as Record<string, unknown>).document = { readyState: 'complete' };
+    await waitForDomReady();
+  });
+
+  test('waits for DOMContentLoaded when document.readyState is loading', async (t) => {
+    const prevDocument = (globalThis as Record<string, unknown>).document;
+    t.after(() => {
+      if (prevDocument === undefined) {
+        delete (globalThis as Record<string, unknown>).document;
+      } else {
+        (globalThis as Record<string, unknown>).document = prevDocument;
+      }
+    });
+
+    let listener: (() => void) | undefined;
+    let capturedOptions: { once?: boolean } | undefined;
+    (globalThis as Record<string, unknown>).document = {
+      readyState: 'loading',
+      addEventListener: (event: string, cb: () => void, opts?: { once?: boolean }) => {
+        if (event === 'DOMContentLoaded') {
+          listener = cb;
+          capturedOptions = opts;
+        }
+      },
+    };
+
+    let settled = false;
+    const readyPromise = waitForDomReady().then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    assert.equal(settled, false);
+    assert.equal(typeof listener, 'function');
+    assert.deepEqual(capturedOptions, { once: true });
+
+    listener?.();
+    await readyPromise;
+    assert.equal(settled, true);
   });
 });

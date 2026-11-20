@@ -1,5 +1,5 @@
 diff --git a/cobalt/android/BUILD.gn b/cobalt/android/BUILD.gn
-index 3cf2b28..472c107 100644
+index 160587a..52c762b 100644
 --- a/cobalt/android/BUILD.gn
 +++ b/cobalt/android/BUILD.gn
 @@ -358,8 +358,14 @@ android_library("cobalt_apk_java") {
@@ -19,55 +19,59 @@ index 3cf2b28..472c107 100644
    disable_compression = true
    deps = [
      "//starboard/content/fonts:copy_font_data",
-diff --git a/third_party/blink/renderer/core/dom/document.cc b/third_party/blink/renderer/core/dom/document.cc
-index c040351..acb0872 100644
---- a/third_party/blink/renderer/core/dom/document.cc
-+++ b/third_party/blink/renderer/core/dom/document.cc
-@@ -28,6 +28,10 @@
-  */
+diff --git a/cobalt/shell/browser/shell.cc b/cobalt/shell/browser/shell.cc
+index b08c7f1..f62ce2e 100644
+--- a/cobalt/shell/browser/shell.cc
++++ b/cobalt/shell/browser/shell.cc
+@@ -86,6 +86,9 @@
+ #endif
  
- #include "third_party/blink/renderer/core/dom/document.h"
+ #if BUILDFLAG(IS_ANDROID)
 +#include "base/android/apk_assets.h"
 +#include "base/files/file.h"
-+#include "base/no_destructor.h"
-+#include "third_party/blink/renderer/core/script/classic_script.h"
- 
- #include <algorithm>
- #include <memory>
-@@ -4010,6 +4014,36 @@ void Document::ImplicitClose() {
- 
-   load_event_progress_ = kLoadEventInProgress;
- 
-+  // Custom userscript injection (bundled locally, main frame on YouTube).
-+  if (IsA<HTMLDocument>(this) && domWindow() && IsInOutermostMainFrame()) {
-+    const std::string host = Url().Host().Utf8();
-+    if (host == "youtube.com" ||
-+        (host.size() > 12 &&
-+         host.compare(host.size() - 12, 12, ".youtube.com") == 0)) {
-+      static const base::NoDestructor<std::string> kCachedUserScript([] {
-+        std::string out;
-+        base::MemoryMappedFile::Region region;
-+        base::File asset_file(
-+            base::android::OpenApkAsset("assets/userscript.js", &region));
-+        if (asset_file.IsValid() && region.size > 0) {
-+          base::MemoryMappedFile mapped;
-+          if (mapped.Initialize(std::move(asset_file), region)) {
-+            out.assign(reinterpret_cast<const char*>(mapped.data()),
-+                       mapped.length());
-+          }
-+        }
-+        return out;
-+      }());
-+      if (!kCachedUserScript->empty()) {
-+        ClassicScript::CreateUnspecifiedScript(
-+            String::FromUTF8(*kCachedUserScript),
-+            ScriptSourceLocationType::kInternal,
-+            SanitizeScriptErrors::kDoNotSanitize)
-+            ->RunScript(domWindow());
++#include "base/files/memory_mapped_file.h"
+ #if BUILDFLAG(USE_STARBOARD_MEDIA)
+ #include "starboard/android/shared/audio_permission_requester.h"
+ #endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+@@ -738,6 +741,41 @@ void Shell::RegisterInjectedJavaScript() {
+                    << ", error message: " << result.error_message.value();
+     }
+   }
++
++#if BUILDFLAG(IS_ANDROID)
++  static const base::NoDestructor<std::string> kCachedUserScript([] {
++    std::string out;
++    base::MemoryMappedFile::Region region;
++    base::File asset_file(
++        base::android::OpenApkAsset("assets/userscript.js", &region));
++    if (asset_file.IsValid() && region.size > 0) {
++      base::MemoryMappedFile mapped;
++      if (mapped.Initialize(std::move(asset_file), region)) {
++        out.assign(reinterpret_cast<const char*>(mapped.data()),
++                   mapped.length());
++      } else {
++        LOG(ERROR) << "Failed to mmap assets/userscript.js";
 +      }
++    } else {
++      LOG(ERROR) << "Failed to open assets/userscript.js";
++    }
++    return out;
++  }());
++
++  if (!kCachedUserScript->empty()) {
++    LOG(INFO) << "JS injection for filename: assets/userscript.js ("
++              << kCachedUserScript->size() << " bytes)";
++    const std::u16string userscript(base::UTF8ToUTF16(*kCachedUserScript));
++    const std::vector<std::string> yt_origins(
++        {"https://youtube.com", "https://*.youtube.com"});
++    auto result =
++        js_communication_host_->AddDocumentStartJavaScript(userscript, yt_origins);
++    if (result.error_message.has_value()) {
++      LOG(ERROR) << "Failed to register userscript.js injection: "
++                 << result.error_message.value();
 +    }
 +  }
-+
-   // We have to clear the parser, in case someone document.write()s from the
-   // onLoad event handler, as in Radar 3206524.
-   DetachParser();
++#endif  // BUILDFLAG(IS_ANDROID)
+ }
+ 
+ void Shell::LoadSplashScreenWebContents() {

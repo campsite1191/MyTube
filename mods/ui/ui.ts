@@ -21,7 +21,7 @@ function installGlobalStyles(): void {
   }
   const style = document.createElement('style');
   style.textContent = css;
-  document.head.appendChild(style);
+  (document.head ?? document.documentElement)?.appendChild(style);
 }
 
 function initUi(): void {

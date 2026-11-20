@@ -42,7 +42,18 @@ function flushWaiters(): void {
 
 function ensureObserving(): void {
   if (domObserver || typeof MutationObserver === 'undefined' || typeof document === 'undefined') return;
-  const target = document.body; // Observe body instead of documentElement
+  const target = document.body ?? document.documentElement;
+  if (!target) {
+    document.addEventListener(
+      'DOMContentLoaded',
+      () => {
+        flushWaiters();
+        ensureObserving();
+      },
+      { once: true }
+    );
+    return;
+  }
   domObserver = new MutationObserver(flushWaiters);
   domObserver.observe(target, { childList: true, subtree: true });
 }
