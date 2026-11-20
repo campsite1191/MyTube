@@ -1,11 +1,20 @@
 diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
-index 51c56db..289ddc4 100644
+index 3ab8934..c6f5706 100644
 --- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
 +++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
-@@ -560,6 +560,32 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+@@ -557,6 +557,46 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
      }
    }
  
++  @Override
++  protected void onNewIntent(Intent intent) {
++    String deepLink = getIntentUrlAsString(intent);
++    if (deepLink.isEmpty()) {
++      return;
++    }
++    getStarboardBridge().handleDeepLink(deepLink);
++  }
++
 +  @Override
 +  protected String getIntentUrlAsString(Intent intent) {
 +    if (intent == null) {
@@ -17,8 +26,13 @@ index 51c56db..289ddc4 100644
 +    }
 +    String scheme = intentUri.getScheme();
 +    String host = intentUri.getHost();
-+    if (scheme == null || !"https".equalsIgnoreCase(scheme) || host == null) {
-+      Log.w(TAG, "Blocked deep link with unsupported scheme or missing host.");
++    int port = intentUri.getPort();
++    if (scheme == null
++        || !"https".equalsIgnoreCase(scheme)
++        || host == null
++        || intentUri.getUserInfo() != null
++        || (port != -1 && port != 443)) {
++      Log.w(TAG, "Blocked deep link with unsupported scheme, host, port, or userinfo.");
 +      return "";
 +    }
 +    String lowerHost = host.toLowerCase(Locale.US);

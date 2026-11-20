@@ -42,7 +42,7 @@ index 30fde0c..78730e3 100644
 +  <color name="primary">@color/cobalt_gray</color>
  </resources>
 diff --git a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2 b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
-index 3ecd390..75e9b6d 100644
+index 3ecd390..4963006 100644
 --- a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
 +++ b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
 @@ -55,9 +55,10 @@
@@ -57,14 +57,12 @@ index 3ecd390..75e9b6d 100644
          {% if debuggable == 'true' %}
          <profileable android:shell="true" android:enabled="true" />
          {% endif %}
-@@ -65,8 +66,9 @@
+@@ -65,7 +66,7 @@
          <activity android:name="dev.cobalt.app.MainActivity"
                    android:launchMode="singleTask"
                    android:theme="@style/CobaltTheme"
 -                  android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|uiMode"
 +                  android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|screenLayout|uiMode"
                    android:windowSoftInputMode="adjustResize"
-+                  android:supportsPictureInPicture="true"
                    android:exported="true">
              <meta-data android:name="cobalt.APP_URL" android:value="https://www.youtube.com/tv"/>
-             <meta-data android:name="cobalt.ENABLE_SPLASH_SCREEN" android:value="true"/>

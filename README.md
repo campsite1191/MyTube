@@ -7,11 +7,14 @@ Custom Cobalt APK builder targeting official upstream [`youtube/cobalt`](https:/
 - `02-disable-splash-and-telemetry.patch`: Enable `kDisableSplashScreen`, `kCobaltSkipTrustedHeaderClient` (eliminating per-request `CobaltTrustedURLLoaderHeaderClient` Mojo pipes), `kCobaltStartupPreconnect`, and `kCobaltFlushHttpServerPropertiesOnPause`, disable `kCobaltVirtualAddressSpaceMetrics` and `kHangWatchRendererThreadDump`, and set `UpdateUploadPermissions(false)` in `CobaltBrowserMainParts::StartMetricsRecording()`.
 - `03-starboard-seek-and-avsync.patch`: Enable the Starboard seek and audio/video sync fixes.
 - `04-bundle-local-userscript.patch`: Bundle `assets/userscript.js` into `coat_assets` and inject it locally on main YouTube frames in `Document::ImplicitClose()`.
-- `05-android-hardening-and-activity-fixes.patch`: Bypass IME for hardware volume keys in `CobaltActivity`, set `android:allowBackup="false"`, `YouTube` app label, `supportsPictureInPicture="true"`, and dark gray shell background (`#0f0f0f`).
+- `05-android-hardening-and-activity-fixes.patch`: Bypass IME for hardware volume keys in `CobaltActivity`, set `android:allowBackup="false"`, `YouTube` app label, `smallestScreenSize|screenLayout` configChanges, and dark gray shell background (`#0f0f0f`).
 - `06-java-switches-tuning.patch`: Tune Java/Chromium/C++ switches and network stack on `27.lts`: remove forced `--enable-low-end-device-mode` in `JavaSwitches.java`, remove `--disable-quic` default and set `128` MB GPU mem default, `--minor-ms`, `48` MB image decode cache cap, clipped image scaling, `EnableAv1StartupOptimization`, and `CobaltMmapFontCache` in `androidtv_flag_map.cc`, drop `--no-concurrent-marking` in `cobalt_switch_defaults_android.cc`, set `delay_main_job_with_available_spdy_session = true` in `NetworkContext`, and remove the startup `0ms` delay short-circuit in `QuicSessionPool::GetTimeDelayForWaitingJob`. Native change: requires a full APK build, not a JS hotswap.
 - `07-allow-ryd-in-csp.patch`: Allow `sponsor.ajay.app`, `dearrow-thumb.ajay.app`, and `returnyoutubedislikeapi.com` in Blink's CSP allowlist.
 - `08-enable-background-freeze.patch`: Enable `kCobaltFreezeOnBackground` to improve resource management when Cobalt is in the background.
-- `09-integrity-check.patch`: Basic APK signature check in `CobaltActivity` to discourage tampering.
+- `09-integrity-check.patch`: Basic APK signature check in `CobaltActivity` using active signing certificates to discourage tampering.
+- `10-media-hdr-aaudio-cache-tuning.patch`: Tune memory/HTTP/GPU caches for 3 GB TVs, enable area-based video buffer budgets, AAudio pull-sink default, and HDR10+ VP9/AV1 profiles.
+- `11-manifest-hardening-and-mojo-sizing.patch`: Harden `AndroidManifest.xml.jinja2` (`debuggable=false`, `usesCleartextTraffic="false"`, `extractNativeLibs="false"`, strip unused permissions) and enable dynamic Mojo pipe sizing.
+- `12-deeplink-url-allowlist.patch`: Validate `https://` scheme, host allowlist, userinfo, and port on deep-link intents in `CobaltActivity`, and skip empty blocked intents in `onNewIntent()`.
 - `assets/res/`: Custom prism launcher icons (`mipmap-*/ic_app.png`) and Android TV banners (`drawable-*/app_banner.png`) copied into `src/cobalt/shell/android/java/res/` during `Build Cobalt APK`.
 
 ## Userscript Source (`mods/` & `tests/`)
