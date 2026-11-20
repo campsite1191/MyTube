@@ -12,9 +12,23 @@ import { t } from './i18n.ts';
 import { getFeedbackPanelTokens, requestNextAndNavigateChannel, sendFeedbackToken } from './innertube-calls.ts';
 import { findResolveCommandHost } from './yttv-bridge.ts';
 
+type ResolveInstance = { resolveCommand: (cmd: InnertubeCommand, arg?: unknown) => unknown };
+
+let activeResolveInstance: ResolveInstance | null = null;
+
+function isLiveResolveInstance(instance: ResolveInstance | null): instance is ResolveInstance {
+  if (!instance || typeof instance.resolveCommand !== 'function' || typeof window === 'undefined' || !window._yttv) {
+    return false;
+  }
+  return Object.values(window._yttv).some((entry) => isRecord(entry) && entry.instance === instance);
+}
+
 export default async function resolveCommand(cmd: unknown, arg?: unknown): Promise<unknown> {
-  const host = findResolveCommandHost();
-  return host ? host.instance.resolveCommand(cmd as InnertubeCommand, arg) : undefined;
+  patchResolveCommand();
+  const target = isLiveResolveInstance(activeResolveInstance)
+    ? activeResolveInstance
+    : findResolveCommandHost()?.instance;
+  return target ? target.resolveCommand(cmd as InnertubeCommand, arg) : undefined;
 }
 
 function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
@@ -102,7 +116,13 @@ function extractCustomAction(cmd: Record<string, unknown>): { action: string; pa
   return null;
 }
 
-const patchedResolveInstances = new WeakSet<object>();
+const patchedResolveFns = new WeakSet<object>();
+
+function runCustomAction(action: string, parameters?: unknown): void {
+  void customAction(action, parameters).catch((error) => {
+    console.error('[ResolveCommand] customAction failed:', action, error);
+  });
+}
 
 export function patchResolveCommand(): void {
   if (typeof window === 'undefined' || !window._yttv) return;
@@ -110,12 +130,12 @@ export function patchResolveCommand(): void {
     if (!isRecord(entry) || !isRecord(entry.instance) || typeof entry.instance.resolveCommand !== 'function') {
       continue;
     }
-    if (patchedResolveInstances.has(entry.instance)) continue;
-    patchedResolveInstances.add(entry.instance);
-
     const instance = entry.instance as { resolveCommand: (cmd: unknown, arg?: unknown) => unknown };
     const ogResolve = instance.resolveCommand;
-    instance.resolveCommand = function (this: unknown, rawCmd: unknown, arg?: unknown): unknown {
+    if (patchedResolveFns.has(ogResolve)) continue;
+
+    const wrappedResolve = function (this: unknown, rawCmd: unknown, arg?: unknown): unknown {
+      activeResolveInstance = instance as ResolveInstance;
       if (!isRecord(rawCmd)) return ogResolve.call(this, rawCmd, arg);
 
       if (isRecord(rawCmd.setClientSettingEndpoint)) {
@@ -123,7 +143,7 @@ export function patchResolveCommand(): void {
       } else {
         const extracted = extractCustomAction(rawCmd);
         if (extracted) {
-          void customAction(extracted.action, extracted.parameters);
+          runCustomAction(extracted.action, extracted.parameters);
           return true;
         }
         const openPopup = isRecord(rawCmd.openPopupAction) ? rawCmd.openPopupAction : undefined;
@@ -139,7 +159,7 @@ export function patchResolveCommand(): void {
         for (const subCmd of cmdExec.commands) {
           const extracted = isRecord(subCmd) ? extractCustomAction(subCmd) : null;
           if (extracted) {
-            void customAction(extracted.action, extracted.parameters);
+            runCustomAction(extracted.action, extracted.parameters);
           } else {
             instance.resolveCommand(subCmd, arg);
           }
@@ -156,6 +176,9 @@ export function patchResolveCommand(): void {
 
       return ogResolve.call(this, rawCmd, arg);
     };
+
+    patchedResolveFns.add(wrappedResolve);
+    instance.resolveCommand = wrappedResolve;
   }
 }
 

@@ -9,9 +9,12 @@ function buildCustomSettingsCategory(): Record<string, unknown> {
     t('settings.ttSettings.title'),
     'custom_settings_open_action',
     {
-      customAction: {
-        action: 'TT_SETTINGS_SHOW',
-        parameters: [],
+      clickTrackingParams: 'null',
+      signalAction: {
+        customAction: {
+          action: 'TT_SETTINGS_SHOW',
+          parameters: [],
+        },
       },
     },
     t('settings.ttSettings.summary'),

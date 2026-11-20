@@ -561,8 +561,18 @@ describe('End-to-end userscript bundle lifecycle', () => {
         title: { runs: [{ text: 'Settings' }] },
         items: [{ settingCategoryCollectionRenderer: { categoryId: 'ABOUT', items: [] } }],
       })
-    ) as { items: Array<{ settingCategoryCollectionRenderer: { categoryId: string } }> };
+    ) as {
+      items: Array<{
+        settingCategoryCollectionRenderer: {
+          categoryId: string;
+          items?: Array<{ settingActionRenderer?: { serviceEndpoint?: unknown } }>;
+        };
+      }>;
+    };
     assert.equal(settingsParsed.items[0]?.settingCategoryCollectionRenderer.categoryId, 'custom_settings_category');
+    const customSettingsEndpoint =
+      settingsParsed.items[0]?.settingCategoryCollectionRenderer.items?.[0]?.settingActionRenderer?.serviceEndpoint;
+    assert.ok(customSettingsEndpoint, 'Custom settings item exposes serviceEndpoint');
 
     const guideParsed = vmJson.parse(
       JSON.stringify({
@@ -638,10 +648,33 @@ describe('End-to-end userscript bundle lifecycle', () => {
       'https://i.ytimg.com/vi/homeVid1/hq720.jpg'
     );
 
-    // 5. Test resolveCommand user actions (Custom Settings modal, toggle setting, speed menu, captions auto-translate)
-    resolveHost.instance.resolveCommand({ customAction: { action: 'TT_SETTINGS_SHOW', parameters: [] } });
+    // 5. Test resolveCommand user actions (Custom Settings modal via injected SettingActionRenderer, toggle setting, speed menu, captions auto-translate)
+    resolvedCommands.length = 0;
+    resolveHost.instance.resolveCommand(customSettingsEndpoint);
     assert.equal(
       (resolvedCommands.at(-1) as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId,
+      'tt-settings'
+    );
+
+    // Late-loaded _yttv command host (registered after startup) must still be patched via Settings parse / action key
+    const lateResolvedCommands: unknown[] = [];
+    const lateHost = {
+      instance: {
+        resolveCommand: (cmd: unknown) => {
+          lateResolvedCommands.push(cmd);
+          return true;
+        },
+      },
+    };
+    (fakeWindow._yttv as Record<string, unknown>).lateSettingsHost = lateHost;
+    (fakeDocument.dispatchEvent as (e: { type: string; key?: string; keyCode?: number }) => void)({
+      type: 'keydown',
+      key: 'Enter',
+      keyCode: 13,
+    });
+    lateHost.instance.resolveCommand(customSettingsEndpoint);
+    assert.equal(
+      (lateResolvedCommands.at(-1) as { openPopupAction?: { uniqueId?: string } })?.openPopupAction?.uniqueId,
       'tt-settings'
     );
 

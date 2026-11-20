@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { configChangeEmitter, configRead, configWrite, initConfig } from '../mods/core/config.ts';
+import { patchResolveCommand } from '../mods/core/resolve-command.ts';
 import { injectCss } from '../mods/core/styles.ts';
+import { whenYttvReady } from '../mods/core/yttv-bridge.ts';
 import { applyDeArrowBranding, clearDeArrowCache } from '../mods/transforms/thumbnails.ts';
 import { transformGuideResponse } from '../mods/ui/custom-guide-action.ts';
 
@@ -148,6 +150,98 @@ describe('regression fixes', () => {
     } finally {
       clearDeArrowCache();
       globalThis.fetch = origFetch;
+    }
+  });
+
+  test('whenYttvReady waits for resolveCommand host and patchResolveCommand re-patches replaced or late hosts', async () => {
+    const origWindow = (globalThis as { window?: unknown }).window;
+    const origDoc = (globalThis as { document?: unknown }).document;
+    const listeners = new Map<string, Set<() => void>>();
+
+    try {
+      const fakeWindow: Record<string, unknown> = {
+        _yttv: { bootstrapOnly: { version: 1 } },
+        addEventListener: (type: string, cb: () => void) => {
+          let set = listeners.get(type);
+          if (!set) {
+            set = new Set();
+            listeners.set(type, set);
+          }
+          set.add(cb);
+        },
+        removeEventListener: (type: string, cb: () => void) => listeners.get(type)?.delete(cb),
+      };
+      const fakeDoc: Record<string, unknown> = {
+        readyState: 'complete',
+        documentElement: {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      };
+      (globalThis as { window: unknown }).window = fakeWindow;
+      (globalThis as { document: unknown }).document = fakeDoc;
+
+      let readyCount = 0;
+      whenYttvReady(() => {
+        readyCount++;
+        patchResolveCommand();
+      });
+
+      // Ready must not fire prematurely while _yttv only contains non-command entries.
+      assert.equal(readyCount, 0);
+
+      const firstCalls: unknown[] = [];
+      const firstHost = {
+        instance: {
+          resolveCommand: (cmd: unknown) => {
+            firstCalls.push(cmd);
+            return 'orig-first';
+          },
+        },
+      };
+      (fakeWindow._yttv as Record<string, unknown>).mainRouter = firstHost;
+
+      await new Promise((resolve) => setTimeout(resolve, 260));
+      assert.equal(readyCount, 1);
+
+      const secondCalls: unknown[] = [];
+      firstHost.instance.resolveCommand = (cmd: unknown) => {
+        secondCalls.push(cmd);
+        return 'replaced-first';
+      };
+      patchResolveCommand();
+
+      const lateCalls: unknown[] = [];
+      const lateHost = {
+        instance: {
+          resolveCommand: (cmd: unknown) => {
+            lateCalls.push(cmd);
+            return 'late';
+          },
+        },
+      };
+      (fakeWindow._yttv as Record<string, unknown>).lateRouter = lateHost;
+      patchResolveCommand();
+
+      // Replaced and late resolveCommand functions must intercept TT_SETTINGS_SHOW cleanly.
+      firstHost.instance.resolveCommand({ customAction: { action: 'TT_SETTINGS_SHOW', parameters: [] } });
+      assert.equal(secondCalls.length, 1);
+      assert.equal(
+        (secondCalls[0] as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId,
+        'tt-settings'
+      );
+
+      lateHost.instance.resolveCommand({
+        signalAction: { customAction: { action: 'TT_SETTINGS_SHOW', parameters: [] } },
+      });
+      assert.equal(lateCalls.length, 1);
+      assert.equal(
+        (lateCalls[0] as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId,
+        'tt-settings'
+      );
+      assert.equal(firstCalls.length, 0);
+    } finally {
+      (globalThis as { window?: unknown }).window = origWindow;
+      (globalThis as { document?: unknown }).document = origDoc;
     }
   });
 });

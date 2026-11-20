@@ -7,7 +7,7 @@ import type {
 import { isRecord } from '../utils/type-guards.ts';
 
 function getYttvServicesMap(): Map<string, unknown> | null {
-  const yttv = window._yttv;
+  const yttv = typeof window !== 'undefined' ? window._yttv : undefined;
   if (!yttv) return null;
   for (const entry of Object.values(yttv)) {
     if (isRecord(entry) && entry.mappings instanceof Map) {
@@ -34,7 +34,7 @@ export function getCurrentIdentityService(): CurrentIdentityService | null {
 }
 
 export function findResolveCommandHost(): YttvResolveCommandHost | null {
-  const yttv = window._yttv;
+  const yttv = typeof window !== 'undefined' ? window._yttv : undefined;
   if (!yttv) return null;
   for (const entry of Object.values(yttv)) {
     if (isRecord(entry) && isRecord(entry.instance) && typeof entry.instance.resolveCommand === 'function') {
@@ -48,11 +48,7 @@ const yttvReadyCallbacks = new Set<() => void>();
 let yttvWatcherActive = false;
 
 function isYttvPopulated(): boolean {
-  if (typeof window === 'undefined' || !window._yttv) return false;
-  return (
-    Boolean(findResolveCommandHost()) ||
-    (typeof document !== 'undefined' && document.readyState === 'complete' && Object.keys(window._yttv).length > 0)
-  );
+  return Boolean(findResolveCommandHost());
 }
 
 /**
@@ -70,7 +66,7 @@ export function whenYttvReady(callback: () => void): void {
   yttvWatcherActive = true;
 
   let attempts = 0;
-  const maxAttempts = 60;
+  const maxAttempts = 150;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let observer: MutationObserver | null = null;
 
@@ -132,7 +128,7 @@ export function whenYttvReady(callback: () => void): void {
 }
 
 export function getCommandExecutor(): YttvCommandExecutor | null {
-  const yttv = window._yttv;
+  const yttv = typeof window !== 'undefined' ? window._yttv : undefined;
   if (!yttv) return null;
 
   let instance: Record<string, unknown> | null = null;
@@ -141,21 +137,25 @@ export function getCommandExecutor(): YttvCommandExecutor | null {
   for (const entry of Object.values(yttv)) {
     if (!isRecord(entry) || typeof entry.getInstance !== 'function') continue;
     const rawEntry = entry as { getInstance: () => unknown; toString?: () => string };
+    let candidateInstance: unknown;
+    try {
+      candidateInstance = rawEntry.getInstance();
+    } catch {
+      continue;
+    }
     if (String(rawEntry).includes('ytlrActionRouter')) {
-      const candidate = rawEntry.getInstance();
-      if (isRecord(candidate)) instance = candidate;
+      if (isRecord(candidateInstance)) instance = candidateInstance;
       continue;
     }
 
-    const tempInstance = rawEntry.getInstance();
-    if (!isRecord(tempInstance)) continue;
-    const proto = Object.getPrototypeOf(tempInstance);
+    if (!isRecord(candidateInstance)) continue;
+    const proto = Object.getPrototypeOf(candidateInstance);
     if (!isRecord(proto)) continue;
     for (const propName of Object.getOwnPropertyNames(proto)) {
-      const member = tempInstance[propName];
+      const member = candidateInstance[propName];
       if (typeof member === 'function' && member.toString().includes('ytlrActionRouter')) {
         executeFunction = member as (command: unknown) => unknown;
-        instance = tempInstance;
+        instance = candidateInstance;
       }
     }
   }

@@ -47,6 +47,18 @@ function initUi(): void {
   }
 }
 
+function ensureResolveHooksOnActionKey(event: KeyboardEvent): void {
+  if (
+    event.key === 'Enter' ||
+    event.key === ' ' ||
+    event.keyCode === 13 ||
+    event.keyCode === 23 ||
+    event.keyCode === 32
+  ) {
+    patchResolveCommand();
+  }
+}
+
 if (typeof document !== 'undefined') {
   void waitForDomReady().then(installGlobalStyles);
   whenYttvReady(() => {
@@ -57,4 +69,9 @@ if (typeof document !== 'undefined') {
     patchResolveCommand();
     void whenConfigReady().then(initUi);
   });
+  if (typeof window !== 'undefined') {
+    window.addEventListener('hashchange', patchResolveCommand);
+  }
+  document.addEventListener('keydown', ensureResolveHooksOnActionKey, true);
+  document.addEventListener('click', patchResolveCommand, true);
 }

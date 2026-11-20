@@ -33,7 +33,7 @@ import { buildLongPressPayload } from '../utils/feed-helpers.ts';
 import { isRecord } from '../utils/type-guards.ts';
 import { configChangeEmitter, configRead, whenConfigReady } from './config.ts';
 import { findFeedbackToken } from './innertube-calls.ts';
-import resolveCommand from './resolve-command.ts';
+import resolveCommand, { patchResolveCommand } from './resolve-command.ts';
 import { whenYttvReady } from './yttv-bridge.ts';
 
 const ITEM_LIST_KEYS = [
@@ -658,6 +658,8 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
     if (Array.isArray(r.items)) {
       if (isSettingsPayload(r, r.items)) {
         patchSettingsInPlace(r);
+        patchResolveCommand();
+        syncYttvPreviewAndJson();
       } else {
         transformGuideResponse(r);
       }
