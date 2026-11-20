@@ -1,3 +1,5 @@
+import pLimit from 'p-limit';
+import QuickLRU from 'quick-lru';
 import { configRead } from '../core/config.ts';
 import type { FeedItem, FormattedText, Thumbnail } from '../types/innertube.ts';
 
@@ -217,47 +219,73 @@ export function applyDeArrowBrandingToItem(
   }
 }
 
-const MAX_DEARROW_CACHE_SIZE = 200;
+const DEARROW_CACHE_MAX_SIZE = 500;
+const DEARROW_MISS_TTL_MS = 10 * 60_000;
 const MAX_DEARROW_CONCURRENCY = 6;
-const deArrowCache = new Map<string, DeArrowBrandingResponse>();
+const EMPTY_DEARROW_BRANDING: DeArrowBrandingResponse = { titles: [], thumbnails: [] };
+
+const deArrowLimit = pLimit(MAX_DEARROW_CONCURRENCY);
+const deArrowCache = new QuickLRU<string, DeArrowBrandingResponse>({ maxSize: DEARROW_CACHE_MAX_SIZE });
 const inFlightDeArrow = new Map<string, Promise<DeArrowBrandingResponse | null>>();
+let activeNavigationController: AbortController | null =
+  typeof AbortController === 'function' ? new AbortController() : null;
+
+function hasDeArrowBrandingContent(branding: DeArrowBrandingResponse | null | undefined): boolean {
+  return Boolean(branding && (branding.titles?.length || branding.thumbnails?.length));
+}
+
+/** Aborts in-flight and queued DeArrow requests (e.g. on navigation or memory pressure). */
+export function abortPendingDeArrowRequests(): void {
+  activeNavigationController?.abort();
+  activeNavigationController = typeof AbortController === 'function' ? new AbortController() : null;
+  inFlightDeArrow.clear();
+}
 
 /** Clears cached DeArrow branding entries under memory pressure. */
 export function clearDeArrowCache(): void {
   deArrowCache.clear();
-  inFlightDeArrow.clear();
+  abortPendingDeArrowRequests();
 }
 
-function setBoundedDeArrowCache(videoId: string, branding: DeArrowBrandingResponse): void {
-  if (deArrowCache.size >= MAX_DEARROW_CACHE_SIZE) {
-    const oldestKey = deArrowCache.keys().next().value;
-    if (oldestKey !== undefined) deArrowCache.delete(oldestKey);
-  }
-  deArrowCache.set(videoId, branding);
-}
-
-function fetchBrandingForVideo(videoId: string): Promise<DeArrowBrandingResponse | null> {
+function fetchBrandingForVideo(
+  videoId: string,
+  controller: AbortController | null
+): Promise<DeArrowBrandingResponse | null> {
   const cached = deArrowCache.get(videoId);
   if (cached) return Promise.resolve(cached);
 
   const pending = inFlightDeArrow.get(videoId);
   if (pending) return pending;
 
-  const request = (async (): Promise<DeArrowBrandingResponse | null> => {
+  const signal = controller?.signal;
+  const request = deArrowLimit(async (): Promise<DeArrowBrandingResponse | null> => {
+    if (signal?.aborted) return null;
+    const cachedWhileQueued = deArrowCache.get(videoId);
+    if (cachedWhileQueued) return cachedWhileQueued;
+
     try {
-      const response = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${encodeURIComponent(videoId)}`);
+      const response = await fetch(
+        `https://sponsor.ajay.app/api/branding?videoID=${encodeURIComponent(videoId)}`,
+        signal ? { signal } : undefined
+      );
+      if (response.status === 404) {
+        deArrowCache.set(videoId, EMPTY_DEARROW_BRANDING, { maxAge: DEARROW_MISS_TTL_MS });
+        return EMPTY_DEARROW_BRANDING;
+      }
       if (!response.ok) return null;
       const branding = (await response.json()) as DeArrowBrandingResponse | null;
       if (!branding) return null;
-      setBoundedDeArrowCache(videoId, branding);
+      deArrowCache.set(videoId, branding);
       return branding;
     } catch {
-      // Ignore transient network or JSON parse errors from the external DeArrow API.
+      // Ignore aborted navigations, transient network errors, or JSON parse errors.
       return null;
     } finally {
-      inFlightDeArrow.delete(videoId);
+      if (inFlightDeArrow.get(videoId) === request) {
+        inFlightDeArrow.delete(videoId);
+      }
     }
-  })();
+  });
 
   inFlightDeArrow.set(videoId, request);
   return request;
@@ -268,32 +296,31 @@ export async function applyDeArrowBranding(items: FeedItem[], options: DeArrowOp
   const enableDeArrowThumbnails = options.enableDeArrowThumbnails ?? configRead('enableDeArrowThumbnails');
   if (!enableDeArrow || !Array.isArray(items)) return;
 
+  const requestController = activeNavigationController;
   const tasks: Array<{ entry: FeedItem; videoId: string }> = [];
   for (const entry of items) {
     const videoId = extractVideoIdForThumbnail(entry);
     if (!videoId) continue;
     const cached = deArrowCache.get(videoId);
     if (cached) {
-      applyDeArrowBrandingToItem(entry, videoId, cached, enableDeArrowThumbnails);
+      if (hasDeArrowBrandingContent(cached)) {
+        applyDeArrowBrandingToItem(entry, videoId, cached, enableDeArrowThumbnails);
+      }
     } else {
       tasks.push({ entry, videoId });
     }
   }
   if (tasks.length === 0) return;
 
-  let nextIdx = 0;
-  const workerCount = Math.min(MAX_DEARROW_CONCURRENCY, tasks.length);
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (nextIdx < tasks.length) {
-      const task = tasks[nextIdx++];
-      if (!task) break;
-      const branding = await fetchBrandingForVideo(task.videoId);
-      if (branding) {
-        applyDeArrowBrandingToItem(task.entry, task.videoId, branding, enableDeArrowThumbnails);
-      }
-    }
-  });
-  await Promise.all(workers);
+  await Promise.all(
+    tasks.map((task) =>
+      fetchBrandingForVideo(task.videoId, requestController).then((branding) => {
+        if (!requestController?.signal.aborted && branding && hasDeArrowBrandingContent(branding)) {
+          applyDeArrowBrandingToItem(task.entry, task.videoId, branding, enableDeArrowThumbnails);
+        }
+      })
+    )
+  );
 }
 
 export function resolveFallbackThumbnailUrl(failedUrl: string): string | null {
@@ -307,6 +334,10 @@ let isFallbackListenerInstalled = false;
 export function installThumbnailErrorFallback(): void {
   if (isFallbackListenerInstalled || typeof document === 'undefined') return;
   isFallbackListenerInstalled = true;
+
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('hashchange', abortPendingDeArrowRequests, false);
+  }
 
   document.addEventListener(
     'error',

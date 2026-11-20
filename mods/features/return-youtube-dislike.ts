@@ -1,3 +1,4 @@
+import QuickLRU from 'quick-lru';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 import { readFormattedText } from '../transforms/feed-filter.ts';
@@ -36,9 +37,10 @@ const LIKE_BUTTON_SELECTOR =
 const DISLIKE_BUTTON_SELECTOR =
   'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
 
-const rydCache = new Map<string, RydCacheEntry>();
+const RYD_CACHE_MAX_SIZE = 500;
+const rydCache = new QuickLRU<string, RydCacheEntry>({ maxSize: RYD_CACHE_MAX_SIZE });
 const inFlight = new Set<string>();
-const likeCache = new Map<string, string>();
+const likeCache = new QuickLRU<string, string>({ maxSize: RYD_CACHE_MAX_SIZE });
 let stylesInstalled = false;
 let badgeSyncPending = false;
 let watchControlsObserver: MutationObserver | null = null;
@@ -58,14 +60,6 @@ function getActiveVideoId(): string | null {
   return m?.[1] ?? null;
 }
 
-function setBoundedCache<V>(cache: Map<string, V>, key: string, value: V, maxSize = 200): void {
-  if (cache.size >= maxSize) {
-    const firstKey = cache.keys().next().value;
-    if (firstKey !== undefined) cache.delete(firstKey);
-  }
-  cache.set(key, value);
-}
-
 function prefetchRyd(videoId: string): void {
   if (!videoId || rydCache.has(videoId) || inFlight.has(videoId) || typeof fetch !== 'function') return;
   inFlight.add(videoId);
@@ -79,7 +73,7 @@ function prefetchRyd(videoId: string): void {
         likes: typeof record.likes === 'number' ? record.likes : null,
         dislikes: record.dislikes,
       };
-      setBoundedCache(rydCache, videoId, entry);
+      rydCache.set(videoId, entry);
       if (videoId === getActiveVideoId()) {
         scheduleBadgeSync();
       }
@@ -216,7 +210,7 @@ export function applyDislikeCountToActions<T>(actions: T[], videoId: string | nu
   }
 
   if (likeLabel) {
-    setBoundedCache(likeCache, videoId, likeLabel.replace(/\s+/g, ''));
+    likeCache.set(videoId, likeLabel.replace(/\s+/g, ''));
   }
   if (videoId === getActiveVideoId()) {
     scheduleBadgeSync();

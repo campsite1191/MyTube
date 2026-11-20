@@ -12,7 +12,9 @@
   "license": "GPL-3.0-only",
   "dependencies": {
     "idb-keyval": "^6.3.0",
-    "js-tokens": "^10.0.0"
+    "js-tokens": "^10.0.0",
+    "p-limit": "^7.3.3",
+    "quick-lru": "^8.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

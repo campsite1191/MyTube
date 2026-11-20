@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { DeArrowBrandingResponse } from '../mods/transforms/thumbnails.ts';
 import {
+  abortPendingDeArrowRequests,
   applyDeArrowBranding,
   applyDeArrowBrandingToItem,
   applyThumbnailUpgrade,
+  clearDeArrowCache,
   extractVideoIdForThumbnail,
   resolveFallbackThumbnailUrl,
   selectHighestVotedEntry,
@@ -284,6 +286,95 @@ describe('DeArrow branding helpers', () => {
     assert.equal(tileCase.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Fetched Clean Title');
     assert.equal(richLockupCase.lockup.metadata?.lockupMetadataViewModel?.title?.content, 'Fetched Clean Title');
     assert.equal(failingVideoCase.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Original Tile Title');
+  });
+
+  test('caches 404 misses, retries transient 500s, and aborts stale fetches on navigation', async () => {
+    clearDeArrowCache();
+    let fetchCount = 0;
+    let transientStatus = 500;
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async (input: string | URL | Request): Promise<Response> => {
+      fetchCount++;
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('miss-404')) {
+        return new Response(null, { status: 404 });
+      }
+      if (url.includes('transient-500')) {
+        if (transientStatus !== 200) {
+          return new Response(null, { status: transientStatus });
+        }
+        return new Response(JSON.stringify({ titles: [{ title: 'Recovered Title', votes: 5 }], thumbnails: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof globalThis.fetch;
+
+    try {
+      const missItem = createTileFeedItem({ onSelectCommand: { watchEndpoint: { videoId: 'miss-404' } } });
+      await applyDeArrowBranding([missItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      await applyDeArrowBranding([missItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      assert.equal(fetchCount, 1);
+
+      const flakyItem = createTileFeedItem({ onSelectCommand: { watchEndpoint: { videoId: 'transient-500' } } });
+      await applyDeArrowBranding([flakyItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      assert.equal(fetchCount, 2);
+      assert.equal(flakyItem.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Original Tile Title');
+
+      transientStatus = 200;
+      await applyDeArrowBranding([flakyItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      assert.equal(fetchCount, 3);
+      assert.equal(flakyItem.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Recovered Title');
+
+      // 1) Synchronous abort before p-limit dispatches queued work skips fetch entirely.
+      let queuedFetchCalled = false;
+      globalThis.fetch = (async (): Promise<Response> => {
+        queuedFetchCalled = true;
+        return new Response(null, { status: 404 });
+      }) as typeof globalThis.fetch;
+      const queuedItem = createTileFeedItem({ onSelectCommand: { watchEndpoint: { videoId: 'queued-abort' } } });
+      const pendingQueued = applyDeArrowBranding([queuedItem.entry], {
+        enableDeArrow: true,
+        enableDeArrowThumbnails: false,
+      });
+      abortPendingDeArrowRequests();
+      await pendingQueued;
+      assert.equal(queuedFetchCalled, false);
+
+      // 2) Navigation abort while fetch is already in-flight fires AbortSignal and skips stale DOM mutation.
+      let sawAbort = false;
+      let notifyStarted!: () => void;
+      const fetchStarted = new Promise<void>((resolve) => {
+        notifyStarted = resolve;
+      });
+      globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+        new Promise((resolve) => {
+          notifyStarted();
+          init?.signal?.addEventListener('abort', () => {
+            sawAbort = true;
+            resolve(
+              new Response(JSON.stringify({ titles: [{ title: 'Stale Title', votes: 9 }], thumbnails: [] }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              })
+            );
+          });
+        })) as typeof globalThis.fetch;
+
+      const staleItem = createTileFeedItem({ onSelectCommand: { watchEndpoint: { videoId: 'stale-abort' } } });
+      const pending = applyDeArrowBranding([staleItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      await fetchStarted;
+      abortPendingDeArrowRequests();
+      await pending;
+
+      assert.equal(sawAbort, true);
+      assert.equal(staleItem.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Original Tile Title');
+    } finally {
+      clearDeArrowCache();
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
