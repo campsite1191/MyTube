@@ -220,7 +220,6 @@ export function applyDeArrowBrandingToItem(
 }
 
 const DEARROW_CACHE_MAX_SIZE = 2000;
-const DEARROW_MISS_TTL_MS = 60 * 60_000;
 const MAX_DEARROW_CONCURRENCY = 6;
 const EMPTY_DEARROW_BRANDING: DeArrowBrandingResponse = { titles: [], thumbnails: [] };
 
@@ -269,7 +268,7 @@ function fetchBrandingForVideo(
         signal ? { signal } : undefined
       );
       if (response.status === 404) {
-        deArrowCache.set(videoId, EMPTY_DEARROW_BRANDING, { maxAge: DEARROW_MISS_TTL_MS });
+        deArrowCache.set(videoId, EMPTY_DEARROW_BRANDING);
         return EMPTY_DEARROW_BRANDING;
       }
       if (!response.ok) return null;

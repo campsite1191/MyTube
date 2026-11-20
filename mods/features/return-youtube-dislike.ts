@@ -38,7 +38,7 @@ const DISLIKE_BUTTON_SELECTOR =
   'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
 
 const RYD_CACHE_MAX_SIZE = 1000;
-const rydCache = new QuickLRU<string, RydCacheEntry>({ maxSize: RYD_CACHE_MAX_SIZE });
+const rydCache = new QuickLRU<string, RydCacheEntry | null>({ maxSize: RYD_CACHE_MAX_SIZE });
 const inFlight = new Set<string>();
 const likeCache = new QuickLRU<string, string>({ maxSize: RYD_CACHE_MAX_SIZE });
 let stylesInstalled = false;
@@ -64,7 +64,13 @@ function prefetchRyd(videoId: string): void {
   if (!videoId || rydCache.has(videoId) || inFlight.has(videoId) || typeof fetch !== 'function') return;
   inFlight.add(videoId);
   fetch(`https://returnyoutubedislikeapi.com/Votes?videoId=${encodeURIComponent(videoId)}`)
-    .then((res) => (res.ok ? res.json() : null))
+    .then((res) => {
+      if (res.status === 404) {
+        rydCache.set(videoId, null);
+        return null;
+      }
+      return res.ok ? res.json() : null;
+    })
     .then((data: unknown) => {
       if (!data || typeof data !== 'object') return;
       const record = data as { likes?: unknown; dislikes?: unknown };

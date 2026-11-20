@@ -149,4 +149,36 @@ describe('return-youtube-dislike', () => {
     assert.equal(likeButton.dataset.ttCount, '12.5K');
     assert.equal(dislikeButton.dataset.ttCount, '420');
   });
+
+  test('caches RYD 404 misses per session until clearRydCache', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevFetch = globals.fetch;
+    let fetchCalls = 0;
+
+    t.after(() => {
+      globals.fetch = prevFetch;
+      clearRydCache();
+    });
+
+    clearRydCache();
+    let resolveFetch!: Promise<void>;
+    globals.fetch = (() => {
+      fetchCalls++;
+      const p = Promise.resolve(new Response(null, { status: 404 }));
+      resolveFetch = p.then(() => undefined);
+      return p;
+    }) as typeof fetch;
+
+    applyDislikeCountToActions([], 'ryd404Vid');
+    await resolveFetch;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    applyDislikeCountToActions([], 'ryd404Vid');
+    assert.equal(fetchCalls, 1);
+
+    clearRydCache();
+    applyDislikeCountToActions([], 'ryd404Vid');
+    await resolveFetch;
+    assert.equal(fetchCalls, 2);
+  });
 });
