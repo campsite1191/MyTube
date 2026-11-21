@@ -1,76 +1,18 @@
+import { onAbort, onWatchSession } from '../core/lifecycle.ts';
+import { onVideo } from '../core/player-observer.ts';
+
 const LONG_PAUSE_MS = 30 * 1000;
 const REWIND_SECONDS = 5;
-
-export interface RewindEvaluationInput {
-  pausedAt: number;
-  pausedSrc: string;
-  currentSrc: string;
-  now: number;
-  isWatch: boolean;
-  duration: number;
-  currentTime: number;
-}
+const MANUAL_SEEK_RESET_THRESHOLD_SEC = 5;
+const PLAYING_VERIFY_TOLERANCE_SEC = 1.5;
 
 /**
- * Computes the rewound playback time after a long pause, or null when no rewind should occur.
+ * Computes the rewound playback time after a >= 30s pause, or null when no rewind should occur.
  */
-export function computeRewindTime(input: RewindEvaluationInput): number | null {
-  if (!input.pausedAt) return null;
-  const elapsed = input.now - input.pausedAt;
-  const sameSrc = input.currentSrc === input.pausedSrc;
-  if (!sameSrc || elapsed < LONG_PAUSE_MS || !input.isWatch) return null;
-  if (!Number.isFinite(input.duration) || input.duration <= 0 || input.currentTime <= 1) return null;
-  return Math.max(0, input.currentTime - REWIND_SECONDS);
-}
-
-class PauseStateManager {
-  private pausedAt = 0;
-  private pausedVideo: HTMLVideoElement | null = null;
-  private pausedSrc = '';
-  private pausedTime = 0;
-
-  get at() {
-    return this.pausedAt;
-  }
-  get video() {
-    return this.pausedVideo;
-  }
-  get src() {
-    return this.pausedSrc;
-  }
-  get time() {
-    return this.pausedTime;
-  }
-
-  set(at: number, video: HTMLVideoElement, src: string, time: number): void {
-    this.pausedAt = at;
-    this.pausedVideo = video;
-    this.pausedSrc = src;
-    this.pausedTime = time;
-  }
-
-  reset(): void {
-    this.pausedAt = 0;
-    this.pausedVideo = null;
-    this.pausedSrc = '';
-    this.pausedTime = 0;
-  }
-
-  isVideo(video: HTMLVideoElement): boolean {
-    return video === this.pausedVideo;
-  }
-}
-
-const pauseState = new PauseStateManager();
-
-function isWatchPage(): boolean {
-  return typeof window !== 'undefined' && window.location.hash.includes('watch');
-}
-
-function isVideoElement(target: EventTarget | null): target is HTMLVideoElement {
-  return Boolean(
-    target && typeof target === 'object' && 'tagName' in target && (target as Element).tagName === 'VIDEO'
-  );
+export function computeRewindTime(pausedAt: number, now: number, duration: number, currentTime: number): number | null {
+  if (!pausedAt || now - pausedAt < LONG_PAUSE_MS) return null;
+  if (!Number.isFinite(duration) || duration <= 0 || currentTime <= 1) return null;
+  return Math.max(0, currentTime - REWIND_SECONDS);
 }
 
 let rewindInstalled = false;
@@ -79,78 +21,81 @@ export function installRewindOnPause(): void {
   if (rewindInstalled || typeof document === 'undefined' || typeof window === 'undefined') return;
   rewindInstalled = true;
 
-  document.addEventListener(
-    'pause',
-    (e: Event) => {
-      if (!isVideoElement(e.target)) return;
-      const video = e.target;
-      if (
-        !isWatchPage() ||
-        video.ended ||
-        !Number.isFinite(video.duration) ||
-        video.duration <= 0 ||
-        video.currentTime <= 1
-      ) {
-        pauseState.reset();
-        return;
-      }
-      pauseState.set(Date.now(), video, video.currentSrc || video.src || '', video.currentTime);
-    },
-    true
-  );
+  onWatchSession((_videoId, signal) => {
+    onVideo((video) => {
+      if (signal.aborted) return;
 
-  document.addEventListener(
-    'seeking',
-    (e: Event) => {
-      if (!isVideoElement(e.target)) return;
-      const video = e.target;
-      if (pauseState.isVideo(video) && video.paused && Math.abs(video.currentTime - pauseState.time) > 1) {
-        pauseState.reset();
-      }
-    },
-    true
-  );
+      let pausedAt = 0;
+      let pausedTime = 0;
+      let verifyAbort: AbortController | null = null;
 
-  document.addEventListener(
-    'emptied',
-    (e: Event) => {
-      if (e.target === pauseState.video) {
-        pauseState.reset();
-      }
-    },
-    true
-  );
+      const resetPauseState = (): void => {
+        pausedAt = 0;
+        pausedTime = 0;
+        verifyAbort?.abort();
+        verifyAbort = null;
+      };
 
-  document.addEventListener(
-    'play',
-    (e: Event) => {
-      if (!isVideoElement(e.target)) return;
-      const video = e.target;
-      if (!pauseState.at || !pauseState.isVideo(video)) return;
+      onAbort(signal, resetPauseState);
 
-      const snapshotPausedAt = pauseState.at;
-      const snapshotPausedSrc = pauseState.src;
-      pauseState.reset();
+      video.addEventListener(
+        'pause',
+        () => {
+          resetPauseState();
+          if (video.ended || !Number.isFinite(video.duration) || video.duration <= 0 || video.currentTime <= 1) {
+            return;
+          }
+          pausedAt = Date.now();
+          pausedTime = video.currentTime;
+        },
+        { signal }
+      );
 
-      const nextTime = computeRewindTime({
-        pausedAt: snapshotPausedAt,
-        pausedSrc: snapshotPausedSrc,
-        currentSrc: video.currentSrc || video.src || '',
-        now: Date.now(),
-        isWatch: isWatchPage(),
-        duration: video.duration,
-        currentTime: video.currentTime,
-      });
-      if (nextTime !== null) {
-        video.currentTime = nextTime;
-      }
-    },
-    true
-  );
+      video.addEventListener(
+        'seeking',
+        () => {
+          if (pausedAt && video.paused && Math.abs(video.currentTime - pausedTime) > MANUAL_SEEK_RESET_THRESHOLD_SEC) {
+            resetPauseState();
+          }
+        },
+        { signal }
+      );
 
-  window.addEventListener('hashchange', () => {
-    if (!isWatchPage()) {
-      pauseState.reset();
-    }
+      video.addEventListener(
+        'play',
+        () => {
+          if (!pausedAt) return;
+          const snapshotPausedAt = pausedAt;
+          resetPauseState();
+
+          const resumeTime = video.currentTime;
+          const nextTime = computeRewindTime(snapshotPausedAt, Date.now(), video.duration, resumeTime);
+          if (nextTime === null) return;
+
+          video.currentTime = nextTime;
+
+          verifyAbort = new AbortController();
+          onAbort(verifyAbort.signal, () => {
+            verifyAbort = null;
+          });
+          video.addEventListener(
+            'playing',
+            () => {
+              verifyAbort?.abort();
+              // Re-apply once playback starts if YouTube/Cobalt snapped currentTime back on play.
+              if (
+                !video.paused &&
+                video.currentTime > nextTime + PLAYING_VERIFY_TOLERANCE_SEC &&
+                resumeTime > nextTime
+              ) {
+                video.currentTime = nextTime;
+              }
+            },
+            { once: true, signal: verifyAbort.signal }
+          );
+        },
+        { signal }
+      );
+    });
   });
 }

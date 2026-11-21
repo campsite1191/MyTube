@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { configRead, configWrite, onConfigChange } from '../mods/core/config.ts';
-import { observeDom, onAbort, scheduleAbortableTimeout } from '../mods/core/lifecycle.ts';
+import { observeDom, onAbort, onWatchSession, scheduleAbortableTimeout } from '../mods/core/lifecycle.ts';
 
 describe('AbortSignal lifecycle helpers', () => {
   test('onAbort runs cleanup on abort or immediately when already aborted', () => {
@@ -119,6 +119,54 @@ describe('onConfigChange helper', () => {
     } finally {
       await configWrite('enableClock', prevClock);
       await configWrite('isClock12HourFormat', prev12h);
+    }
+  });
+});
+
+describe('onWatchSession helper', () => {
+  test('starts scoped sessions for active videoIds and aborts on navigation or video switch', () => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const winListeners = new Map<string, Set<() => void>>();
+    const fakeLocation = { hash: '#/', search: '' };
+
+    globals.window = {
+      location: fakeLocation,
+      addEventListener: (type: string, fn: () => void) => {
+        let set = winListeners.get(type);
+        if (!set) {
+          set = new Set();
+          winListeners.set(type, set);
+        }
+        set.add(fn);
+      },
+    };
+
+    const events: string[] = [];
+    const unsubscribe = onWatchSession((videoId, signal) => {
+      events.push(`start:${videoId}`);
+      onAbort(signal, () => {
+        events.push(`abort:${videoId}`);
+      });
+    });
+
+    try {
+      assert.deepEqual(events, []);
+
+      fakeLocation.hash = '#/watch?v=firstVid';
+      for (const fn of winListeners.get('hashchange') ?? []) fn();
+      assert.deepEqual(events, ['start:firstVid']);
+
+      fakeLocation.hash = '#/?v=secondVid';
+      for (const fn of winListeners.get('hashchange') ?? []) fn();
+      assert.deepEqual(events, ['start:firstVid', 'abort:firstVid', 'start:secondVid']);
+
+      fakeLocation.hash = '#/';
+      for (const fn of winListeners.get('hashchange') ?? []) fn();
+      assert.deepEqual(events, ['start:firstVid', 'abort:firstVid', 'start:secondVid', 'abort:secondVid']);
+    } finally {
+      unsubscribe();
+      globals.window = prevWindow;
     }
   });
 });

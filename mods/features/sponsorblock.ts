@@ -1,7 +1,7 @@
 import type { ConfigKey } from '../core/config.ts';
 import { configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
-import { observeDom, onAbort } from '../core/lifecycle.ts';
+import { observeDom, onAbort, onWatchSession } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { showToast } from '../core/yttv-bridge.ts';
 
@@ -65,11 +65,6 @@ export async function computeSha256HexPrefix(input: string, prefixLength = 4): P
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0'))
     .join('')
     .slice(0, prefixLength);
-}
-
-export function extractWatchVideoId(locationHash: string): string | null {
-  const query = locationHash.split('?')[1];
-  return query ? new URLSearchParams(query).get('v')?.trim() || null : null;
 }
 
 /** Returns only SponsorBlock categories currently enabled in settings for fetching. */
@@ -206,9 +201,8 @@ export async function fetchSponsorBlockSegments(
 
 class SponsorBlockHandler {
   readonly videoId: string;
+  private readonly signal: AbortSignal;
   private video: HTMLVideoElement | null = null;
-  private active = true;
-  private abortController = new AbortController();
   private nextSkipTimeout: ReturnType<typeof setTimeout> | null = null;
   private waitingForSlider = false;
   private segmentsOverlay: HTMLDivElement | null = null;
@@ -234,12 +228,14 @@ class SponsorBlockHandler {
     this.syncOldUiOverlayTop();
   };
 
-  constructor(videoId: string) {
+  constructor(videoId: string, signal: AbortSignal) {
     this.videoId = videoId;
-    onAbort(this.abortController.signal, () => {
+    this.signal = signal;
+    onAbort(signal, () => {
       this.clearSkipTimer();
       this.segmentsOverlay?.remove();
       this.segmentsOverlay = null;
+      this.skippedCategories.clear();
       if (this.video) {
         const transition = computeMuteTransition(this.muteState, null, this.video.muted);
         this.muteState = transition.state;
@@ -249,10 +245,10 @@ class SponsorBlockHandler {
     });
   }
 
-  async init(): Promise<void> {
+  async init(): Promise<SponsorBlockSegment[]> {
     try {
-      const segments = await fetchSponsorBlockSegments(this.videoId, this.abortController.signal);
-      if (!this.active || segments.length === 0) return;
+      const segments = await fetchSponsorBlockSegments(this.videoId, this.signal);
+      if (this.signal.aborted || segments.length === 0) return [];
 
       this.segments = segments;
       const manual = configRead('sponsorBlockManualSkips');
@@ -260,30 +256,27 @@ class SponsorBlockHandler {
       this.skippableCategories = new Set(getEnabledSkipCategories());
 
       onVideo((video) => {
-        if (!this.active) return;
+        if (this.signal.aborted) return;
         this.bindVideo(video);
         this.buildOverlay();
         this.syncOldUiOverlayTop();
         this.syncMuteState();
         this.scheduleSkip(true);
       });
+      return segments;
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (error instanceof DOMException && error.name === 'AbortError') return [];
       console.warn('[SponsorBlock] Failed to load segments:', error);
+      return [];
     }
-  }
-
-  getSegments(): readonly SponsorBlockSegment[] {
-    return this.segments;
   }
 
   private bindVideo(video: HTMLVideoElement): void {
     this.video = video;
-    const { signal } = this.abortController;
     for (const evt of ['play', 'pause', 'timeupdate', 'seeked'] as const) {
-      video.addEventListener(evt, this.playbackEventHandler, { signal });
+      video.addEventListener(evt, this.playbackEventHandler, { signal: this.signal });
     }
-    video.addEventListener('durationchange', this.durationChangeHandler, { signal });
+    video.addEventListener('durationchange', this.durationChangeHandler, { signal: this.signal });
   }
 
   private syncOldUiOverlayTop(): void {
@@ -293,7 +286,7 @@ class SponsorBlockHandler {
   }
 
   private syncMuteState(): void {
-    if (!this.active || !this.video) return;
+    if (this.signal.aborted || !this.video) return;
     const activeMute = findActiveMuteSegment(this.segments, this.video.currentTime, this.manualSkippableCategories);
     const transition = computeMuteTransition(this.muteState, activeMute, this.video.muted);
     this.muteState = transition.state;
@@ -329,7 +322,7 @@ class SponsorBlockHandler {
     observeDom(
       host,
       (mutations) => {
-        if (!this.active || !this.segmentsOverlay) return;
+        if (this.signal.aborted || !this.segmentsOverlay) return;
         if (mutations.some((m) => Array.from(m.removedNodes).includes(this.segmentsOverlay as Node))) {
           host.appendChild(this.segmentsOverlay);
         }
@@ -340,13 +333,13 @@ class SponsorBlockHandler {
         }
       },
       { childList: true, subtree: true },
-      this.abortController.signal
+      this.signal
     );
     host.appendChild(overlay);
   }
 
   private buildOverlay(): void {
-    if (!this.active || this.segmentsOverlay || !this.video?.duration) return;
+    if (this.signal.aborted || this.segmentsOverlay || !this.video?.duration) return;
 
     const tryMount = (): boolean => {
       const slider = document.querySelector('div[idomkey="slider"]');
@@ -362,13 +355,13 @@ class SponsorBlockHandler {
     const observer = observeDom(
       document.documentElement ?? document,
       () => {
-        if (!this.active || !this.video?.duration || this.segmentsOverlay || tryMount()) {
+        if (this.signal.aborted || !this.video?.duration || this.segmentsOverlay || tryMount()) {
           this.waitingForSlider = false;
           observer?.disconnect();
         }
       },
       { childList: true, subtree: true },
-      this.abortController.signal
+      this.signal
     );
   }
 
@@ -379,7 +372,7 @@ class SponsorBlockHandler {
   }
 
   scheduleSkip(force = false): void {
-    if (!this.active || !this.video || this.video.paused || this.segments.length === 0) {
+    if (this.signal.aborted || !this.video || this.video.paused || this.segments.length === 0) {
       this.clearSkipTimer();
       return;
     }
@@ -410,7 +403,7 @@ class SponsorBlockHandler {
     this.nextSkipTimeout = setTimeout(() => {
       this.nextSkipTimeout = null;
       this.scheduledSegmentUuid = null;
-      if (!this.active || !this.video || this.video.paused) return;
+      if (this.signal.aborted || !this.video || this.video.paused) return;
       if (!this.skippableCategories.has(segment.category as SponsorBlockCategory)) return;
       if (this.manualSkippableCategories.has(segment.category)) return;
 
@@ -445,47 +438,25 @@ class SponsorBlockHandler {
       this.scheduleSkip(true);
     }, delayMs);
   }
-
-  destroy(): void {
-    this.active = false;
-    this.abortController.abort();
-    this.skippedCategories.clear();
-  }
 }
 
-let activeHandler: SponsorBlockHandler | null = null;
+let activeSegments: readonly SponsorBlockSegment[] = [];
 
 export function getActiveSponsorBlockSegments(): readonly SponsorBlockSegment[] {
-  return activeHandler?.getSegments() ?? [];
-}
-
-function destroyActiveHandler(): void {
-  if (!activeHandler) return;
-  try {
-    activeHandler.destroy();
-  } catch (error) {
-    console.warn('[SponsorBlock] Failed to destroy previous handler:', error);
-  }
-  activeHandler = null;
-}
-
-function handleHashChange(): void {
-  const videoId = extractWatchVideoId(location.hash);
-  if (!videoId) {
-    destroyActiveHandler();
-    return;
-  }
-
-  if (activeHandler?.videoId === videoId) return;
-  destroyActiveHandler();
-
-  if (configRead('enableSponsorBlock')) {
-    activeHandler = new SponsorBlockHandler(videoId);
-    void activeHandler.init();
-  }
+  return activeSegments;
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  window.addEventListener('hashchange', handleHashChange, false);
-  void whenConfigReady().then(handleHashChange);
+  void whenConfigReady().then(() => {
+    onWatchSession((videoId, signal) => {
+      activeSegments = [];
+      onAbort(signal, () => {
+        activeSegments = [];
+      });
+      if (!configRead('enableSponsorBlock')) return;
+      void new SponsorBlockHandler(videoId, signal).init().then((segments) => {
+        if (!signal.aborted) activeSegments = segments;
+      });
+    });
+  });
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { extractWatchVideoId } from '../mods/core/lifecycle.ts';
 import type { MuteState, SponsorBlockSegment } from '../mods/features/sponsorblock.ts';
 import {
   BAR_TYPES,
@@ -8,7 +9,6 @@ import {
   computeSha256HexPrefix,
   computeSkipDelayMs,
   computeTargetTimeAfterSkip,
-  extractWatchVideoId,
   fetchSponsorBlockSegments,
   findActiveMuteSegment,
   findNextSegment,

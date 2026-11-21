@@ -859,9 +859,9 @@ describe('End-to-end userscript bundle lifecycle', () => {
 
     // Verify Rewind on Pause (-5s after >= 30s pause)
     vm.runInContext('var __origDateNow = Date.now; var __fakeNow = 1000000; Date.now = () => __fakeNow;', context);
-    (fakeDocument.dispatchEvent as (e: { type: string; target?: unknown }) => void)({ type: 'pause', target: videoEl });
+    videoEl.dispatchEvent({ type: 'pause' });
     vm.runInContext('__fakeNow += 35000;', context);
-    (fakeDocument.dispatchEvent as (e: { type: string; target?: unknown }) => void)({ type: 'play', target: videoEl });
+    videoEl.dispatchEvent({ type: 'play' });
     assert.equal(videoEl.currentTime, 25);
     vm.runInContext('Date.now = __origDateNow;', context);
 
