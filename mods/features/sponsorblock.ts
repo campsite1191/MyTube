@@ -1,7 +1,7 @@
 import type { ConfigKey } from '../core/config.ts';
 import { configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
-import { observeDom, onAbort, onWatchSession } from '../core/lifecycle.ts';
+import { observeDom, onAbort, onWatchSession, scheduleAbortableTimeout } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { showToast } from '../core/yttv-bridge.ts';
 
@@ -203,7 +203,7 @@ class SponsorBlockHandler {
   readonly videoId: string;
   private readonly signal: AbortSignal;
   private video: HTMLVideoElement | null = null;
-  private nextSkipTimeout: ReturnType<typeof setTimeout> | null = null;
+  private skipAbort: AbortController | null = null;
   private waitingForSlider = false;
   private segmentsOverlay: HTMLDivElement | null = null;
   private segments: SponsorBlockSegment[] = [];
@@ -366,8 +366,8 @@ class SponsorBlockHandler {
   }
 
   private clearSkipTimer(): void {
-    if (this.nextSkipTimeout !== null) clearTimeout(this.nextSkipTimeout);
-    this.nextSkipTimeout = null;
+    this.skipAbort?.abort();
+    this.skipAbort = null;
     this.scheduledSegmentUuid = null;
   }
 
@@ -390,7 +390,7 @@ class SponsorBlockHandler {
 
     if (
       !force &&
-      this.nextSkipTimeout !== null &&
+      this.skipAbort !== null &&
       this.scheduledSegmentUuid === segment.UUID &&
       Math.abs(targetSkipAtMs - this.scheduledSkipAtMs) < 150
     ) {
@@ -400,43 +400,49 @@ class SponsorBlockHandler {
     this.clearSkipTimer();
     this.scheduledSegmentUuid = segment.UUID;
     this.scheduledSkipAtMs = targetSkipAtMs;
-    this.nextSkipTimeout = setTimeout(() => {
-      this.nextSkipTimeout = null;
-      this.scheduledSegmentUuid = null;
-      if (this.signal.aborted || !this.video || this.video.paused) return;
-      if (!this.skippableCategories.has(segment.category as SponsorBlockCategory)) return;
-      if (this.manualSkippableCategories.has(segment.category)) return;
+    const skipAbort = new AbortController();
+    this.skipAbort = skipAbort;
+    scheduleAbortableTimeout(
+      () => {
+        this.skipAbort = null;
+        this.scheduledSegmentUuid = null;
+        if (this.signal.aborted || !this.video || this.video.paused) return;
+        if (!this.skippableCategories.has(segment.category as SponsorBlockCategory)) return;
+        if (this.manualSkippableCategories.has(segment.category)) return;
 
-      const skipName = BAR_TYPES[segment.category]?.name || segment.category;
-      const now = Date.now();
-      const existingSkip = this.skippedCategories.get(segment.UUID);
-      if (existingSkip) {
-        const decision = getSuppressionDecision(existingSkip, now);
-        this.skippedCategories.set(segment.UUID, decision.newState);
-        if (decision.suppress) {
-          if (decision.showToast && configRead('enableSponsorBlockToasts')) {
-            showToast(
-              'SponsorBlock',
-              t('sponsorblock.toasts.notSkipping', { segment: skipName, count: decision.newState.count })
-            );
+        const skipName = BAR_TYPES[segment.category]?.name || segment.category;
+        const now = Date.now();
+        const existingSkip = this.skippedCategories.get(segment.UUID);
+        if (existingSkip) {
+          const decision = getSuppressionDecision(existingSkip, now);
+          this.skippedCategories.set(segment.UUID, decision.newState);
+          if (decision.suppress) {
+            if (decision.showToast && configRead('enableSponsorBlockToasts')) {
+              showToast(
+                'SponsorBlock',
+                t('sponsorblock.toasts.notSkipping', { segment: skipName, count: decision.newState.count })
+              );
+            }
+            return;
           }
-          return;
+        } else {
+          this.skippedCategories.set(segment.UUID, {
+            count: 1,
+            firstSkipped: now,
+            lastSkipped: now,
+            hasShownToast: false,
+          });
         }
-      } else {
-        this.skippedCategories.set(segment.UUID, {
-          count: 1,
-          firstSkipped: now,
-          lastSkipped: now,
-          hasShownToast: false,
-        });
-      }
 
-      if (configRead('enableSponsorBlockToasts')) {
-        showToast('SponsorBlock', t('sponsorblock.toasts.skipping', { segment: skipName }));
-      }
-      this.video.currentTime = computeTargetTimeAfterSkip(end, this.video.duration);
-      this.scheduleSkip(true);
-    }, delayMs);
+        if (configRead('enableSponsorBlockToasts')) {
+          showToast('SponsorBlock', t('sponsorblock.toasts.skipping', { segment: skipName }));
+        }
+        this.video.currentTime = computeTargetTimeAfterSkip(end, this.video.duration);
+        this.scheduleSkip(true);
+      },
+      delayMs,
+      skipAbort.signal
+    );
   }
 }
 

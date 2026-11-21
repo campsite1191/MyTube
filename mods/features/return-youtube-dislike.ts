@@ -125,16 +125,33 @@ export function installReturnYouTubeDislike(): void {
 
     onVideo(() => {
       if (signal.aborted) return;
-      applyForSession();
-      const watchHost = document.querySelector('ytlr-watch-default');
-      if (watchHost) {
+
+      let observedTarget: Element | null = null;
+      let hostAbort: AbortController | null = null;
+      onAbort(signal, () => hostAbort?.abort());
+
+      const syncTargetObserverAndLabels = (): void => {
+        applyForSession();
+        if (signal.aborted) return;
+        const likeEl = document.querySelector<HTMLElement>(LIKE_BUTTON_SELECTOR);
+        const dislikeEl = document.querySelector<HTMLElement>(DISLIKE_BUTTON_SELECTOR);
+        const watchHost = document.querySelector('ytlr-watch-default');
+        // Narrow observation from the full watch root to the action-button strip once controls mount.
+        const desiredTarget = likeEl?.parentElement ?? dislikeEl?.parentElement ?? watchHost;
+        if (!desiredTarget || desiredTarget === observedTarget) return;
+
+        hostAbort?.abort();
+        observedTarget = desiredTarget;
+        hostAbort = new AbortController();
         observeDom(
-          watchHost,
-          applyForSession,
+          desiredTarget,
+          syncTargetObserverAndLabels,
           { childList: true, subtree: true, attributes: true, attributeFilter: ['hybridnavfocusable'] },
-          signal
+          hostAbort.signal
         );
-      }
+      };
+
+      syncTargetObserverAndLabels();
     });
   });
 }
