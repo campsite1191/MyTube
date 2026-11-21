@@ -136,11 +136,9 @@ describe('isSurveyItem', () => {
 });
 
 describe('shouldHideItem', () => {
-  test('respects ad-block and sign-in-reminder settings', () => {
-    assert.equal(shouldHideItem({ adSlotRenderer: {} }, { enableAdBlock: true }), true);
-    assert.equal(shouldHideItem({ adSlotRenderer: {} }, { enableAdBlock: false }), false);
-    assert.equal(shouldHideItem({ feedNudgeRenderer: {} }, { enableSigninReminder: false }), true);
-    assert.equal(shouldHideItem({ feedNudgeRenderer: {} }, { enableSigninReminder: true }), false);
+  test('filters ads and sign-in nudges by default', () => {
+    assert.equal(shouldHideItem({ adSlotRenderer: {} }), true);
+    assert.equal(shouldHideItem({ feedNudgeRenderer: {} }), true);
   });
 
   test('filters survey shelves and paid or restricted badges', () => {

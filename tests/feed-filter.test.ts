@@ -2,36 +2,31 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
-  extractItemChannelInfo,
-  extractWatchedPercent,
-  filterFeedItems,
-  filterShelvesInPlace,
+  extractItemChannelName,
+  filterFeedItemsSync,
+  filterShelvesInPlaceSync,
+  getExistingMenuItemLists,
   hasBlockedBadge,
   hasPaidOfferEndpoint,
   isBlockedBadge,
-  isChannelHidden,
-  isShortsItem,
   isSurveyItem,
-  resolveFeedPageName,
+  readFormattedText,
   shouldHideFeedItem,
-  shouldHideWatchedItem,
+  walkCommands,
 } from '../mods/transforms/feed-filter.ts';
 import type { FeedItem } from '../mods/types/innertube.ts';
 
 describe('ads, sign-in nudges, and surveys', () => {
-  test('filters ad slots, wrapped ad slots, and sign-in nudges according to options', () => {
+  test('filters ad slots, wrapped ad slots, and sign-in nudges', () => {
     const adItem: FeedItem = { adSlotRenderer: {} };
     const wrappedAd: FeedItem = { richItemRenderer: { content: { adSlotRenderer: {} } } };
     const nudgeItem: FeedItem = { feedNudgeRenderer: {} };
     const wrappedNudge: FeedItem = { richItemRenderer: { content: { feedNudgeRenderer: {} } } };
 
-    assert.equal(shouldHideFeedItem(adItem, { enableAdBlock: true }), true);
-    assert.equal(shouldHideFeedItem(wrappedAd, { enableAdBlock: true }), true);
-    assert.equal(shouldHideFeedItem(adItem, { enableAdBlock: false }), false);
-
-    assert.equal(shouldHideFeedItem(nudgeItem, { enableSigninReminder: false }), true);
-    assert.equal(shouldHideFeedItem(wrappedNudge, { enableSigninReminder: false }), true);
-    assert.equal(shouldHideFeedItem(nudgeItem, { enableSigninReminder: true }), false);
+    assert.equal(shouldHideFeedItem(adItem), true);
+    assert.equal(shouldHideFeedItem(wrappedAd), true);
+    assert.equal(shouldHideFeedItem(nudgeItem), true);
+    assert.equal(shouldHideFeedItem(wrappedNudge), true);
   });
 
   test('detects survey renderers and survey prompt titles', () => {
@@ -42,33 +37,6 @@ describe('ads, sign-in nudges, and surveys', () => {
       true
     );
     assert.equal(isSurveyItem({ tileRenderer: { contentId: 'vid-1' } }), false);
-  });
-});
-
-describe('Shorts detection and filtering', () => {
-  test('recognizes all Shorts shelf and item variants', () => {
-    const shortsVariants: FeedItem[] = [
-      { shelfRenderer: { tvhtml5ShelfRendererType: 'TVHTML5_SHELF_RENDERER_TYPE_SHORTS' } },
-      { reelShelfRenderer: {} },
-      { shortsLockupViewModel: {} },
-      { richItemRenderer: { content: { shortsLockupViewModel: {} } } },
-      { lockupViewModel: { contentType: 'LOCKUP_CONTENT_TYPE_SHORT' } },
-      { tileRenderer: { tvhtml5ShelfRendererType: 'TVHTML5_TILE_RENDERER_TYPE_SHORTS' } },
-      { tileRenderer: { style: 'TILE_STYLE_YTLR_SHORTS' } },
-      { tileRenderer: { contentType: 'TILE_CONTENT_TYPE_SHORTS' } },
-      { tileRenderer: { onSelectCommand: { reelWatchEndpoint: { videoId: 's1' } } } },
-    ];
-
-    for (const item of shortsVariants) {
-      assert.equal(isShortsItem(item), true);
-      assert.equal(shouldHideFeedItem(item, { enableShorts: false }), true);
-      assert.equal(shouldHideFeedItem(item, { enableShorts: true }), false);
-    }
-
-    assert.equal(
-      isShortsItem({ tileRenderer: { contentId: 'regular', contentType: 'TILE_CONTENT_TYPE_VIDEO' } }),
-      false
-    );
   });
 });
 
@@ -165,8 +133,9 @@ describe('paid offers and deep badge scanning', () => {
   });
 });
 
-describe('channel extraction and hidden channel filtering', () => {
-  test('extracts channel info from tileRenderer menu and lockupViewModel avatar commands', () => {
+describe('text, command, menu, and channel extraction helpers', () => {
+  test('extractItemChannelName and getExistingMenuItemLists handle tiles and lockups', () => {
+    const sharedMenuItems = [{ menuServiceItemRenderer: { serviceEndpoint: { id: 1 } } }];
     const tileItem: FeedItem = {
       tileRenderer: {
         contentId: 't1',
@@ -177,24 +146,15 @@ describe('channel extraction and hidden channel filtering', () => {
         },
         menu: {
           menuRenderer: {
-            items: [
-              { menuNavigationItemRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'UC123456' } } } },
-            ],
+            items: sharedMenuItems,
           },
         },
-      },
-    };
-    const lockupMetadata = {
-      metadata: {
-        contentMetadataViewModel: {
-          metadataRows: [{ metadataParts: [{ text: { content: 'Music Channel' } }] }],
-        },
-      },
-      avatar: {
-        decoratedAvatarViewModel: {
-          rendererContext: {
-            commandContext: {
-              onTap: { innertubeCommand: { browseEndpoint: { browseId: 'UC654321' } } },
+        onLongPressCommand: {
+          showMenuCommand: {
+            menu: {
+              menuRenderer: {
+                items: sharedMenuItems,
+              },
             },
           },
         },
@@ -204,154 +164,67 @@ describe('channel extraction and hidden channel filtering', () => {
       lockupViewModel: {
         contentId: 'l1',
         metadata: {
-          lockupMetadataViewModel: lockupMetadata,
-        },
-      },
-    };
-
-    assert.deepEqual(extractItemChannelInfo(tileItem), { id: 'UC123456', name: 'Tech Channel' });
-    assert.deepEqual(extractItemChannelInfo(lockupItem), { id: 'UC654321', name: 'Music Channel' });
-
-    assert.equal(isChannelHidden(tileItem, [{ id: 'UC123456', name: 'Old Name' }]), true);
-    assert.equal(isChannelHidden(lockupItem, [{ id: '', name: 'music channel' }]), true);
-    assert.equal(isChannelHidden(lockupItem, [{ id: 'UC000000', name: 'Other Channel' }]), false);
-    assert.equal(shouldHideFeedItem(tileItem, { hiddenChannels: [{ id: 'UC123456', name: 'Tech Channel' }] }), true);
-  });
-});
-
-describe('watched video filtering', () => {
-  test('extracts progress percentage from both tileRenderer and lockupViewModel', () => {
-    const tile: FeedItem = {
-      tileRenderer: {
-        header: {
-          tileHeaderRenderer: {
-            thumbnailOverlays: [{ thumbnailOverlayResumePlaybackRenderer: { percentDurationWatched: 85 } }],
+          lockupMetadataViewModel: {
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [{ metadataParts: [{ text: { content: 'Music Channel' } }] }],
+              },
+            },
           },
         },
-      },
-    };
-    const lockup: FeedItem = {
-      lockupViewModel: {
-        contentImage: {
-          thumbnailViewModel: {
-            overlays: [
-              {
-                thumbnailBottomOverlayViewModel: {
-                  progressBar: { thumbnailOverlayProgressBarViewModel: { startPercent: 92 } },
+        rendererContext: {
+          commandContext: {
+            onLongPress: {
+              innertubeCommand: {
+                showMenuCommand: {
+                  menu: {
+                    menuRenderer: {
+                      items: [{ menuServiceItemRenderer: { serviceEndpoint: { id: 2 } } }],
+                    },
+                  },
                 },
               },
-            ],
+            },
           },
         },
       },
     };
 
-    assert.equal(extractWatchedPercent(tile), 85);
-    assert.equal(extractWatchedPercent(lockup), 92);
-    assert.equal(extractWatchedPercent({ tileRenderer: { contentId: 'unwatched' } }), null);
-  });
-
-  test('resolves YouTube TV route hashes into settings page identifiers', () => {
-    assert.equal(resolveFeedPageName('#/'), 'home');
-    assert.equal(resolveFeedPageName('#/search?q=lofi'), 'search');
-    assert.equal(resolveFeedPageName('#/browse?c=FEsubscriptions'), 'subscriptions');
-    assert.equal(resolveFeedPageName('#/browse?c=FEtopics_gaming'), 'gaming');
-    assert.equal(resolveFeedPageName('#/browse?c=FElibrary'), 'library');
-  });
-
-  test('respects enableHideWatchedVideos, enabled pages, and percentage threshold', () => {
-    const lockup90: FeedItem = {
-      lockupViewModel: {
-        contentImage: {
-          thumbnailViewModel: {
-            overlays: [
-              {
-                thumbnailBottomOverlayViewModel: {
-                  progressBar: { thumbnailOverlayProgressBarViewModel: { startPercent: 90 } },
-                },
-              },
-            ],
+    assert.equal(extractItemChannelName(tileItem), 'Tech Channel');
+    assert.equal(extractItemChannelName(lockupItem), 'Music Channel');
+    assert.equal(getExistingMenuItemLists(tileItem).length, 1);
+    assert.equal(getExistingMenuItemLists(lockupItem).length, 1);
+    assert.equal(readFormattedText({ runs: [{ text: 'A' }, { text: 'B' }] }), 'AB');
+    assert.equal(
+      walkCommands(
+        {
+          commandExecutorCommand: {
+            commands: [{ innertubeCommand: { targetAction: true } }],
           },
         },
-      },
-    };
-    const tile100: FeedItem = {
-      tileRenderer: {
-        header: {
-          tileHeaderRenderer: {
-            thumbnailOverlays: [{ thumbnailOverlayResumePlaybackRenderer: { percentDurationWatched: 100 } }],
-          },
-        },
-      },
-    };
-
-    // Master switch off -> always kept
-    assert.equal(
-      shouldHideWatchedItem(lockup90, {
-        enableHideWatchedVideos: false,
-        hideWatchedVideosPages: ['home'],
-        hideWatchedVideosThreshold: 80,
-        locationHash: '#/',
-      }),
-      false
-    );
-
-    // Master switch on + matching page + above threshold -> hidden
-    assert.equal(
-      shouldHideWatchedItem(lockup90, {
-        enableHideWatchedVideos: true,
-        hideWatchedVideosPages: ['home'],
-        hideWatchedVideosThreshold: 80,
-        locationHash: '#/',
-      }),
-      true
-    );
-
-    // Non-matching page -> kept
-    assert.equal(
-      shouldHideWatchedItem(lockup90, {
-        enableHideWatchedVideos: true,
-        hideWatchedVideosPages: ['subscriptions'],
-        hideWatchedVideosThreshold: 80,
-        locationHash: '#/',
-      }),
-      false
-    );
-
-    // Threshold 100 hides 100% watched videos
-    assert.equal(
-      shouldHideWatchedItem(tile100, {
-        enableHideWatchedVideos: true,
-        hideWatchedVideosPages: ['home'],
-        hideWatchedVideosThreshold: 100,
-        locationHash: '#/',
-      }),
+        (cmd) => Boolean(cmd.targetAction)
+      ),
       true
     );
   });
 });
 
-describe('filterFeedItems and filterShelvesInPlace', () => {
-  test('filters items cleanly and compacts shelves in place', async () => {
-    const validVideo: FeedItem = { tileRenderer: { contentId: 'keep-me' } };
+describe('filterFeedItemsSync and filterShelvesInPlaceSync', () => {
+  test('filters hidden entries cleanly in new arrays and in-place shelf arrays', () => {
+    const validVideo: FeedItem = { tileRenderer: { contentId: 'ok' } };
     const paidVideo: FeedItem = { tileRenderer: { onSelectCommand: { ypcGetOffersEndpoint: {} } } };
-    const shortVideo: FeedItem = { lockupViewModel: { contentType: 'LOCKUP_CONTENT_TYPE_SHORT' } };
+    const adSlot: FeedItem = { adSlotRenderer: {} };
 
-    assert.deepEqual(await filterFeedItems([validVideo, paidVideo, shortVideo], { enableShorts: false }), [validVideo]);
+    assert.deepEqual(filterFeedItemsSync([validVideo, paidVideo, adSlot]), [validVideo]);
 
     const shelves: FeedItem[] = [
+      { surveyRenderer: {} },
+      { shelfRenderer: { title: { simpleText: 'Keep Me' } } },
       { adSlotRenderer: {} },
-      { shelfRenderer: { title: 'Recommended' } },
-      { feedNudgeRenderer: {} },
-      { shelfRenderer: { tvhtml5ShelfRendererType: 'TVHTML5_SHELF_RENDERER_TYPE_SHORTS' } },
     ];
-    const result = await filterShelvesInPlace(shelves, {
-      enableAdBlock: true,
-      enableSigninReminder: false,
-      enableShorts: false,
-    });
-
+    const result = filterShelvesInPlaceSync(shelves);
     assert.equal(result, shelves);
-    assert.deepEqual(shelves, [{ shelfRenderer: { title: 'Recommended' } }]);
+    assert.equal(shelves.length, 1);
+    assert.equal(readFormattedText(shelves[0]?.shelfRenderer?.title), 'Keep Me');
   });
 });

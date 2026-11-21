@@ -32,11 +32,6 @@ export interface DeArrowBrandingResponse {
   thumbnails?: DeArrowThumbnailEntry[];
 }
 
-export interface DeArrowOptions {
-  enableDeArrow?: boolean;
-  enableDeArrowThumbnails?: boolean;
-}
-
 interface ThumbnailListHandle {
   getThumbnails: () => Thumbnail[] | undefined;
   setThumbnails: (thumbnails: Thumbnail[]) => void;
@@ -71,6 +66,9 @@ function getThumbnailListHandle(feedItem: FeedItem): ThumbnailListHandle | null 
   return null;
 }
 
+/**
+ * Prepends an `hq720.jpg` thumbnail entry unless the item already has an HD or custom thumbnail.
+ */
 export function applyThumbnailUpgrade(thumbnails: Thumbnail[], videoId: string): Thumbnail[] {
   if (!Array.isArray(thumbnails) || !videoId) return thumbnails;
 
@@ -140,8 +138,11 @@ export function upgradeFeedItemThumbnails(entry: FeedItem | null | undefined): b
   return true;
 }
 
-export function upgradeFeedThumbnails(items: FeedItem[], isEnabled = true): void {
-  if (!isEnabled || !Array.isArray(items)) return;
+/**
+ * Upgrades video thumbnails in place across a batch of feed items.
+ */
+export function upgradeFeedThumbnails(items: FeedItem[]): void {
+  if (!Array.isArray(items)) return;
   for (const entry of items) {
     upgradeFeedItemThumbnails(entry);
   }
@@ -150,6 +151,7 @@ export function upgradeFeedThumbnails(items: FeedItem[], isEnabled = true): void
 export function selectHighestVotedEntry<T extends { votes: number }>(entries: readonly T[]): T | null {
   let highestVotedEntry: T | null = null;
   for (const entry of entries) {
+    if (entry.votes < 0) continue;
     if (!highestVotedEntry || entry.votes > highestVotedEntry.votes) {
       highestVotedEntry = entry;
     }
@@ -176,12 +178,7 @@ function setFormattedTitle(
   }
 }
 
-export function applyDeArrowBrandingToItem(
-  entry: FeedItem,
-  videoId: string,
-  branding: DeArrowBrandingResponse,
-  shouldUpdateThumbnails: boolean
-): void {
+export function applyDeArrowBrandingToItem(entry: FeedItem, videoId: string, branding: DeArrowBrandingResponse): void {
   const feedItem = unwrapFeedItem(entry);
   if (!feedItem) return;
 
@@ -200,19 +197,25 @@ export function applyDeArrowBrandingToItem(
     }
   }
 
-  if (shouldUpdateThumbnails && Array.isArray(branding.thumbnails) && branding.thumbnails.length > 0) {
+  if (Array.isArray(branding.thumbnails) && branding.thumbnails.length > 0) {
     const highestVotedThumbnail = selectHighestVotedEntry(branding.thumbnails);
-    if (typeof highestVotedThumbnail?.timestamp === 'number') {
-      const deArrowThumbnail: Thumbnail = {
-        url: `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${encodeURIComponent(videoId)}&time=${highestVotedThumbnail.timestamp}`,
-        width: HQ_THUMBNAIL_WIDTH,
-        height: DEARROW_THUMBNAIL_HEIGHT,
-      };
+    const ts = highestVotedThumbnail?.timestamp;
+    if (typeof ts === 'number' && Number.isFinite(ts) && ts >= 0) {
+      const url = `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${encodeURIComponent(videoId)}&time=${ts}`;
       const thumbnailHandle = getThumbnailListHandle(feedItem);
       if (thumbnailHandle) {
         const existingThumbnails = thumbnailHandle.getThumbnails();
         const fallbackThumbnails = Array.isArray(existingThumbnails) ? existingThumbnails : [];
-        thumbnailHandle.setThumbnails([deArrowThumbnail, ...fallbackThumbnails]);
+        if (fallbackThumbnails[0]?.url !== url) {
+          thumbnailHandle.setThumbnails([
+            {
+              url,
+              width: HQ_THUMBNAIL_WIDTH,
+              height: DEARROW_THUMBNAIL_HEIGHT,
+            },
+            ...fallbackThumbnails,
+          ]);
+        }
       }
     }
   }
@@ -288,20 +291,22 @@ function fetchBrandingForVideo(
   return request;
 }
 
-export async function applyDeArrowBranding(items: FeedItem[], options: DeArrowOptions = {}): Promise<void> {
-  const enableDeArrow = options.enableDeArrow ?? true;
-  const enableDeArrowThumbnails = options.enableDeArrowThumbnails ?? true;
-  if (!enableDeArrow || !Array.isArray(items)) return;
+/**
+ * Fetches and applies DeArrow replacement titles and thumbnails across a batch of feed items.
+ */
+export async function applyDeArrowBranding(items: FeedItem[]): Promise<void> {
+  if (!Array.isArray(items)) return;
 
   const requestController = activeNavigationController;
   const tasks: Array<{ entry: FeedItem; videoId: string }> = [];
   for (const entry of items) {
     const videoId = extractVideoIdForThumbnail(entry);
     if (!videoId) continue;
+
     const cached = deArrowCache.get(videoId);
     if (cached) {
       if (hasDeArrowBrandingContent(cached)) {
-        applyDeArrowBrandingToItem(entry, videoId, cached, enableDeArrowThumbnails);
+        applyDeArrowBrandingToItem(entry, videoId, cached);
       }
     } else {
       tasks.push({ entry, videoId });
@@ -313,21 +318,33 @@ export async function applyDeArrowBranding(items: FeedItem[], options: DeArrowOp
     tasks.map((task) =>
       fetchBrandingForVideo(task.videoId, requestController).then((branding) => {
         if (!requestController?.signal.aborted && branding && hasDeArrowBrandingContent(branding)) {
-          applyDeArrowBrandingToItem(task.entry, task.videoId, branding, enableDeArrowThumbnails);
+          applyDeArrowBrandingToItem(task.entry, task.videoId, branding);
         }
       })
     )
   );
 }
 
+/**
+ * Resolves the next step-down thumbnail URL when an image fails to load:
+ * `DeArrow -> hq720.jpg -> hqdefault.jpg -> null`.
+ */
 export function resolveFallbackThumbnailUrl(failedUrl: string): string | null {
   if (!failedUrl) return null;
-  const match = failedUrl.match(YOUTUBE_HQ720_URL_PATTERN) ?? failedUrl.match(DEARROW_THUMBNAIL_URL_PATTERN);
-  return match?.[1] ? `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg` : null;
+  const deArrowMatch = failedUrl.match(DEARROW_THUMBNAIL_URL_PATTERN);
+  if (deArrowMatch?.[1]) {
+    return `https://i.ytimg.com/vi/${deArrowMatch[1]}/hq720.jpg`;
+  }
+  const hq720Match = failedUrl.match(YOUTUBE_HQ720_URL_PATTERN);
+  return hq720Match?.[1] ? `https://i.ytimg.com/vi/${hq720Match[1]}/hqdefault.jpg` : null;
 }
 
 let isFallbackListenerInstalled = false;
 
+/**
+ * Installs capture-phase thumbnail error recovery (`DeArrow -> hq720.jpg -> hqdefault.jpg`)
+ * and aborts queued DeArrow fetches on route navigation.
+ */
 export function installThumbnailErrorFallback(): void {
   if (isFallbackListenerInstalled || typeof document === 'undefined') return;
   isFallbackListenerInstalled = true;
@@ -340,14 +357,11 @@ export function installThumbnailErrorFallback(): void {
     'error',
     (event: Event) => {
       const imageElement = event.target;
-      if (!(imageElement instanceof HTMLImageElement)) return;
+      if (typeof HTMLImageElement === 'undefined' || !(imageElement instanceof HTMLImageElement)) return;
 
       const failedSourceUrl = imageElement.src || '';
-      if (!failedSourceUrl || imageElement.dataset.ttThumbFallback === failedSourceUrl) return;
-
       const fallbackUrl = resolveFallbackThumbnailUrl(failedSourceUrl);
-      if (fallbackUrl) {
-        imageElement.dataset.ttThumbFallback = failedSourceUrl;
+      if (fallbackUrl && fallbackUrl !== failedSourceUrl) {
         imageElement.src = fallbackUrl;
       }
     },

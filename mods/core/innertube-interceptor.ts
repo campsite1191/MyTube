@@ -643,11 +643,7 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
 
     const streamingData = isRecord(r.streamingData) ? r.streamingData : undefined;
     if (Array.isArray(streamingData?.adaptiveFormats)) {
-      streamingData.adaptiveFormats = filterStreamingFormats(
-        streamingData.adaptiveFormats as AudioFormatEntry[],
-        'any',
-        false
-      );
+      streamingData.adaptiveFormats = filterStreamingFormats(streamingData.adaptiveFormats as AudioFormatEntry[]);
     }
 
     disableAutoCaptionsInPayload(r);

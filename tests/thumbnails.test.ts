@@ -8,6 +8,7 @@ import {
   applyThumbnailUpgrade,
   clearDeArrowCache,
   extractVideoIdForThumbnail,
+  installThumbnailErrorFallback,
   resolveFallbackThumbnailUrl,
   selectHighestVotedEntry,
   upgradeFeedItemThumbnails,
@@ -167,15 +168,11 @@ describe('applyThumbnailUpgrade and upgradeFeedThumbnails', () => {
     assert.equal(upgradeFeedItemThumbnails(emptyThumbTile.entry), false);
   });
 
-  test('upgradeFeedThumbnails respects the isEnabled toggle across batches', () => {
-    const disabledCase = createTileFeedItem();
-    upgradeFeedThumbnails([disabledCase.entry], false);
-    assert.equal(disabledCase.tile.header?.tileHeaderRenderer?.thumbnail?.thumbnails?.length, 1);
-
+  test('upgradeFeedThumbnails upgrades video items and skips non-video entries across batches', () => {
     const videoTile = createTileFeedItem();
     const channelTile = createTileFeedItem({ contentType: 'TILE_CONTENT_TYPE_CHANNEL' });
     const lockupCase = createLockupFeedItem();
-    upgradeFeedThumbnails([videoTile.entry, channelTile.entry, lockupCase.entry], true);
+    upgradeFeedThumbnails([videoTile.entry, channelTile.entry, lockupCase.entry]);
 
     assert.equal(videoTile.tile.header?.tileHeaderRenderer?.thumbnail?.thumbnails?.length, 2);
     assert.equal(channelTile.tile.header?.tileHeaderRenderer?.thumbnail?.thumbnails?.length, 1);
@@ -184,8 +181,9 @@ describe('applyThumbnailUpgrade and upgradeFeedThumbnails', () => {
 });
 
 describe('DeArrow branding helpers', () => {
-  test('selectHighestVotedEntry handles empty lists, winners, and ties', () => {
+  test('selectHighestVotedEntry ignores negative votes and handles ties', () => {
     assert.equal(selectHighestVotedEntry([]), null);
+    assert.equal(selectHighestVotedEntry([{ title: 'Spam', votes: -3 }]), null);
     assert.deepEqual(
       selectHighestVotedEntry([
         { title: 'First', votes: 3 },
@@ -203,7 +201,7 @@ describe('DeArrow branding helpers', () => {
     );
   });
 
-  test('applyDeArrowBrandingToItem updates simpleText, runs, content titles, and preserves fallback thumbnails', () => {
+  test('applyDeArrowBrandingToItem updates titles, prepends thumbnail once, and preserves fallbacks', () => {
     const branding: DeArrowBrandingResponse = {
       titles: [
         { title: 'Less Voted', votes: 1 },
@@ -215,12 +213,13 @@ describe('DeArrow branding helpers', () => {
     const runsTile = createTileFeedItem({
       metadata: { tileMetadataRenderer: { title: { runs: [{ text: 'Clickbait!' }] } } },
     });
-    applyDeArrowBrandingToItem(runsTile.entry, 'vid1', branding, false);
+    applyDeArrowBrandingToItem(runsTile.entry, 'vid1', { titles: branding.titles });
     assert.deepEqual(runsTile.tile.metadata?.tileMetadataRenderer?.title?.runs, [{ text: 'Clean Title' }]);
     assert.equal(runsTile.tile.header?.tileHeaderRenderer?.thumbnail?.thumbnails?.length, 1);
 
     const lockupCase = createLockupFeedItem();
-    applyDeArrowBrandingToItem(lockupCase.entry, 'lockup-vid-1', branding, true);
+    applyDeArrowBrandingToItem(lockupCase.entry, 'lockup-vid-1', branding);
+    applyDeArrowBrandingToItem(lockupCase.entry, 'lockup-vid-1', branding);
     assert.equal(lockupCase.lockup.metadata?.lockupMetadataViewModel?.title?.content, 'Clean Title');
     const sources = lockupCase.lockup.contentImage?.thumbnailViewModel?.image?.sources;
     assert.equal(
@@ -258,22 +257,17 @@ describe('DeArrow branding helpers', () => {
     }) as typeof globalThis.fetch;
 
     try {
-      await applyDeArrowBranding(
-        [
-          tileCase.entry,
-          { richItemRenderer: { content: richLockupCase.entry } },
-          channelCase.entry,
-          failingVideoCase.entry,
-        ],
-        { enableDeArrow: true, enableDeArrowThumbnails: true }
-      );
+      await applyDeArrowBranding([
+        tileCase.entry,
+        { richItemRenderer: { content: richLockupCase.entry } },
+        channelCase.entry,
+        failingVideoCase.entry,
+      ]);
 
       globalThis.fetch = (async (): Promise<Response> => {
         throw new Error('Network offline');
       }) as typeof globalThis.fetch;
-      await assert.doesNotReject(() =>
-        applyDeArrowBranding([failingVideoCase.entry], { enableDeArrow: true, enableDeArrowThumbnails: true })
-      );
+      await assert.doesNotReject(() => applyDeArrowBranding([failingVideoCase.entry]));
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -314,17 +308,17 @@ describe('DeArrow branding helpers', () => {
 
     try {
       const missItem = createTileFeedItem({ onSelectCommand: { watchEndpoint: { videoId: 'miss-404' } } });
-      await applyDeArrowBranding([missItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
-      await applyDeArrowBranding([missItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      await applyDeArrowBranding([missItem.entry]);
+      await applyDeArrowBranding([missItem.entry]);
       assert.equal(fetchCount, 1);
 
       const flakyItem = createTileFeedItem({ onSelectCommand: { watchEndpoint: { videoId: 'transient-500' } } });
-      await applyDeArrowBranding([flakyItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      await applyDeArrowBranding([flakyItem.entry]);
       assert.equal(fetchCount, 2);
       assert.equal(flakyItem.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Original Tile Title');
 
       transientStatus = 200;
-      await applyDeArrowBranding([flakyItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      await applyDeArrowBranding([flakyItem.entry]);
       assert.equal(fetchCount, 3);
       assert.equal(flakyItem.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Recovered Title');
 
@@ -335,10 +329,7 @@ describe('DeArrow branding helpers', () => {
         return new Response(null, { status: 404 });
       }) as typeof globalThis.fetch;
       const queuedItem = createTileFeedItem({ onSelectCommand: { watchEndpoint: { videoId: 'queued-abort' } } });
-      const pendingQueued = applyDeArrowBranding([queuedItem.entry], {
-        enableDeArrow: true,
-        enableDeArrowThumbnails: false,
-      });
+      const pendingQueued = applyDeArrowBranding([queuedItem.entry]);
       abortPendingDeArrowRequests();
       await pendingQueued;
       assert.equal(queuedFetchCalled, false);
@@ -364,7 +355,7 @@ describe('DeArrow branding helpers', () => {
         })) as typeof globalThis.fetch;
 
       const staleItem = createTileFeedItem({ onSelectCommand: { watchEndpoint: { videoId: 'stale-abort' } } });
-      const pending = applyDeArrowBranding([staleItem.entry], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      const pending = applyDeArrowBranding([staleItem.entry]);
       await fetchStarted;
       abortPendingDeArrowRequests();
       await pending;
@@ -378,17 +369,75 @@ describe('DeArrow branding helpers', () => {
   });
 });
 
-describe('resolveFallbackThumbnailUrl', () => {
-  test('converts failed hq720 and dearrow URLs to hqdefault and ignores other URLs', () => {
-    assert.equal(
-      resolveFallbackThumbnailUrl('https://i.ytimg.com/vi/abc123/hq720.jpg?sqp=1'),
-      'https://i.ytimg.com/vi/abc123/hqdefault.jpg'
-    );
+describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => {
+  test('steps down DeArrow -> hq720.jpg -> hqdefault.jpg and ignores other URLs', () => {
     assert.equal(
       resolveFallbackThumbnailUrl('https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=xyz789&time=12.5'),
+      'https://i.ytimg.com/vi/xyz789/hq720.jpg'
+    );
+    assert.equal(
+      resolveFallbackThumbnailUrl('https://i.ytimg.com/vi/xyz789/hq720.jpg?sqp=1'),
       'https://i.ytimg.com/vi/xyz789/hqdefault.jpg'
     );
-    assert.equal(resolveFallbackThumbnailUrl('https://i.ytimg.com/vi/abc123/hqdefault.jpg'), null);
+    assert.equal(resolveFallbackThumbnailUrl('https://i.ytimg.com/vi/xyz789/hqdefault.jpg'), null);
     assert.equal(resolveFallbackThumbnailUrl(''), null);
+  });
+
+  test('installThumbnailErrorFallback recovers failed images including recycled DOM nodes', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevWindow = globals.window;
+    const prevHTMLImageElement = globals.HTMLImageElement;
+
+    class MockHTMLImageElement {
+      src: string;
+      constructor(src: string) {
+        this.src = src;
+      }
+    }
+
+    let errorHandler: ((event: Event) => void) | undefined;
+    let hashChangeHandler: (() => void) | undefined;
+
+    globals.HTMLImageElement = MockHTMLImageElement;
+    globals.window = {
+      addEventListener: (type: string, listener: () => void) => {
+        if (type === 'hashchange') hashChangeHandler = listener;
+      },
+    };
+    globals.document = {
+      addEventListener: (type: string, listener: (event: Event) => void) => {
+        if (type === 'error') errorHandler = listener;
+      },
+    };
+
+    t.after(() => {
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevHTMLImageElement === undefined) delete globals.HTMLImageElement;
+      else globals.HTMLImageElement = prevHTMLImageElement;
+    });
+
+    installThumbnailErrorFallback();
+    assert.ok(errorHandler);
+    assert.ok(hashChangeHandler);
+
+    const img = new MockHTMLImageElement('https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=rec1&time=5');
+    errorHandler({ target: img } as unknown as Event);
+    assert.equal(img.src, 'https://i.ytimg.com/vi/rec1/hq720.jpg');
+
+    errorHandler({ target: img } as unknown as Event);
+    assert.equal(img.src, 'https://i.ytimg.com/vi/rec1/hqdefault.jpg');
+
+    // Recycled DOM element loads the same failing DeArrow URL again on a later scroll -> still recovers.
+    img.src = 'https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=rec1&time=5';
+    errorHandler({ target: img } as unknown as Event);
+    assert.equal(img.src, 'https://i.ytimg.com/vi/rec1/hq720.jpg');
+
+    // Non-image targets are ignored cleanly.
+    errorHandler({ target: {} } as unknown as Event);
+    hashChangeHandler();
   });
 });

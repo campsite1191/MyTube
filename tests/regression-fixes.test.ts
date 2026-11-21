@@ -117,19 +117,19 @@ describe('regression fixes', () => {
     try {
       const a = makeItem('dedupVid1');
       const b = makeItem('dedupVid1');
-      await applyDeArrowBranding([a, b], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      await applyDeArrowBranding([a, b]);
       assert.equal(fetchCalls, 1);
       assert.equal(a.tileRenderer.metadata.tileMetadataRenderer.title.simpleText, 'Cached Title');
       assert.equal(b.tileRenderer.metadata.tileMetadataRenderer.title.simpleText, 'Cached Title');
 
       const c = makeItem('dedupVid1');
-      await applyDeArrowBranding([c], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      await applyDeArrowBranding([c]);
       assert.equal(fetchCalls, 1);
       assert.equal(c.tileRenderer.metadata.tileMetadataRenderer.title.simpleText, 'Cached Title');
 
       clearDeArrowCache();
       const d = makeItem('dedupVid1');
-      await applyDeArrowBranding([d], { enableDeArrow: true, enableDeArrowThumbnails: false });
+      await applyDeArrowBranding([d]);
       assert.equal(fetchCalls, 2);
     } finally {
       clearDeArrowCache();

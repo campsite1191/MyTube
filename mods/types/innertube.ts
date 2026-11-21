@@ -158,11 +158,6 @@ export interface FeedItem {
   [key: string]: unknown;
 }
 
-export interface HiddenChannel {
-  id: string;
-  name: string;
-}
-
 export interface AdaptiveFormat {
   itag?: number;
   mimeType: string;

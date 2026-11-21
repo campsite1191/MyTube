@@ -3,6 +3,7 @@ import { isRecord } from '../utils/type-guards.ts';
 
 export interface AudioFormatEntry extends AdaptiveFormat {
   audioChannels?: number;
+  bitrate?: number;
   xtags?: string;
   isDrc?: boolean;
   isVoiceBoost?: boolean;
@@ -30,11 +31,29 @@ export function getAudioTier(fmt: AudioFormatEntry, preferDrcAudio = false): num
   return isDrc ? 5 : 4;
 }
 
+interface TrackSummary {
+  id: string;
+  displayName: string;
+  isOriginal: boolean;
+  bestTier: number;
+  bestChannels: number;
+  sourceDefault: boolean;
+  firstIndex: number;
+}
+
+function compareTrackSummaries(a: TrackSummary, b: TrackSummary): number {
+  if (a.isOriginal !== b.isOriginal) return a.isOriginal ? -1 : 1;
+  if (a.bestTier !== b.bestTier) return a.bestTier - b.bestTier;
+  if (a.bestChannels !== b.bestChannels) return b.bestChannels - a.bestChannels;
+  if (a.sourceDefault !== b.sourceDefault) return a.sourceDefault ? -1 : 1;
+  return a.firstIndex - b.firstIndex;
+}
+
 /**
- * Filters `adaptiveFormats` by preferred video codec (when set) and enforces
- * Cobalt's preferred original-track audio priority:
- * 7.1 -> 5.1 Surround -> Voice Boost -> Original Stereo -> DRC
- * (or DRC ahead of Voice Boost / Stereo when `preferDrcAudio` is true).
+ * Filters `adaptiveFormats` by preferred video codec (when set), preserves all audio tracks,
+ * arranges audio formats in recommended order (best/original track first, then highest tier
+ * `7.1 -> 5.1 Surround -> Voice Boost -> Original Stereo -> DRC` and bitrate descending),
+ * and marks the best track as initially selected (`audioIsDefault: true`).
  */
 export function filterStreamingFormats(
   formats: AudioFormatEntry[],
@@ -50,52 +69,91 @@ export function filterStreamingFormats(
     }
   }
 
-  let firstId: string | null = null;
-  let hasMultiple = false;
-  let originalId: string | null = null;
-  let fallbackId: string | null = null;
+  const nonAudio: AudioFormatEntry[] = [];
+  const audio: AudioFormatEntry[] = [];
+  const tracks = new Map<string, TrackSummary>();
 
-  for (const fmt of result) {
-    if (!fmt?.mimeType?.startsWith('audio/')) continue;
-    const at = fmt.audioTrack;
-    const id = at?.id;
-    if (!id) continue;
-    if (firstId === null) firstId = id;
-    else if (id !== firstId) hasMultiple = true;
-    if (!originalId && /\boriginal\b/i.test(at.displayName || '')) originalId = id;
-    if (!fallbackId && id.endsWith('.4')) fallbackId = id;
-  }
-
-  const targetId = hasMultiple ? originalId || fallbackId : null;
-  let bestTier = Number.POSITIVE_INFINITY;
-  let needsFilter = false;
-
-  for (const fmt of result) {
-    if (!fmt?.mimeType?.startsWith('audio/')) continue;
-    if (targetId && fmt.audioTrack?.id !== targetId) {
-      needsFilter = true;
+  for (let i = 0; i < result.length; i++) {
+    const fmt = result[i];
+    if (!fmt) continue;
+    if (!fmt.mimeType?.startsWith('audio/')) {
+      nonAudio.push(fmt);
       continue;
     }
+
+    audio.push(fmt);
+    const id = fmt.audioTrack?.id ?? '';
+    const displayName = fmt.audioTrack?.displayName ?? '';
     const tier = getAudioTier(fmt, preferDrcAudio);
-    if (tier < bestTier) {
-      if (bestTier !== Number.POSITIVE_INFINITY) needsFilter = true;
-      bestTier = tier;
-    } else if (tier > bestTier) {
-      needsFilter = true;
+    const channels = typeof fmt.audioChannels === 'number' ? fmt.audioChannels : 0;
+    const isOriginal = Boolean(id && (/\boriginal\b/i.test(displayName) || id.endsWith('.4')));
+    const existing = tracks.get(id);
+
+    if (!existing) {
+      tracks.set(id, {
+        id,
+        displayName,
+        isOriginal,
+        bestTier: tier,
+        bestChannels: channels,
+        sourceDefault: Boolean(fmt.audioTrack?.audioIsDefault),
+        firstIndex: i,
+      });
+    } else {
+      if (!existing.displayName && displayName) existing.displayName = displayName;
+      if (isOriginal) existing.isOriginal = true;
+      if (tier < existing.bestTier || (tier === existing.bestTier && channels > existing.bestChannels)) {
+        existing.bestTier = tier;
+        existing.bestChannels = channels;
+      }
+      if (fmt.audioTrack?.audioIsDefault) existing.sourceDefault = true;
     }
   }
 
-  if (bestTier !== Number.POSITIVE_INFINITY && (needsFilter || targetId)) {
-    return result.filter((fmt) => {
-      if (!fmt?.mimeType?.startsWith('audio/')) return true;
-      if (targetId && fmt.audioTrack?.id !== targetId) return false;
-      if (getAudioTier(fmt, preferDrcAudio) !== bestTier) return false;
-      if (targetId && fmt.audioTrack) fmt.audioTrack.audioIsDefault = true;
-      return true;
-    });
+  if (audio.length === 0) return result;
+
+  const rankedTracks = Array.from(tracks.values()).toSorted(compareTrackSummaries);
+  const bestTrackId = rankedTracks[0]?.id ?? '';
+
+  const sortedAudio = audio.toSorted((a, b) => {
+    const aId = a.audioTrack?.id ?? '';
+    const bId = b.audioTrack?.id ?? '';
+    const aIsBestTrack = aId === bestTrackId;
+    const bIsBestTrack = bId === bestTrackId;
+    if (aIsBestTrack !== bIsBestTrack) return aIsBestTrack ? -1 : 1;
+
+    if (aId !== bId) {
+      const aTrack = tracks.get(aId);
+      const bTrack = tracks.get(bId);
+      if (aTrack && bTrack) {
+        if (aTrack.isOriginal !== bTrack.isOriginal) return aTrack.isOriginal ? -1 : 1;
+        if (aTrack.bestTier !== bTrack.bestTier) return aTrack.bestTier - bTrack.bestTier;
+        const nameCmp = aTrack.displayName.localeCompare(bTrack.displayName);
+        if (nameCmp !== 0) return nameCmp;
+      }
+    }
+
+    const tierDiff = getAudioTier(a, preferDrcAudio) - getAudioTier(b, preferDrcAudio);
+    if (tierDiff !== 0) return tierDiff;
+
+    const aChannels = typeof a.audioChannels === 'number' ? a.audioChannels : 0;
+    const bChannels = typeof b.audioChannels === 'number' ? b.audioChannels : 0;
+    if (aChannels !== bChannels) return bChannels - aChannels;
+
+    const aBitrate = typeof a.bitrate === 'number' ? a.bitrate : 0;
+    const bBitrate = typeof b.bitrate === 'number' ? b.bitrate : 0;
+    return bBitrate - aBitrate;
+  });
+
+  if (bestTrackId) {
+    for (const fmt of sortedAudio) {
+      if (fmt.audioTrack) {
+        fmt.audioTrack.audioIsDefault = fmt.audioTrack.id === bestTrackId;
+      }
+    }
   }
 
-  return result;
+  return [...nonAudio, ...sortedAudio];
 }
 
 /**

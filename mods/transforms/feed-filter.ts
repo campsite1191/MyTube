@@ -1,71 +1,6 @@
-import type { FeedItem, FormattedText, HiddenChannel } from '../types/innertube.ts';
+import type { FeedItem, FormattedText } from '../types/innertube.ts';
 import { compactInPlace } from '../utils/feed-helpers.ts';
 import { isRecord } from '../utils/type-guards.ts';
-
-const EMPTY_HIDDEN_CHANNELS: readonly HiddenChannel[] = [];
-const EMPTY_HIDDEN_PAGES: readonly string[] = [];
-
-interface ComputedItemMetadata {
-  channelInfo?: HiddenChannel;
-  hasPaidOffer?: boolean;
-  hasBlockedBadge?: boolean;
-}
-
-const computedMetadataCache = new WeakMap<FeedItem, ComputedItemMetadata>();
-
-interface HiddenChannelIndex {
-  ids: Set<string>;
-  lowerNames: Set<string>;
-}
-
-const hiddenChannelIndexCache = new WeakMap<readonly HiddenChannel[], HiddenChannelIndex>();
-const hiddenPagesCache = new WeakMap<readonly string[], Set<string>>();
-let lastResolvedHash: string | undefined;
-let lastResolvedPageName = '';
-
-function getHiddenChannelIndex(hiddenChannels: readonly HiddenChannel[]): HiddenChannelIndex {
-  let index = hiddenChannelIndexCache.get(hiddenChannels);
-  if (index) return index;
-  const ids = new Set<string>();
-  const lowerNames = new Set<string>();
-  for (const entry of hiddenChannels) {
-    if (!entry) continue;
-    if (entry.id) ids.add(entry.id);
-    if (entry.name) lowerNames.add(entry.name.toLowerCase());
-  }
-  index = { ids, lowerNames };
-  hiddenChannelIndexCache.set(hiddenChannels, index);
-  return index;
-}
-
-function getHiddenPagesSet(pages: readonly string[]): Set<string> {
-  let set = hiddenPagesCache.get(pages);
-  if (!set) {
-    set = new Set(pages);
-    hiddenPagesCache.set(pages, set);
-  }
-  return set;
-}
-
-function getComputedMetadata(item: FeedItem): ComputedItemMetadata {
-  let meta = computedMetadataCache.get(item);
-  if (!meta) {
-    meta = {};
-    computedMetadataCache.set(item, meta);
-  }
-  return meta;
-}
-
-export interface FeedFilterOptions {
-  enableAdBlock?: boolean;
-  enableSigninReminder?: boolean;
-  enableShorts?: boolean;
-  enableHideWatchedVideos?: boolean;
-  hideWatchedVideosThreshold?: number;
-  hideWatchedVideosPages?: readonly string[];
-  hiddenChannels?: readonly HiddenChannel[];
-  locationHash?: string;
-}
 
 const BADGE_KEY_RE = /badge/i;
 const SURVEY_KEY_RE = /survey|questionnaire/i;
@@ -117,6 +52,9 @@ export function walkCommands(
   return visit(node, 0);
 }
 
+/**
+ * Extracts plain text from an InnerTube formatted text node (`simpleText`, `content`, or `runs`).
+ */
 export function readFormattedText(node: unknown): string {
   if (!node) return '';
   if (typeof node === 'string') return node;
@@ -140,6 +78,9 @@ function firstNonEmptyText(nodes: unknown, pick: (entry: Record<string, unknown>
   return '';
 }
 
+/**
+ * Extracts the channel display name from a `tileRenderer` or `lockupViewModel` feed item.
+ */
 export function extractItemChannelName(item: FeedItem | null | undefined): string {
   const target = unwrapFeedItem(item);
   if (!target) return '';
@@ -163,6 +104,9 @@ export function extractItemChannelName(item: FeedItem | null | undefined): strin
   return firstNonEmptyText(parts, (entry) => entry.text);
 }
 
+/**
+ * Collects unique existing menu item arrays attached to a feed item's menu or long-press commands.
+ */
 export function getExistingMenuItemLists(item: FeedItem | null | undefined): Array<Array<Record<string, unknown>>> {
   const target = unwrapFeedItem(item);
   if (!target) return [];
@@ -194,66 +138,6 @@ export function getExistingMenuItemLists(item: FeedItem | null | undefined): Arr
   return Array.from(new Set(lists));
 }
 
-export function extractItemChannelInfo(item: FeedItem | null | undefined): HiddenChannel {
-  const target = unwrapFeedItem(item);
-  if (!target) return { id: '', name: '' };
-
-  const meta = getComputedMetadata(target);
-  if (meta.channelInfo) return meta.channelInfo;
-
-  const name = extractItemChannelName(target);
-  let id = '';
-
-  const pickBrowseId = (command: unknown): void => {
-    if (!command || id) return;
-    walkCommands(command, (cmd) => {
-      const browseEndpoint = isRecord(cmd.browseEndpoint) ? cmd.browseEndpoint : undefined;
-      const browseId = browseEndpoint?.browseId;
-      if (typeof browseId === 'string' && browseId.startsWith('UC')) {
-        id = browseId;
-        return true;
-      }
-      return false;
-    });
-  };
-
-  const metaVm: unknown = target.lockupViewModel?.metadata?.lockupMetadataViewModel;
-  if (isRecord(metaVm)) {
-    const avatarContainer = isRecord(metaVm.image) ? metaVm.image : isRecord(metaVm.avatar) ? metaVm.avatar : undefined;
-    const decoratedAvatar = isRecord(avatarContainer?.decoratedAvatarViewModel)
-      ? avatarContainer.decoratedAvatarViewModel
-      : undefined;
-    const avatarRendererContext = isRecord(decoratedAvatar?.rendererContext)
-      ? decoratedAvatar.rendererContext
-      : undefined;
-    const avatarCommandContext = isRecord(avatarRendererContext?.commandContext)
-      ? avatarRendererContext.commandContext
-      : undefined;
-    pickBrowseId(avatarCommandContext?.onTap);
-  }
-
-  if (!id) {
-    const menuLists = getExistingMenuItemLists(target);
-    for (const rawItems of menuLists) {
-      if (id) break;
-      for (const menuItem of rawItems) {
-        if (id) break;
-        const navRenderer = isRecord(menuItem.menuNavigationItemRenderer)
-          ? menuItem.menuNavigationItemRenderer
-          : undefined;
-        const serviceRenderer = isRecord(menuItem.menuServiceItemRenderer)
-          ? menuItem.menuServiceItemRenderer
-          : undefined;
-        pickBrowseId(navRenderer?.navigationEndpoint ?? serviceRenderer?.serviceEndpoint);
-      }
-    }
-  }
-
-  const info: HiddenChannel = { id, name };
-  meta.channelInfo = info;
-  return info;
-}
-
 function isSurveyTitle(titleText: unknown): boolean {
   if (!titleText) return false;
   const normalized = String(titleText).toLowerCase();
@@ -280,35 +164,6 @@ export function isSurveyItem(item: FeedItem | null | undefined): boolean {
   }
 
   return false;
-}
-
-export function isShortsItem(item: FeedItem | null | undefined): boolean {
-  if (!isRecord(item)) return false;
-  const target = unwrapFeedItem(item);
-  if (!target) return false;
-
-  if (
-    item.shelfRenderer?.tvhtml5ShelfRendererType === 'TVHTML5_SHELF_RENDERER_TYPE_SHORTS' ||
-    item.reelShelfRenderer ||
-    item.shortsLockupViewModel ||
-    target.shortsLockupViewModel
-  ) {
-    return true;
-  }
-
-  if (target.lockupViewModel?.contentType === 'LOCKUP_CONTENT_TYPE_SHORT') {
-    return true;
-  }
-
-  const tile = target.tileRenderer;
-  if (!tile) return false;
-
-  return (
-    tile.tvhtml5ShelfRendererType === 'TVHTML5_TILE_RENDERER_TYPE_SHORTS' ||
-    tile.style === 'TILE_STYLE_YTLR_SHORTS' ||
-    tile.contentType === 'TILE_CONTENT_TYPE_SHORTS' ||
-    Boolean(tile.onSelectCommand?.reelWatchEndpoint)
-  );
 }
 
 function readBadgeNodeText(node: Record<string, unknown>): string {
@@ -374,9 +229,6 @@ export function hasBlockedBadge(item: FeedItem | null | undefined): boolean {
   const target = unwrapFeedItem(item);
   if (!target) return false;
 
-  const meta = getComputedMetadata(target);
-  if (meta.hasBlockedBadge !== undefined) return meta.hasBlockedBadge;
-
   const checkBlocked = (node: unknown, depth = 0): boolean => {
     if (!node || typeof node !== 'object' || depth > 10) return false;
 
@@ -402,140 +254,21 @@ export function hasBlockedBadge(item: FeedItem | null | undefined): boolean {
     return false;
   };
 
-  const result = checkBlocked(target);
-  meta.hasBlockedBadge = result;
-  return result;
+  return checkBlocked(target);
 }
 
 export function hasPaidOfferEndpoint(item: FeedItem | null | undefined): boolean {
   const target = unwrapFeedItem(item);
   if (!target) return false;
 
-  const meta = getComputedMetadata(target);
-  if (meta.hasPaidOffer !== undefined) return meta.hasPaidOffer;
-
   if (target.tileRenderer?.onSelectCommand?.ypcGetOffersEndpoint) {
-    meta.hasPaidOffer = true;
     return true;
   }
 
   const onTap: unknown = target.lockupViewModel?.rendererContext?.commandContext?.onTap;
-  let result = false;
-  if (isRecord(onTap)) {
-    result = Boolean(onTap.ypcGetOffersEndpoint) || walkCommands(onTap, (cmd) => Boolean(cmd.ypcGetOffersEndpoint));
-  }
-  meta.hasPaidOffer = result;
-  return result;
-}
-
-export function isChannelHidden(item: FeedItem | null | undefined, hiddenChannels?: readonly HiddenChannel[]): boolean {
-  const configuredHidden = hiddenChannels ?? EMPTY_HIDDEN_CHANNELS;
-  if (!Array.isArray(configuredHidden) || configuredHidden.length === 0) return false;
-
-  const target = unwrapFeedItem(item);
-  if (!target) return false;
-
-  const { id, name } = extractItemChannelInfo(target);
-  if (!id && !name) return false;
-
-  const index = getHiddenChannelIndex(configuredHidden);
-  if (id && index.ids.has(id)) return true;
-  return Boolean(name && index.lowerNames.has(name.toLowerCase()));
-}
-
-function readNumericProgress(progressBar: unknown): number | null {
-  if (!isRecord(progressBar)) return null;
-  if (typeof progressBar.percentDurationWatched === 'number' && Number.isFinite(progressBar.percentDurationWatched)) {
-    return progressBar.percentDurationWatched;
-  }
-  if (typeof progressBar.startPercent === 'number' && Number.isFinite(progressBar.startPercent)) {
-    return progressBar.startPercent;
-  }
-  return null;
-}
-
-export function extractWatchedPercent(item: FeedItem | null | undefined): number | null {
-  const target = unwrapFeedItem(item);
-  if (!target) return null;
-
-  if (target.tileRenderer) {
-    const overlays = target.tileRenderer.header?.tileHeaderRenderer?.thumbnailOverlays;
-    if (!Array.isArray(overlays)) return null;
-    for (const overlay of overlays) {
-      if (isRecord(overlay) && isRecord(overlay.thumbnailOverlayResumePlaybackRenderer)) {
-        return readNumericProgress(overlay.thumbnailOverlayResumePlaybackRenderer);
-      }
-    }
-    return null;
-  }
-
-  if (target.lockupViewModel) {
-    const overlays = target.lockupViewModel.contentImage?.thumbnailViewModel?.overlays;
-    if (!Array.isArray(overlays)) return null;
-    for (const overlay of overlays) {
-      if (!isRecord(overlay) || !isRecord(overlay.thumbnailBottomOverlayViewModel)) continue;
-      const progressBar = overlay.thumbnailBottomOverlayViewModel.progressBar;
-      if (!isRecord(progressBar)) continue;
-      const model = isRecord(progressBar.thumbnailOverlayProgressBarViewModel)
-        ? progressBar.thumbnailOverlayProgressBarViewModel
-        : progressBar;
-      const percent = readNumericProgress(model);
-      if (percent !== null) return percent;
-    }
-  }
-
-  return null;
-}
-
-export function resolveFeedPageName(locationHash?: string): string {
-  const raw =
-    locationHash !== undefined
-      ? locationHash
-      : typeof globalThis.location !== 'undefined'
-        ? String(globalThis.location.hash || '')
-        : '';
-
-  if (raw === lastResolvedHash) return lastResolvedPageName;
-
-  const path = raw.startsWith('#') ? raw.slice(1) : raw;
-  let pageName = '';
-  if (path === '/') {
-    pageName = 'home';
-  } else if (path.startsWith('/search')) {
-    pageName = 'search';
-  } else {
-    const queryIndex = path.indexOf('?');
-    if (queryIndex !== -1) {
-      const query = path.slice(queryIndex + 1);
-      const params = new URLSearchParams(query);
-      const category = params.get('c') ?? query.split('&')[0]?.split('=')[1] ?? '';
-      pageName = category.replace(/^FE/, '').replace(/^topics_/, '');
-    }
-  }
-
-  lastResolvedHash = raw;
-  lastResolvedPageName = pageName;
-  return pageName;
-}
-
-export function shouldHideWatchedItem(item: FeedItem | null | undefined, options: FeedFilterOptions = {}): boolean {
-  const enabled = options.enableHideWatchedVideos ?? false;
-  if (!enabled) return false;
-
-  const pages = options.hideWatchedVideosPages ?? EMPTY_HIDDEN_PAGES;
-  if (!Array.isArray(pages) || pages.length === 0) return false;
-
-  const pageName = resolveFeedPageName(options.locationHash);
-  if (!pageName || !getHiddenPagesSet(pages).has(pageName)) return false;
-
-  const percentWatched = extractWatchedPercent(item);
-  if (percentWatched === null) return false;
-
-  const threshold = options.hideWatchedVideosThreshold ?? 80;
-  if (threshold >= 100) {
-    return percentWatched >= 100;
-  }
-  return percentWatched > threshold;
+  return isRecord(onTap)
+    ? Boolean(onTap.ypcGetOffersEndpoint) || walkCommands(onTap, (cmd) => Boolean(cmd.ypcGetOffersEndpoint))
+    : false;
 }
 
 function isShelfContainer(item: FeedItem): boolean {
@@ -549,84 +282,36 @@ function isShelfContainer(item: FeedItem): boolean {
 }
 
 /**
- * Determines whether a feed item or shelf entry should be filtered out based
- * on ad-block, sign-in reminder, Shorts, survey, paid/member badge, hidden
- * channel, and watched-progress rules.
+ * Determines whether a feed item or shelf entry should be filtered out (ads, sign-in nudges,
+ * surveys, paid offers, or paid/members-only badges).
  */
-export function shouldHideFeedItem(item: FeedItem | null | undefined, options: FeedFilterOptions = {}): boolean {
+export function shouldHideFeedItem(item: FeedItem | null | undefined): boolean {
   if (!isRecord(item)) return false;
   const target = unwrapFeedItem(item);
   if (!target) return false;
 
-  const enableAdBlock = options.enableAdBlock ?? true;
-  const enableSigninReminder = options.enableSigninReminder ?? false;
-  const enableShorts = options.enableShorts ?? true;
-
-  if (enableAdBlock && (item.adSlotRenderer || target.adSlotRenderer)) return true;
-  if (!enableSigninReminder && (item.feedNudgeRenderer || target.feedNudgeRenderer)) return true;
-  if (!enableShorts && isShortsItem(item)) return true;
+  if (item.adSlotRenderer || target.adSlotRenderer) return true;
+  if (item.feedNudgeRenderer || target.feedNudgeRenderer) return true;
   if (isSurveyItem(item) || isSurveyItem(target)) return true;
 
   if (isShelfContainer(target)) {
     return false;
   }
 
-  if (hasPaidOfferEndpoint(target)) return true;
-  if (isChannelHidden(target, options.hiddenChannels)) return true;
-  if (hasBlockedBadge(target)) return true;
-  return shouldHideWatchedItem(target, options);
+  return hasPaidOfferEndpoint(target) || hasBlockedBadge(target);
 }
 
 /**
- * Synchronously filters an InnerTube feed item list using the configured feed rules.
+ * Synchronously filters an InnerTube feed item list.
  */
-export function filterFeedItemsSync(items: FeedItem[], options: FeedFilterOptions = {}): FeedItem[] {
+export function filterFeedItemsSync(items: FeedItem[]): FeedItem[] {
   if (!Array.isArray(items)) return items;
-  return items.filter((item) => !shouldHideFeedItem(item, options));
+  return items.filter((item) => !shouldHideFeedItem(item));
 }
 
 /**
  * Synchronously compacts a shelves array in place, dropping hidden shelves/entries.
  */
-export function filterShelvesInPlaceSync(shelves: FeedItem[], options: FeedFilterOptions = {}): FeedItem[] {
-  return compactInPlace(shelves, (item) => shouldHideFeedItem(item, options));
-}
-
-export async function filterFeedItems(items: FeedItem[], options: FeedFilterOptions = {}): Promise<FeedItem[]> {
-  if (!Array.isArray(items)) return items;
-
-  const filtered: FeedItem[] = [];
-  const BATCH_SIZE = 20;
-
-  for (let i = 0; i < items.length; i += BATCH_SIZE) {
-    const batch = items.slice(i, i + BATCH_SIZE);
-    filtered.push(...batch.filter((item) => !shouldHideFeedItem(item, options)));
-
-    // Yield to the main thread
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  return filtered;
-}
-
-export async function filterShelvesInPlace(shelves: FeedItem[], options: FeedFilterOptions = {}): Promise<FeedItem[]> {
-  if (!Array.isArray(shelves)) return shelves;
-
-  let writeIndex = 0;
-  const BATCH_SIZE = 20;
-
-  for (let readIndex = 0; readIndex < shelves.length; readIndex++) {
-    const item = shelves[readIndex] as FeedItem;
-    if (!shouldHideFeedItem(item, options)) {
-      shelves[writeIndex] = item;
-      writeIndex++;
-    }
-
-    // Yield to the main thread every BATCH_SIZE items
-    if (readIndex % BATCH_SIZE === 0 && readIndex > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-  }
-
-  shelves.length = writeIndex;
-  return shelves;
+export function filterShelvesInPlaceSync(shelves: FeedItem[]): FeedItem[] {
+  return compactInPlace(shelves, (item) => shouldHideFeedItem(item));
 }
