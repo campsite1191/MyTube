@@ -59,7 +59,7 @@ export interface ConfigSchema {
 
 export type ConfigKey = keyof ConfigSchema;
 
-export interface ConfigChangeDetail<K extends ConfigKey = ConfigKey> {
+interface ConfigChangeDetail<K extends ConfigKey = ConfigKey> {
   key: K;
   value: ConfigSchema[K];
 }

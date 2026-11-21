@@ -6,7 +6,7 @@ export interface YtPlayerStateObject {
   isEnded?: boolean;
 }
 
-export interface YtVideoData {
+interface YtVideoData {
   video_id?: string;
   title?: string;
   author?: string;

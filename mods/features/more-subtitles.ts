@@ -26,6 +26,15 @@ function getLanguageDisplayNames(): Intl.DisplayNames | null {
   return languageDisplayNames;
 }
 
+function readRecordPath(root: unknown, ...keys: string[]): Record<string, unknown> | null {
+  let current: unknown = root;
+  for (const key of keys) {
+    if (!isRecord(current)) return null;
+    current = current[key];
+  }
+  return isRecord(current) ? current : null;
+}
+
 /**
  * Resolves a human-readable English display name for a BCP-47 language code
  * using Cobalt's native `Intl.DisplayNames` API.
@@ -42,18 +51,12 @@ export function resolveLanguageDisplayName(languageCode: string, fallbackName = 
 }
 
 function extractTranslationLanguage(item: unknown): { languageCode?: string; languageName?: string } | null {
-  if (!isRecord(item) || !isRecord(item.compactLinkRenderer)) return null;
-  const serviceEndpoint = item.compactLinkRenderer.serviceEndpoint;
-  if (!isRecord(serviceEndpoint) || !isRecord(serviceEndpoint.commandExecutorCommand)) return null;
-
-  const commands = serviceEndpoint.commandExecutorCommand.commands;
-  if (!Array.isArray(commands) || commands.length === 0) return null;
-
-  const firstCommand = commands[0];
-  if (!isRecord(firstCommand) || !isRecord(firstCommand.selectSubtitlesTrackCommand)) return null;
-
-  const translationLanguage = firstCommand.selectSubtitlesTrackCommand.translationLanguage;
-  if (!isRecord(translationLanguage)) return null;
+  const exec = readRecordPath(item, 'compactLinkRenderer', 'serviceEndpoint', 'commandExecutorCommand');
+  const commands = exec?.commands;
+  const translationLanguage = Array.isArray(commands)
+    ? readRecordPath(commands[0], 'selectSubtitlesTrackCommand', 'translationLanguage')
+    : null;
+  if (!translationLanguage) return null;
 
   return {
     languageCode: typeof translationLanguage.languageCode === 'string' ? translationLanguage.languageCode : undefined,
@@ -105,11 +108,9 @@ export function createAutoTranslateLanguageOption(languageCode: string, language
 }
 
 function findSectionHeaderIndex(items: readonly Record<string, unknown>[], subtitleText: string): number {
-  return items.findIndex((item) => {
-    if (!isRecord(item) || !isRecord(item.overlayMessageRenderer)) return false;
-    const subtitle = item.overlayMessageRenderer.subtitle;
-    return isRecord(subtitle) && subtitle.simpleText === subtitleText;
-  });
+  return items.findIndex(
+    (item) => readRecordPath(item, 'overlayMessageRenderer', 'subtitle')?.simpleText === subtitleText
+  );
 }
 
 /**
@@ -123,7 +124,7 @@ export function injectPinnedAutoTranslateLanguages(
   const optionsToInsert: Record<string, unknown>[] = [];
 
   for (const language of languages) {
-    const displayName = resolveLanguageDisplayName(language.code, language.name);
+    const displayName = language.name || resolveLanguageDisplayName(language.code, language.code);
     if (!hasAutoTranslateLanguage(items, language.code, displayName)) {
       optionsToInsert.push(createAutoTranslateLanguageOption(language.code, displayName));
     }
@@ -148,35 +149,20 @@ export function injectPinnedAutoTranslateLanguages(
 }
 
 function getAutoTranslateMenuItems(command: unknown): Record<string, unknown>[] | null {
-  if (!isRecord(command) || !isRecord(command.openPopupAction)) return null;
-  if (command.openPopupAction.uniqueId !== 'CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE') return null;
+  const openPopup = readRecordPath(command, 'openPopupAction');
+  if (openPopup?.uniqueId !== 'CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE') return null;
 
-  const popup = command.openPopupAction.popup;
-  if (!isRecord(popup)) return null;
-
-  const overlaySectionRenderer = popup.overlaySectionRenderer;
-  if (!isRecord(overlaySectionRenderer)) return null;
-
-  const overlay = overlaySectionRenderer.overlay;
-  if (!isRecord(overlay)) return null;
-
-  const overlayTwoPanelRenderer = overlay.overlayTwoPanelRenderer;
-  if (!isRecord(overlayTwoPanelRenderer)) return null;
-
-  const actionPanel = overlayTwoPanelRenderer.actionPanel;
-  if (!isRecord(actionPanel)) return null;
-
-  const overlayPanelRenderer = actionPanel.overlayPanelRenderer;
-  if (!isRecord(overlayPanelRenderer)) return null;
-
-  const content = overlayPanelRenderer.content;
-  if (!isRecord(content)) return null;
-
-  const overlayPanelItemListRenderer = content.overlayPanelItemListRenderer;
-  if (!isRecord(overlayPanelItemListRenderer)) return null;
-
-  const items = overlayPanelItemListRenderer.items;
-  return Array.isArray(items) ? (items as Record<string, unknown>[]) : null;
+  const list = readRecordPath(
+    openPopup.popup,
+    'overlaySectionRenderer',
+    'overlay',
+    'overlayTwoPanelRenderer',
+    'actionPanel',
+    'overlayPanelRenderer',
+    'content',
+    'overlayPanelItemListRenderer'
+  );
+  return Array.isArray(list?.items) ? (list.items as Record<string, unknown>[]) : null;
 }
 
 export function patchAutoTranslateCommand(command: unknown, enabled = configRead('enableShowUserLanguage')): boolean {

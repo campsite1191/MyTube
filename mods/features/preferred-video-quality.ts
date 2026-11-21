@@ -1,20 +1,31 @@
 import { configRead, onConfigChange, whenConfigReady } from '../core/config.ts';
-import { onPlayer } from '../core/player-observer.ts';
-import type { YtPlayerStateObject, YtQualityData, YtVideoData } from '../types/yttv.ts';
+import { onAbort } from '../core/lifecycle.ts';
+import { onPlayer, onVideo } from '../core/player-observer.ts';
+import type { YtPlayerStateObject, YtQualityData } from '../types/yttv.ts';
 
 const PLAYER_STATE_CHANGE_EVENT = 'onStateChange';
 const PREFERRED_VIDEO_QUALITY_KEY = 'preferredVideoQuality';
 const HIGHRES_QUALITY_ID = 'highres';
-const SHORTS_STAT_MARKER = 'shortspage';
 
 export interface QualityControllablePlayer {
-  addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+  addEventListener: (
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions
+  ) => void;
   removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
   getPlayerStateObject?: () => YtPlayerStateObject | null | undefined;
-  getVideoData?: () => YtVideoData | null | undefined;
-  getVideoStats?: () => Record<string, unknown> | null | undefined;
   getAvailableQualityData?: () => readonly YtQualityData[] | null | undefined;
   setPlaybackQualityRange?: (minQuality: string, maxQuality: string) => void;
+}
+
+export interface QualityVideoTarget {
+  addEventListener: (
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions
+  ) => void;
+  removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
 }
 
 export interface PreferredQualityController {
@@ -75,15 +86,6 @@ export function selectPlaybackQuality(
   return highestBelowTarget?.quality ?? lowestAboveTarget?.quality ?? HIGHRES_QUALITY_ID;
 }
 
-export function isShortsPlayback(player: QualityControllablePlayer | null | undefined): boolean {
-  const videoStats = player?.getVideoStats?.();
-  if (!videoStats || typeof videoStats !== 'object') return false;
-  for (const key in videoStats) {
-    if (Object.hasOwn(videoStats, key) && videoStats[key] === SHORTS_STAT_MARKER) return true;
-  }
-  return false;
-}
-
 export function applyPreferredQualityToPlayer(
   player: QualityControllablePlayer,
   preferredQuality: string = configRead(PREFERRED_VIDEO_QUALITY_KEY)
@@ -105,52 +107,85 @@ export function applyPreferredQualityToPlayer(
 
 export function attachPreferredQualityController(
   player: QualityControllablePlayer,
-  getPreferredQuality: () => string = () => configRead(PREFERRED_VIDEO_QUALITY_KEY)
+  getPreferredQuality: () => string = () => configRead(PREFERRED_VIDEO_QUALITY_KEY),
+  video?: QualityVideoTarget | null,
+  signal?: AbortSignal
 ): PreferredQualityController {
-  let lastVideoId: string | undefined;
-  let hasAppliedForCurrentVideo = false;
+  const controllerAbort = new AbortController();
+  let playAbort: AbortController | null = null;
+
+  const disarmFirstPlay = (): void => {
+    playAbort?.abort();
+    playAbort = null;
+    player.removeEventListener?.(PLAYER_STATE_CHANGE_EVENT, handleStateChange);
+  };
 
   const applyQuality = (): boolean => {
-    if (isShortsPlayback(player)) return false;
+    if (controllerAbort.signal.aborted) return false;
     return applyPreferredQualityToPlayer(player, getPreferredQuality());
   };
 
   const handleStateChange = (): void => {
-    const playerState = player.getPlayerStateObject?.();
-    const videoId = player.getVideoData?.()?.video_id;
-
-    if (videoId !== lastVideoId) {
-      lastVideoId = videoId;
-      hasAppliedForCurrentVideo = false;
-    }
-
-    if (playerState?.isPlaying && !hasAppliedForCurrentVideo && !isShortsPlayback(player)) {
-      if (applyQuality()) {
-        hasAppliedForCurrentVideo = true;
-      }
+    if (controllerAbort.signal.aborted || !player.getPlayerStateObject?.()?.isPlaying) return;
+    // Once quality locks on first play for the loaded media, detach onStateChange until next loadstart.
+    if (applyQuality()) {
+      disarmFirstPlay();
     }
   };
 
-  player.addEventListener(PLAYER_STATE_CHANGE_EVENT, handleStateChange);
-  const stopConfigWatch = onConfigChange(PREFERRED_VIDEO_QUALITY_KEY, () => applyQuality());
-  handleStateChange();
+  const armFirstPlay = (): void => {
+    if (controllerAbort.signal.aborted) return;
+    disarmFirstPlay();
+    playAbort = new AbortController();
+    handleStateChange();
+    if (playAbort && !playAbort.signal.aborted) {
+      player.addEventListener(PLAYER_STATE_CHANGE_EVENT, handleStateChange, { signal: playAbort.signal });
+    }
+  };
+
+  const dispose = (): void => {
+    if (controllerAbort.signal.aborted) return;
+    controllerAbort.abort();
+    disarmFirstPlay();
+    video?.removeEventListener?.('loadstart', armFirstPlay);
+  };
+
+  onAbort(signal, dispose);
+  if (!signal?.aborted) {
+    video?.addEventListener('loadstart', armFirstPlay, { signal: controllerAbort.signal });
+    armFirstPlay();
+  }
 
   return {
     handleStateChange,
     applyQuality,
-    dispose: () => {
-      player.removeEventListener?.(PLAYER_STATE_CHANGE_EVENT, handleStateChange);
-      stopConfigWatch();
-    },
+    dispose,
   };
 }
 
-function initPreferredVideoQuality(): void {
-  onPlayer((player) => {
-    attachPreferredQualityController(player);
-  });
-}
+let preferredQualityInstalled = false;
 
-if (typeof document !== 'undefined') {
-  void whenConfigReady().then(initPreferredVideoQuality);
+/**
+ * Applies preferred playback quality on first play for every media load across the app
+ * (Watch videos, Shorts, and inline Previews), keeping zero state listeners active after lock.
+ */
+export function installPreferredVideoQuality(): void {
+  if (preferredQualityInstalled || typeof document === 'undefined' || typeof window === 'undefined') return;
+  preferredQualityInstalled = true;
+  void whenConfigReady().then(() => {
+    onPlayer((player) => {
+      onVideo((video) => {
+        let activeController: PreferredQualityController | null = null;
+        const sync = (): void => {
+          const preferred = configRead(PREFERRED_VIDEO_QUALITY_KEY);
+          activeController?.dispose();
+          activeController = null;
+          if (!preferred || preferred === 'auto') return;
+          activeController = attachPreferredQualityController(player, () => preferred, video);
+        };
+        onConfigChange(PREFERRED_VIDEO_QUALITY_KEY, sync);
+        sync();
+      });
+    });
+  });
 }
