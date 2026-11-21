@@ -1,7 +1,15 @@
 import type { ConfigKey } from '../core/config.ts';
 import { configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
-import { observeDom, onAbort, onWatchSession, scheduleAbortableTimeout } from '../core/lifecycle.ts';
+import {
+  isPlayerBarVisible,
+  observeDom,
+  observePlayerBar,
+  onAbort,
+  onWatchSession,
+  PLAYER_BAR_SELECTOR,
+  scheduleAbortableTimeout,
+} from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { showToast } from '../core/yttv-bridge.ts';
 
@@ -297,6 +305,15 @@ class SponsorBlockHandler {
     }
   }
 
+  private syncOverlayVisibility(bar?: Element | null): void {
+    if (!this.segmentsOverlay) return;
+    const progressBar = bar ?? document.querySelector(PLAYER_BAR_SELECTOR);
+    const nextDisplay = isPlayerBarVisible(progressBar) ? 'block' : 'none';
+    if (this.segmentsOverlay.style.display !== nextDisplay) {
+      this.segmentsOverlay.style.setProperty('display', nextDisplay, 'important');
+    }
+  }
+
   private mountOverlay(slider: Element, host: Element, duration: number): void {
     const overlay = document.createElement('div');
     overlay.classList.add('ytLrProgressBarSlider', 'ytLrProgressBarSliderRectangularProgressBar');
@@ -319,18 +336,23 @@ class SponsorBlockHandler {
     overlay.append(...bars);
 
     this.segmentsOverlay = overlay;
+    observePlayerBar(this.signal, (bar) => this.syncOverlayVisibility(bar), {
+      attributes: true,
+      attributeFilter: ['hybridnavfocusable'],
+    });
     observeDom(
       host,
       (mutations) => {
         if (this.signal.aborted || !this.segmentsOverlay) return;
-        if (mutations.some((m) => Array.from(m.removedNodes).includes(this.segmentsOverlay as Node))) {
-          host.appendChild(this.segmentsOverlay);
+        for (const mutation of mutations) {
+          for (const removed of mutation.removedNodes) {
+            if (removed === this.segmentsOverlay) {
+              host.appendChild(this.segmentsOverlay);
+              break;
+            }
+          }
         }
-        const focusable = document.querySelector('ytlr-progress-bar')?.getAttribute('hybridnavfocusable');
-        const nextDisplay = focusable === 'false' ? 'none' : 'block';
-        if (this.segmentsOverlay.style.display !== nextDisplay) {
-          this.segmentsOverlay.style.setProperty('display', nextDisplay, 'important');
-        }
+        this.syncOverlayVisibility();
       },
       { childList: true, subtree: true },
       this.signal
@@ -353,7 +375,7 @@ class SponsorBlockHandler {
     if (tryMount() || this.waitingForSlider) return;
     this.waitingForSlider = true;
     const observer = observeDom(
-      document.documentElement ?? document,
+      document.body ?? document.documentElement,
       () => {
         if (this.signal.aborted || !this.video?.duration || this.segmentsOverlay || tryMount()) {
           this.waitingForSlider = false;
@@ -447,12 +469,18 @@ class SponsorBlockHandler {
 }
 
 let activeSegments: readonly SponsorBlockSegment[] = [];
+let sponsorBlockInstalled = false;
 
 export function getActiveSponsorBlockSegments(): readonly SponsorBlockSegment[] {
   return activeSegments;
 }
 
-if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+/**
+ * Installs SponsorBlock segment fetching, skipping, muting, and progress-bar markers.
+ */
+export function installSponsorBlock(): void {
+  if (sponsorBlockInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
+  sponsorBlockInstalled = true;
   void whenConfigReady().then(() => {
     onWatchSession((videoId, signal) => {
       activeSegments = [];

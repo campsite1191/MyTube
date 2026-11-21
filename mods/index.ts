@@ -6,13 +6,13 @@ import { setupMemoryPressureListener } from './core/memory-pressure.ts';
 import { installRemainingTime } from './features/remaining-time.ts';
 import { installReturnYouTubeDislike } from './features/return-youtube-dislike.ts';
 import { installRewindOnPause } from './features/rewind-on-pause.ts';
+import { installSponsorBlock } from './features/sponsorblock.ts';
 import { initClock } from './ui/clock.ts';
 
 setupMemoryPressureListener();
 
 const configReady = initConfig();
 
-import './features/sponsorblock.ts';
 import './ui/ui.ts';
 import './ui/speed-ui.ts';
 import './features/disable-whos-watching.ts';
@@ -24,6 +24,7 @@ void Promise.all([configReady, waitForDomReady()]).then(() => {
   schedulePostFirstPaint(() => {
     preconnectOrigins(['https://sponsor.ajay.app', 'https://returnyoutubedislikeapi.com']);
     initClock();
+    installSponsorBlock();
     installRemainingTime();
     installReturnYouTubeDislike();
     installRewindOnPause();

@@ -4,6 +4,7 @@ import { injectCss } from '../core/styles.ts';
 
 const TIME_LABEL_SELECTOR = '[idomkey="time-label"]';
 const ELAPSED_SELECTOR = '[idomkey="elapsedTime"]';
+const TEXT_NODE_TYPE = 3; // Node.TEXT_NODE (numeric fallback avoids ReferenceError when Node is unmocked in tests)
 const OURS = /\s*\(-\d+:\d{2}(?::\d{2})?\)/g;
 const CLOCK_RE = /\d+:\d{2}(?::\d{2})?/;
 const CLOCK_SPLIT_RE = /^(.*?\d+:\d{2}(?::\d{2})?)([\s\S]*)$/;
@@ -71,13 +72,13 @@ export function formatRemainingLabel(
 
 function findClockTextNode(node: Node | null | undefined): Text | null {
   if (!node) return null;
-  if (node.nodeType === 3) {
+  if (node.nodeType === TEXT_NODE_TYPE) {
     return CLOCK_RE.test(node.nodeValue || '') ? (node as Text) : null;
   }
   const children = node.childNodes;
   if (!children) return null;
-  for (let i = 0; i < children.length; i++) {
-    const hit = findClockTextNode(children[i]);
+  for (const child of children) {
+    const hit = findClockTextNode(child);
     if (hit) return hit;
   }
   return null;
@@ -90,15 +91,11 @@ function toElapsedTarget(el: Element, fallbackDur = false): ElapsedTarget {
 }
 
 function findElapsedTarget(bar: Element): ElapsedTarget | null {
-  const directs = bar.querySelectorAll(ELAPSED_SELECTOR);
-  for (let i = 0; i < directs.length; i++) {
-    const direct = directs[i];
+  for (const direct of bar.querySelectorAll(ELAPSED_SELECTOR)) {
     if (!direct || direct.closest?.('ytlr-storyboard')) continue;
     if (CLOCK_RE.test(direct.textContent || '')) return toElapsedTarget(direct);
   }
-  const labels = bar.querySelectorAll(TIME_LABEL_SELECTOR);
-  for (let i = 0; i < labels.length; i++) {
-    const label = labels[i];
+  for (const label of bar.querySelectorAll(TIME_LABEL_SELECTOR)) {
     if (!label || label.closest?.('ytlr-storyboard')) continue;
     const span = label.querySelector(
       '[idomkey="elapsedTime"], [idomkey="position"], [idomkey="time"], [idomkey="current-time"], [idomkey="elapsed"]'
@@ -133,8 +130,7 @@ export function installRemainingTime(): void {
   remainingTimeInstalled = true;
 
   injectCss(`
-      ytlr-progress-bar [idomkey="elapsedTime"],
-      ytlr-progress-bar [idomkey="duration"] {
+      ytlr-progress-bar :is([idomkey="elapsedTime"], [idomkey="duration"]) {
         font-size: 1rem !important;
         line-height: 1.375 !important;
         font-weight: 500 !important;
@@ -165,7 +161,7 @@ export function installRemainingTime(): void {
         const target = getTarget(bar);
         if (!target) return;
         const durEl =
-          target.el.parentElement?.querySelector('[idomkey="duration"]') ||
+          target.el.parentElement?.querySelector('[idomkey="duration"]') ??
           target.el.closest?.('[idomkey="time-label"]')?.querySelector('[idomkey="duration"]');
         const durOverride = parseClockSeconds(durEl?.textContent);
         const next = formatRemainingLabel(
