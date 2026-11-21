@@ -1,5 +1,5 @@
 diff --git a/cobalt/android/BUILD.gn b/cobalt/android/BUILD.gn
-index c0ea98a..3cf2b28 100644
+index c0ea98a..160587a 100644
 --- a/cobalt/android/BUILD.gn
 +++ b/cobalt/android/BUILD.gn
 @@ -20,14 +20,14 @@ jinja_template("cobalt_manifest") {
@@ -34,10 +34,10 @@ index c0ea98a..3cf2b28 100644
  
  robolectric_binary("cobalt_coat_junit_tests") {
 diff --git a/cobalt/build/configs/android-arm/args.gn b/cobalt/build/configs/android-arm/args.gn
-index 61f94d8..8a96ccc 100644
+index 61f94d8..cd6e579 100644
 --- a/cobalt/build/configs/android-arm/args.gn
 +++ b/cobalt/build/configs/android-arm/args.gn
-@@ -1,3 +1,10 @@
+@@ -1,3 +1,14 @@
  import("//cobalt/build/configs/android_common.gn")
  
  target_cpu = "arm"
@@ -48,6 +48,10 @@ index 61f94d8..8a96ccc 100644
 +
 +# Required with arm_version = 8: Rust .rlib bitcode uses armv7-none-linux-android while C++ uses thumbv8a.
 +use_thin_lto = false
++
++# Target Hisense Android TV OS directly (Android 12 / API 31), dropping legacy < API 31 compatibility.
++default_min_sdk_version = 31
++default_target_sdk_version = "31"
 diff --git a/cobalt/build/configs/common.gn b/cobalt/build/configs/common.gn
 index 6fcf0ca..3611edb 100644
 --- a/cobalt/build/configs/common.gn

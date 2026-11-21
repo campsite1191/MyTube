@@ -43,16 +43,15 @@ index 61d4122..9c6df12 100644
    if (const auto cooldown =
            flag_map.GetNumeric(flags::kMemoryPressureCooldownInSeconds)) {
 diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java
-index 4c238e6..7bbd83c 100644
+index 4c238e6..ad98093 100644
 --- a/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java
 +++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java
-@@ -522,8 +522,14 @@ public class MediaCodecUtil {
+@@ -522,8 +522,13 @@ public class MediaCodecUtil {
              || codecProfileLevel.profile == CodecProfileLevel.VP9Profile3HDR) {
            return true;
          }
-+        if (Build.VERSION.SDK_INT >= 29
-+            && (codecProfileLevel.profile == CodecProfileLevel.VP9Profile2HDR10Plus
-+                || codecProfileLevel.profile == CodecProfileLevel.VP9Profile3HDR10Plus)) {
++        if (codecProfileLevel.profile == CodecProfileLevel.VP9Profile2HDR10Plus
++            || codecProfileLevel.profile == CodecProfileLevel.VP9Profile3HDR10Plus) {
 +          return true;
 +        }
        } else if (mimeType.equals(AV1_MIME_TYPE)) {
