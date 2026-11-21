@@ -1,6 +1,7 @@
 import type { ConfigKey } from '../core/config.ts';
 import { configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
+import { observeDom, onAbort } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { showToast } from '../core/yttv-bridge.ts';
 
@@ -209,8 +210,7 @@ class SponsorBlockHandler {
   private active = true;
   private abortController = new AbortController();
   private nextSkipTimeout: ReturnType<typeof setTimeout> | null = null;
-  private overlayObserver: MutationObserver | null = null;
-  private sliderWaitObserver: MutationObserver | null = null;
+  private waitingForSlider = false;
   private segmentsOverlay: HTMLDivElement | null = null;
   private segments: SponsorBlockSegment[] = [];
   private skippableCategories = new Set<SponsorBlockCategory>();
@@ -236,6 +236,17 @@ class SponsorBlockHandler {
 
   constructor(videoId: string) {
     this.videoId = videoId;
+    onAbort(this.abortController.signal, () => {
+      this.clearSkipTimer();
+      this.segmentsOverlay?.remove();
+      this.segmentsOverlay = null;
+      if (this.video) {
+        const transition = computeMuteTransition(this.muteState, null, this.video.muted);
+        this.muteState = transition.state;
+        if (transition.nextMuted !== null) this.video.muted = transition.nextMuted;
+        this.video = null;
+      }
+    });
   }
 
   async init(): Promise<void> {
@@ -315,18 +326,22 @@ class SponsorBlockHandler {
     overlay.append(...bars);
 
     this.segmentsOverlay = overlay;
-    this.overlayObserver = new MutationObserver((mutations) => {
-      if (!this.active || !this.segmentsOverlay) return;
-      if (mutations.some((m) => Array.from(m.removedNodes).includes(this.segmentsOverlay as Node))) {
-        host.appendChild(this.segmentsOverlay);
-      }
-      const focusable = document.querySelector('ytlr-progress-bar')?.getAttribute('hybridnavfocusable');
-      const nextDisplay = focusable === 'false' ? 'none' : 'block';
-      if (this.segmentsOverlay.style.display !== nextDisplay) {
-        this.segmentsOverlay.style.setProperty('display', nextDisplay, 'important');
-      }
-    });
-    this.overlayObserver.observe(host, { childList: true, subtree: true });
+    observeDom(
+      host,
+      (mutations) => {
+        if (!this.active || !this.segmentsOverlay) return;
+        if (mutations.some((m) => Array.from(m.removedNodes).includes(this.segmentsOverlay as Node))) {
+          host.appendChild(this.segmentsOverlay);
+        }
+        const focusable = document.querySelector('ytlr-progress-bar')?.getAttribute('hybridnavfocusable');
+        const nextDisplay = focusable === 'false' ? 'none' : 'block';
+        if (this.segmentsOverlay.style.display !== nextDisplay) {
+          this.segmentsOverlay.style.setProperty('display', nextDisplay, 'important');
+        }
+      },
+      { childList: true, subtree: true },
+      this.abortController.signal
+    );
     host.appendChild(overlay);
   }
 
@@ -342,14 +357,19 @@ class SponsorBlockHandler {
       return true;
     };
 
-    if (tryMount() || this.sliderWaitObserver) return;
-    this.sliderWaitObserver = new MutationObserver(() => {
-      if (!this.active || !this.video?.duration || this.segmentsOverlay || tryMount()) {
-        this.sliderWaitObserver?.disconnect();
-        this.sliderWaitObserver = null;
-      }
-    });
-    this.sliderWaitObserver.observe(document.documentElement ?? document, { childList: true, subtree: true });
+    if (tryMount() || this.waitingForSlider) return;
+    this.waitingForSlider = true;
+    const observer = observeDom(
+      document.documentElement ?? document,
+      () => {
+        if (!this.active || !this.video?.duration || this.segmentsOverlay || tryMount()) {
+          this.waitingForSlider = false;
+          observer?.disconnect();
+        }
+      },
+      { childList: true, subtree: true },
+      this.abortController.signal
+    );
   }
 
   private clearSkipTimer(): void {
@@ -429,21 +449,6 @@ class SponsorBlockHandler {
   destroy(): void {
     this.active = false;
     this.abortController.abort();
-    this.clearSkipTimer();
-    this.sliderWaitObserver?.disconnect();
-    this.sliderWaitObserver = null;
-    this.overlayObserver?.disconnect();
-    this.overlayObserver = null;
-    this.segmentsOverlay?.remove();
-    this.segmentsOverlay = null;
-
-    if (this.video) {
-      const transition = computeMuteTransition(this.muteState, null, this.video.muted);
-      this.muteState = transition.state;
-      if (transition.nextMuted !== null) this.video.muted = transition.nextMuted;
-      this.video = null;
-    }
-
     this.skippedCategories.clear();
   }
 }

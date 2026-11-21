@@ -1,3 +1,4 @@
+import { observeDom, scheduleAbortableTimeout } from '../core/lifecycle.ts';
 import { injectCss } from '../core/styles.ts';
 
 const TIME_LABEL_SELECTOR = 'ytlr-progress-bar [idomkey="time-label"]';
@@ -71,11 +72,9 @@ export function formatRemainingLabel(
 
 let video: HTMLVideoElement | null = null;
 let videoAbort: AbortController | null = null;
+let attachAbort: AbortController | null = null;
 let desiredText: string | null = null;
 let lastAppliedSec = -1;
-let attachRetryTimeout: ReturnType<typeof setTimeout> | null = null;
-let waitObserver: MutationObserver | null = null;
-let guardObserver: MutationObserver | null = null;
 let observedContainer: Element | null = null;
 
 function pickVideo(): HTMLVideoElement | null {
@@ -230,18 +229,8 @@ function apply(e?: Event): void {
 }
 
 function detach(): void {
-  if (attachRetryTimeout !== null) {
-    clearTimeout(attachRetryTimeout);
-    attachRetryTimeout = null;
-  }
-  if (waitObserver) {
-    waitObserver.disconnect();
-    waitObserver = null;
-  }
-  if (guardObserver) {
-    guardObserver.disconnect();
-    guardObserver = null;
-  }
+  attachAbort?.abort();
+  attachAbort = null;
   observedContainer = null;
   desiredText = null;
   lastAppliedSec = -1;
@@ -249,29 +238,35 @@ function detach(): void {
   video = null;
 }
 
-function scheduleAttachWait(): void {
+function scheduleAttachWait(signal: AbortSignal): void {
   const root = document.body ?? document.documentElement;
   if (root && typeof MutationObserver !== 'undefined') {
-    waitObserver = new MutationObserver(() => {
-      if (pickVideo() && document.querySelector(GUARD_SELECTOR) && getElapsedTarget()) {
-        attach();
-      }
-    });
-    waitObserver.observe(root, { childList: true, subtree: true });
+    observeDom(
+      root,
+      () => {
+        if (pickVideo() && document.querySelector(GUARD_SELECTOR) && getElapsedTarget()) {
+          attach();
+        }
+      },
+      { childList: true, subtree: true },
+      signal
+    );
     return;
   }
-  attachRetryTimeout = setTimeout(attach, ATTACH_RETRY_MS);
+  scheduleAbortableTimeout(attach, ATTACH_RETRY_MS, signal);
 }
 
 function attach(): void {
   detach();
   if (!location.hash.includes('watch') && !location.hash.includes('v=')) return;
+  attachAbort = new AbortController();
+  const { signal } = attachAbort;
   video = pickVideo();
   const container = document.querySelector(GUARD_SELECTOR);
 
   if (!video || !container || !getElapsedTarget()) {
     video = null;
-    scheduleAttachWait();
+    scheduleAttachWait(signal);
     return;
   }
 
@@ -279,24 +274,28 @@ function attach(): void {
   desiredText = null;
   listen(video);
 
-  guardObserver = new MutationObserver(() => {
-    const target = getElapsedTarget();
-    if (!target) return;
-    if (desiredText !== null && readTarget(target) === desiredText) return;
-    liveVideo();
-    const next = computeDesiredText(target);
-    if (next !== null) {
-      desiredText = next;
-      writeTarget(target, desiredText);
-      return;
-    }
-    if (video && video.duration === Infinity) {
-      desiredText = null;
-      return;
-    }
-    if (desiredText !== null) writeTarget(target, desiredText);
-  });
-  guardObserver.observe(container, { characterData: true, childList: true, subtree: true });
+  observeDom(
+    container,
+    () => {
+      const target = getElapsedTarget();
+      if (!target) return;
+      if (desiredText !== null && readTarget(target) === desiredText) return;
+      liveVideo();
+      const next = computeDesiredText(target);
+      if (next !== null) {
+        desiredText = next;
+        writeTarget(target, desiredText);
+        return;
+      }
+      if (video && video.duration === Infinity) {
+        desiredText = null;
+        return;
+      }
+      if (desiredText !== null) writeTarget(target, desiredText);
+    },
+    { characterData: true, childList: true, subtree: true },
+    signal
+  );
 
   apply();
 }

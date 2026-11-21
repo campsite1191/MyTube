@@ -1,5 +1,5 @@
 import type { SidebarContentItem } from '../core/config.ts';
-import { configChangeEmitter, configRead, configWrite } from '../core/config.ts';
+import { configRead, configWrite, onConfigChange } from '../core/config.ts';
 import { clearGuideCache } from '../core/innertube-calls.ts';
 import { getCommandExecutor } from '../core/yttv-bridge.ts';
 import { isRecord } from '../utils/type-guards.ts';
@@ -113,14 +113,11 @@ export function transformGuideResponse(r: unknown): unknown {
 }
 
 if (typeof window !== 'undefined') {
-  configChangeEmitter.addEventListener('configChange', (e) => {
-    const key = e.detail.key;
-    if (key === 'disabledSidebarContents' || key === 'disableChannelsOnSidebar' || key === 'sidebarContentsOrder') {
-      clearGuideCache();
-      const commandExecutor = getCommandExecutor();
-      if (commandExecutor?.commandFunction) {
-        commandExecutor.executeFunction(new commandExecutor.commandFunction('reloadGuideAction'));
-      }
+  onConfigChange(['disabledSidebarContents', 'disableChannelsOnSidebar', 'sidebarContentsOrder'], () => {
+    clearGuideCache();
+    const commandExecutor = getCommandExecutor();
+    if (commandExecutor?.commandFunction) {
+      commandExecutor.executeFunction(new commandExecutor.commandFunction('reloadGuideAction'));
     }
   });
 }

@@ -1,10 +1,8 @@
-import type { ConfigChangeListener } from '../core/config.ts';
-import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
+import { configRead, onConfigChange, whenConfigReady } from '../core/config.ts';
 import { onPlayer } from '../core/player-observer.ts';
 import type { YtPlayerStateObject, YtQualityData, YtVideoData } from '../types/yttv.ts';
 
 const PLAYER_STATE_CHANGE_EVENT = 'onStateChange';
-const CONFIG_CHANGE_EVENT = 'configChange';
 const PREFERRED_VIDEO_QUALITY_KEY = 'preferredVideoQuality';
 const HIGHRES_QUALITY_ID = 'highres';
 const SHORTS_STAT_MARKER = 'shortspage';
@@ -133,14 +131,8 @@ export function attachPreferredQualityController(
     }
   };
 
-  const handleConfigChange: ConfigChangeListener = (event) => {
-    if (event.detail?.key === PREFERRED_VIDEO_QUALITY_KEY) {
-      applyQuality();
-    }
-  };
-
   player.addEventListener(PLAYER_STATE_CHANGE_EVENT, handleStateChange);
-  configChangeEmitter.addEventListener(CONFIG_CHANGE_EVENT, handleConfigChange);
+  const stopConfigWatch = onConfigChange(PREFERRED_VIDEO_QUALITY_KEY, () => applyQuality());
   handleStateChange();
 
   return {
@@ -148,7 +140,7 @@ export function attachPreferredQualityController(
     applyQuality,
     dispose: () => {
       player.removeEventListener?.(PLAYER_STATE_CHANGE_EVENT, handleStateChange);
-      configChangeEmitter.removeEventListener(CONFIG_CHANGE_EVENT, handleConfigChange);
+      stopConfigWatch();
     },
   };
 }

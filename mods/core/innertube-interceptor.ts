@@ -31,7 +31,7 @@ import { patchSettingsInPlace } from '../ui/custom-yt-settings.ts';
 import { ButtonRenderer, longPressData, MenuServiceItemRenderer, timelyAction } from '../ui/yt-ui.ts';
 import { buildLongPressPayload } from '../utils/feed-helpers.ts';
 import { isObjectLike, isRecord } from '../utils/type-guards.ts';
-import { configChangeEmitter, configRead, whenConfigReady } from './config.ts';
+import { configRead, onConfigChange, whenConfigReady } from './config.ts';
 import { findFeedbackToken } from './innertube-calls.ts';
 import resolveCommand, { patchResolveCommand } from './resolve-command.ts';
 import { whenYttvReady } from './yttv-bridge.ts';
@@ -897,10 +897,8 @@ export function installInnertubeInterceptor(): void {
   }
 
   // 4. Sync feature flags & _yttv-scoped JSON.parse once YouTube TV runtime initializes, plus on toggle.
-  configChangeEmitter.addEventListener('configChange', (event) => {
-    if (event.detail.key === 'enablePreviews') {
-      syncYttvPreviewAndJson();
-    }
+  onConfigChange('enablePreviews', () => {
+    syncYttvPreviewAndJson();
   });
   whenYttvReady(() => {
     syncYttvPreviewAndJson();

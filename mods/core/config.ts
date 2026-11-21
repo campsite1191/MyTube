@@ -64,7 +64,7 @@ export interface ConfigChangeDetail<K extends ConfigKey = ConfigKey> {
   value: ConfigSchema[K];
 }
 
-export type ConfigChangeListener = (event: CustomEvent<ConfigChangeDetail>) => void;
+type ConfigChangeListener = (event: CustomEvent<ConfigChangeDetail>) => void;
 
 const CONFIG_KEY = 'ytaf-configuration';
 
@@ -186,11 +186,35 @@ export async function configWrite<K extends ConfigKey>(key: K, value: ConfigSche
 }
 
 export interface ConfigChangeTarget {
-  addEventListener(type: 'configChange', listener: ConfigChangeListener): void;
-  addEventListener(type: string, listener: EventListenerOrEventListenerObject | null): void;
+  addEventListener(
+    type: 'configChange',
+    listener: ConfigChangeListener,
+    options?: boolean | AddEventListenerOptions
+  ): void;
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: boolean | AddEventListenerOptions
+  ): void;
   removeEventListener(type: 'configChange', listener: ConfigChangeListener): void;
   removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null): void;
   dispatchEvent(event: Event): boolean;
 }
 
 export const configChangeEmitter: ConfigChangeTarget = new EventTarget() as ConfigChangeTarget;
+
+/** Subscribes to changes for one or more config keys, returning an unsubscribe callback. */
+export function onConfigChange<K extends ConfigKey>(
+  keys: K | readonly K[],
+  listener: (value: ConfigSchema[K], key: K) => void,
+  options?: { signal?: AbortSignal }
+): () => void {
+  if (options?.signal?.aborted) return () => {};
+  const watched = new Set<ConfigKey>(Array.isArray(keys) ? keys : [keys as ConfigKey]);
+  const handler: ConfigChangeListener = (event) => {
+    const { key, value } = event.detail;
+    if (watched.has(key)) listener(value as ConfigSchema[K], key as K);
+  };
+  configChangeEmitter.addEventListener('configChange', handler, options);
+  return () => configChangeEmitter.removeEventListener('configChange', handler);
+}

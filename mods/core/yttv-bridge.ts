@@ -5,6 +5,7 @@ import type {
   YttvResolveCommandHost,
 } from '../types/yttv.ts';
 import { isObjectLike, isRecord } from '../utils/type-guards.ts';
+import { observeDom, onAbort, scheduleAbortableTimeout } from './lifecycle.ts';
 
 function getYttvServicesMap(): Map<string, unknown> | null {
   const yttv = typeof window !== 'undefined' ? window._yttv : undefined;
@@ -67,18 +68,19 @@ export function whenYttvReady(callback: () => void): void {
 
   let attempts = 0;
   const maxAttempts = 150;
-  let pollTimer: ReturnType<typeof setTimeout> | null = null;
-  let observer: MutationObserver | null = null;
-  const listenerAbort = new AbortController();
+  const readyAbort = new AbortController();
+  let pollAbort: AbortController | null = null;
+  onAbort(readyAbort.signal, () => pollAbort?.abort());
 
   const cleanup = (): void => {
-    if (pollTimer !== null) {
-      clearTimeout(pollTimer);
-      pollTimer = null;
-    }
-    observer?.disconnect();
-    observer = null;
-    listenerAbort.abort();
+    readyAbort.abort();
+  };
+
+  const schedulePoll = (delayMs: number): void => {
+    if (readyAbort.signal.aborted) return;
+    pollAbort?.abort();
+    pollAbort = new AbortController();
+    scheduleAbortableTimeout(check, delayMs, pollAbort.signal);
   };
 
   const flush = (): void => {
@@ -111,20 +113,20 @@ export function whenYttvReady(callback: () => void): void {
       }
       return;
     }
-    if (pollTimer !== null) clearTimeout(pollTimer);
-    pollTimer = setTimeout(check, 200);
+    schedulePoll(200);
   };
 
-  if (typeof MutationObserver !== 'undefined') {
-    const target = document.documentElement ?? document;
-    observer = new MutationObserver(() => {
+  observeDom(
+    document.documentElement ?? document,
+    () => {
       if (isYttvPopulated()) flush();
-    });
-    observer.observe(target, { childList: true, subtree: true });
-  }
-  window.addEventListener('load', check, { once: true, signal: listenerAbort.signal });
-  document.addEventListener('DOMContentLoaded', check, { once: true, signal: listenerAbort.signal });
-  pollTimer = setTimeout(check, 50);
+    },
+    { childList: true, subtree: true },
+    readyAbort.signal
+  );
+  window.addEventListener('load', check, { once: true, signal: readyAbort.signal });
+  document.addEventListener('DOMContentLoaded', check, { once: true, signal: readyAbort.signal });
+  schedulePoll(50);
 }
 
 export function getCommandExecutor(): YttvCommandExecutor | null {

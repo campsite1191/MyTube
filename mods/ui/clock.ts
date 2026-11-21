@@ -1,12 +1,13 @@
-import { configChangeEmitter, configRead } from '../core/config.ts';
+import { configRead, onConfigChange } from '../core/config.ts';
+import { observeDom, scheduleAbortableTimeout } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 
 const CLOCK_ID = 'custom-clock';
 const MAX_VOD_DURATION_SEC = 86400 * 7;
 
-let clockTimeout: ReturnType<typeof setTimeout> | null = null;
-let watchAttrObserver: MutationObserver | null = null;
+let tickAbort: AbortController | null = null;
+let watchAttrAbort: AbortController | null = null;
 let observedWatchDefault: Element | null = null;
 let stylesInstalled = false;
 let cachedWatchDefault: Element | null = null;
@@ -152,25 +153,22 @@ function syncVideoListeners(video: HTMLVideoElement | null, onUpdate: () => void
 }
 
 function syncWatchAttrObserver(watchEl: Element | null, onUpdate: () => void): void {
-  if (!watchEl || typeof MutationObserver === 'undefined') return;
-  if (watchAttrObserver && observedWatchDefault === watchEl) return;
-  watchAttrObserver?.disconnect();
+  if (!watchEl || observedWatchDefault === watchEl) return;
+  watchAttrAbort?.abort();
+  watchAttrAbort = new AbortController();
   observedWatchDefault = watchEl;
-  watchAttrObserver = new MutationObserver(onUpdate);
-  watchAttrObserver.observe(watchEl, { attributes: true, attributeFilter: ['hybridnavfocusable'] });
+  observeDom(watchEl, onUpdate, { attributes: true, attributeFilter: ['hybridnavfocusable'] }, watchAttrAbort.signal);
 }
 
 function clearScheduledTick(): void {
-  if (clockTimeout !== null) {
-    clearTimeout(clockTimeout);
-    clockTimeout = null;
-  }
+  tickAbort?.abort();
+  tickAbort = null;
 }
 
 function cleanupClockListeners(): void {
   clearScheduledTick();
-  watchAttrObserver?.disconnect();
-  watchAttrObserver = null;
+  watchAttrAbort?.abort();
+  watchAttrAbort = null;
   observedWatchDefault = null;
   videoListenersAbort?.abort();
   videoListenersAbort = null;
@@ -254,7 +252,8 @@ function toggleClock(enabled: boolean): void {
     if (endTimeEl.textContent !== nextEnd) endTimeEl.textContent = nextEnd;
 
     if (!document.hidden) {
-      clockTimeout = setTimeout(renderAndSchedule, getNextClockDelayMs(now));
+      tickAbort = new AbortController();
+      scheduleAbortableTimeout(renderAndSchedule, getNextClockDelayMs(now), tickAbort.signal);
     }
   };
 
@@ -277,14 +276,8 @@ export function initClock(): void {
   if (clockInitialized || typeof document === 'undefined') return;
   clockInitialized = true;
 
-  configChangeEmitter.addEventListener('configChange', (e) => {
-    const { key, value } = e.detail;
-    if (key === 'enableClock') {
-      toggleClock(Boolean(value));
-    } else if (key === 'isClock12HourFormat' || key === 'clockHideWhenVideoPlaying') {
-      updateHandler?.();
-    }
-  });
+  onConfigChange('enableClock', (value) => toggleClock(Boolean(value)));
+  onConfigChange(['isClock12HourFormat', 'clockHideWhenVideoPlaying'], () => updateHandler?.());
 
   toggleClock(configRead('enableClock'));
 }
