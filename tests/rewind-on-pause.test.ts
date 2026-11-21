@@ -18,7 +18,7 @@ describe('computeRewindTime', () => {
 });
 
 describe('installRewindOnPause Watch session lifecycle', () => {
-  test('attaches listeners only on active watch session, survives playing overwrite, and detaches on exit', () => {
+  test('attaches play/seeking only during an active pause and cleans up on resume, manual seek, or exit', () => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
@@ -80,33 +80,51 @@ describe('installRewindOnPause Watch session lifecycle', () => {
 
     try {
       installRewindOnPause();
-      // Outside Watch route, zero <video> listeners are attached
       assert.equal(videoListeners.get('pause')?.size ?? 0, 0);
 
-      // Entering Watch (#/?v=vid123) attaches directly to <video>
+      // Entering Watch (#/?v=vid123) attaches ONLY the pause listener initially
       fakeLocation.hash = '#/?v=vid123';
       for (const fn of [...(winListeners.get('hashchange') ?? [])]) fn({ type: 'hashchange' });
       assert.equal(videoListeners.get('pause')?.size ?? 0, 1);
+      assert.equal(videoListeners.get('play')?.size ?? 0, 0);
+      assert.equal(videoListeners.get('seeking')?.size ?? 0, 0);
 
-      // Pause at 90s; minor keyframe seeking (<5s) does not cancel state; playing re-applies if overwritten
+      // Pausing attaches seeking + play; minor keyframe seeking (<5s) keeps them active
       videoEl.dispatch('pause');
+      assert.equal(videoListeners.get('play')?.size ?? 0, 1);
+      assert.equal(videoListeners.get('seeking')?.size ?? 0, 1);
       videoEl.currentTime = 88.5;
       videoEl.dispatch('seeking');
+      assert.equal(videoListeners.get('play')?.size ?? 0, 1);
+
+      // Resuming after >=30s tears down seeking/play, rewinds to 85s, and verifies once on playing
       fakeNow += 35_000;
       videoEl.currentTime = 90;
       videoEl.paused = false;
-
       videoEl.dispatch('play');
       assert.equal(videoEl.currentTime, 85);
+      assert.equal(videoListeners.get('seeking')?.size ?? 0, 0);
+      assert.equal(videoListeners.get('play')?.size ?? 0, 0);
+      assert.equal(videoListeners.get('playing')?.size ?? 0, 1);
+
       videoEl.currentTime = 90;
       videoEl.dispatch('playing');
       assert.equal(videoEl.currentTime, 85);
+      assert.equal(videoListeners.get('playing')?.size ?? 0, 0);
 
-      // Leaving Watch route removes all <video> listeners automatically
+      // Manual seek (>5s) while paused cancels play/seeking immediately
+      videoEl.paused = true;
+      videoEl.currentTime = 120;
+      videoEl.dispatch('pause');
+      videoEl.currentTime = 140;
+      videoEl.dispatch('seeking');
+      assert.equal(videoListeners.get('play')?.size ?? 0, 0);
+      assert.equal(videoListeners.get('seeking')?.size ?? 0, 0);
+
+      // Leaving Watch route removes pause listener too
       fakeLocation.hash = '#/';
       for (const fn of [...(winListeners.get('hashchange') ?? [])]) fn({ type: 'hashchange' });
       assert.equal(videoListeners.get('pause')?.size ?? 0, 0);
-      assert.equal(videoListeners.get('play')?.size ?? 0, 0);
     } finally {
       Date.now = prevDateNow;
       globals.window = prevWindow;

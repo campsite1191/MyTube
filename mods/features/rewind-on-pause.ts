@@ -25,73 +25,65 @@ export function installRewindOnPause(): void {
     onVideo((video) => {
       if (signal.aborted) return;
 
-      let pausedAt = 0;
-      let pausedTime = 0;
-      let verifyAbort: AbortController | null = null;
-
-      const resetPauseState = (): void => {
-        pausedAt = 0;
-        pausedTime = 0;
-        verifyAbort?.abort();
-        verifyAbort = null;
+      let activeAbort: AbortController | null = null;
+      const cancelPending = (): void => {
+        activeAbort?.abort();
+        activeAbort = null;
       };
-
-      onAbort(signal, resetPauseState);
+      onAbort(signal, cancelPending);
 
       video.addEventListener(
         'pause',
         () => {
-          resetPauseState();
+          cancelPending();
           if (video.ended || !Number.isFinite(video.duration) || video.duration <= 0 || video.currentTime <= 1) {
             return;
           }
-          pausedAt = Date.now();
-          pausedTime = video.currentTime;
-        },
-        { signal }
-      );
 
-      video.addEventListener(
-        'seeking',
-        () => {
-          if (pausedAt && video.paused && Math.abs(video.currentTime - pausedTime) > MANUAL_SEEK_RESET_THRESHOLD_SEC) {
-            resetPauseState();
-          }
-        },
-        { signal }
-      );
+          const pausedAt = Date.now();
+          const pausedTime = video.currentTime;
+          const pauseAbort = new AbortController();
+          activeAbort = pauseAbort;
 
-      video.addEventListener(
-        'play',
-        () => {
-          if (!pausedAt) return;
-          const snapshotPausedAt = pausedAt;
-          resetPauseState();
-
-          const resumeTime = video.currentTime;
-          const nextTime = computeRewindTime(snapshotPausedAt, Date.now(), video.duration, resumeTime);
-          if (nextTime === null) return;
-
-          video.currentTime = nextTime;
-
-          verifyAbort = new AbortController();
-          onAbort(verifyAbort.signal, () => {
-            verifyAbort = null;
-          });
           video.addEventListener(
-            'playing',
+            'seeking',
             () => {
-              verifyAbort?.abort();
-              // Re-apply once playback starts if YouTube/Cobalt snapped currentTime back on play.
-              if (
-                !video.paused &&
-                video.currentTime > nextTime + PLAYING_VERIFY_TOLERANCE_SEC &&
-                resumeTime > nextTime
-              ) {
-                video.currentTime = nextTime;
+              if (video.paused && Math.abs(video.currentTime - pausedTime) > MANUAL_SEEK_RESET_THRESHOLD_SEC) {
+                cancelPending();
               }
             },
-            { once: true, signal: verifyAbort.signal }
+            { signal: pauseAbort.signal }
+          );
+
+          video.addEventListener(
+            'play',
+            () => {
+              const resumeTime = video.currentTime;
+              const nextTime = computeRewindTime(pausedAt, Date.now(), video.duration, resumeTime);
+              cancelPending();
+              if (nextTime === null) return;
+
+              video.currentTime = nextTime;
+
+              const verifyAbort = new AbortController();
+              activeAbort = verifyAbort;
+              video.addEventListener(
+                'playing',
+                () => {
+                  cancelPending();
+                  // Re-apply once playback starts if YouTube/Cobalt snapped currentTime back on play.
+                  if (
+                    !video.paused &&
+                    video.currentTime > nextTime + PLAYING_VERIFY_TOLERANCE_SEC &&
+                    resumeTime > nextTime
+                  ) {
+                    video.currentTime = nextTime;
+                  }
+                },
+                { once: true, signal: verifyAbort.signal }
+              );
+            },
+            { once: true, signal: pauseAbort.signal }
           );
         },
         { signal }
