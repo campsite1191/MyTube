@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { addPreviews } from '../mods/interceptors/previews.ts';
+import { addPreviews } from '../mods/transforms/previews.ts';
 import type { FeedItem } from '../mods/types/innertube.ts';
 
 describe('addPreviews', () => {

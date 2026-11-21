@@ -27,6 +27,9 @@ function getGuideItemId(entry: GuideEntryRendererData | null | undefined): strin
   return entry?.icon?.iconType || null;
 }
 
+/**
+ * Filters and reorders the YouTube TV navigation guide sidebar entries to the configured order.
+ */
 export function transformGuideResponse(r: unknown): unknown {
   if (!isRecord(r) || !Array.isArray(r.items)) return r;
   const firstEntry = isRecord(r.items[0]) ? r.items[0] : undefined;

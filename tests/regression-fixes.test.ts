@@ -4,8 +4,8 @@ import { describe, test } from 'node:test';
 import { patchResolveCommand } from '../mods/core/resolve-command.ts';
 import { injectCss } from '../mods/core/styles.ts';
 import { whenYttvReady } from '../mods/core/yttv-bridge.ts';
+import { transformGuideResponse } from '../mods/transforms/guide.ts';
 import { applyDeArrowBranding, clearDeArrowCache } from '../mods/transforms/thumbnails.ts';
-import { transformGuideResponse } from '../mods/ui/custom-guide-action.ts';
 
 describe('regression fixes', () => {
   test('transformGuideResponse keeps only Search, Home, Subscriptions, Library, News, Settings in exact order', () => {

@@ -1,0 +1,78 @@
+diff --git a/media/base/starboard/experimental_features.h b/media/base/starboard/experimental_features.h
+index 65a94a1..53d3b8a 100644
+--- a/media/base/starboard/experimental_features.h
++++ b/media/base/starboard/experimental_features.h
+@@ -181,7 +181,7 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaBypassMojoForMedia(
+     "Media.BypassMojoForMedia");
+ 
+ inline constexpr ExperimentalFeatureKey<bool> kMediaEnableTrivialOptimizations(
+-    "Media.EnableTrivialOptimizations");
++    "Media.EnableTrivialOptimizations", true);
+ 
+ inline constexpr ExperimentalFeatureKey<bool> kMediaForceDecodeToTexture(
+     "Media.ForceDecodeToTexture");
+diff --git a/starboard/shared/starboard/experimental_features.h b/starboard/shared/starboard/experimental_features.h
+index 4af464f..49b16b7 100644
+--- a/starboard/shared/starboard/experimental_features.h
++++ b/starboard/shared/starboard/experimental_features.h
+@@ -184,7 +184,8 @@ inline constexpr ExperimentalFeatureKey<bool>
+     kMediaEnableAv1StartupOptimization("Media.EnableAv1StartupOptimization");
+ 
+ inline constexpr ExperimentalFeatureKey<bool>
+-    kMediaEnableCodecThreadImprovements("Media.EnableCodecThreadImprovements");
++    kMediaEnableCodecThreadImprovements("Media.EnableCodecThreadImprovements",
++                                        true);
+ 
+ inline constexpr ExperimentalFeatureKey<bool> kMediaEnableFlushDuringSeek(
+     "Media.EnableFlushDuringSeek");
+@@ -197,7 +198,7 @@ inline constexpr ExperimentalFeatureKey<bool>
+         "Media.EnableSimdBasedAudioFormatSwitching");
+ 
+ inline constexpr ExperimentalFeatureKey<bool> kMediaEnableTrivialOptimizations(
+-    "Media.EnableTrivialOptimizations");
++    "Media.EnableTrivialOptimizations", true);
+ 
+ inline constexpr ExperimentalFeatureKey<bool>
+     kMediaEnableVideoRendererVspAdjustment(
+@@ -207,7 +208,7 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaFlushAudioTrackDuringSeek(
+     "Media.FlushAudioTrackDuringSeek");
+ 
+ inline constexpr ExperimentalFeatureKey<bool> kMediaForceDualThreads(
+-    "Media.ForceDualThreads");
++    "Media.ForceDualThreads", true);
+ 
+ // Decode-To-Texture (used by WebGL video shaders) may use this.
+ // Main tracking bug: b/490474392, DRM exploration: b/494037632
+@@ -216,7 +217,8 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaForceSoftwareVideoDecoder(
+ 
+ inline constexpr ExperimentalFeatureKey<bool>
+     kMediaIgnoreStaleRenderedFramesAfterSeek(
+-        "Media.IgnoreStaleRenderedFramesAfterSeek");
++        "Media.IgnoreStaleRenderedFramesAfterSeek",
++        true);
+ 
+ // Selects which NDK audio mode to use. The int value maps to `NdkAudioMode`.
+ // TODO: b/565474970 - Remove this flag once the experiment is complete.
+@@ -234,7 +236,8 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaPauseUsingAudioTrackState(
+ // TODO(b/511356295): Remove this flag once the experiment is complete.
+ inline constexpr ExperimentalFeatureKey<bool>
+     kMediaSkipAudioResamplingOnUnchangedSampleRate(
+-        "Media.SkipAudioResamplingOnUnchangedSampleRate");
++        "Media.SkipAudioResamplingOnUnchangedSampleRate",
++        true);
+ 
+ inline constexpr ExperimentalFeatureKey<bool> kMediaSkipFlushOnDecoderTeardown(
+     "Media.SkipFlushOnDecoderTeardown");
+diff --git a/starboard/shared/starboard/player/decoded_audio_internal.cc b/starboard/shared/starboard/player/decoded_audio_internal.cc
+index 0bf9da1..39c598e 100644
+--- a/starboard/shared/starboard/player/decoded_audio_internal.cc
++++ b/starboard/shared/starboard/player/decoded_audio_internal.cc
+@@ -37,7 +37,7 @@ namespace starboard {
+ 
+ namespace {
+ 
+-constexpr bool kIsSimdBasedAudioFormatSwitchingDefaultEnabled = false;
++constexpr bool kIsSimdBasedAudioFormatSwitchingDefaultEnabled = true;
+ 
+ static_assert(std::is_trivially_destructible<std::atomic<bool>>::value,
+               "g_enable_simd_based_audio_format_switching must be trivially "

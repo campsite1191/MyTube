@@ -1,5 +1,5 @@
 import pLimit from 'p-limit';
-import { createLruCache } from '../core/cache.ts';
+import QuickLRU from 'quick-lru';
 import type { FeedItem, FormattedText, Thumbnail } from '../types/innertube.ts';
 import { unwrapFeedItem } from '../utils/feed-helpers.ts';
 
@@ -218,10 +218,11 @@ export function applyDeArrowBrandingToItem(entry: FeedItem, videoId: string, bra
 }
 
 const MAX_DEARROW_CONCURRENCY = 6;
+const DEARROW_CACHE_MAX_SIZE = 2000;
 const EMPTY_DEARROW_BRANDING: DeArrowBrandingResponse = { titles: [], thumbnails: [] };
 
 const deArrowLimit = pLimit(MAX_DEARROW_CONCURRENCY);
-const deArrowCache = createLruCache<DeArrowBrandingResponse>();
+const deArrowCache = new QuickLRU<string, DeArrowBrandingResponse>({ maxSize: DEARROW_CACHE_MAX_SIZE });
 const inFlightDeArrow = new Map<string, Promise<DeArrowBrandingResponse | null>>();
 let activeNavigationController: AbortController | null =
   typeof AbortController === 'function' ? new AbortController() : null;
@@ -241,6 +242,17 @@ export function abortPendingDeArrowRequests(): void {
 export function clearDeArrowCache(): void {
   deArrowCache.clear();
   abortPendingDeArrowRequests();
+}
+
+/** Registers Cobalt's `h5vcc.system.onMemoryPressure` listener to evict the DeArrow cache cleanly. */
+export function setupMemoryPressureListener(): void {
+  const onMemoryPressure = typeof window !== 'undefined' ? window.h5vcc?.system?.onMemoryPressure : undefined;
+  if (typeof onMemoryPressure?.addListener === 'function') {
+    onMemoryPressure.addListener(() => {
+      console.warn('Memory pressure detected, clearing caches...');
+      clearDeArrowCache();
+    });
+  }
 }
 
 function fetchBrandingForVideo(
