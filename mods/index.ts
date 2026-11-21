@@ -3,6 +3,7 @@ import { initConfig } from './core/config.ts';
 import { preconnectOrigins, schedulePostFirstPaint, waitForDomReady } from './core/idle-scheduler.ts';
 import './core/innertube-interceptor.ts';
 import { setupMemoryPressureListener } from './core/memory-pressure.ts';
+import { installDisableWhosWatching } from './features/disable-whos-watching.ts';
 import { installPreferredVideoQuality } from './features/preferred-video-quality.ts';
 import { installRemainingTime } from './features/remaining-time.ts';
 import { installReturnYouTubeDislike } from './features/return-youtube-dislike.ts';
@@ -13,10 +14,10 @@ import { initClock } from './ui/clock.ts';
 setupMemoryPressureListener();
 
 const configReady = initConfig();
+installDisableWhosWatching();
 
 import './ui/ui.ts';
 import './ui/speed-ui.ts';
-import './features/disable-whos-watching.ts';
 import './ui/custom-ui.ts';
 import './ui/custom-guide-action.ts';
 
