@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { configWrite } from '../mods/core/config.ts';
 import type { QualityControllablePlayer, QualityVideoTarget } from '../mods/features/preferred-video-quality.ts';
 import {
   applyPreferredQualityToPlayer,
@@ -190,13 +189,12 @@ describe('attachPreferredQualityController', () => {
     assert.equal(mock.videoListenerCount(), 0);
   });
 
-  test('installPreferredVideoQuality covers player loads across app and removes all listeners when set to auto', async (t) => {
+  test('installPreferredVideoQuality locks 2160p across player loads on Home previews and Watch videos', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
 
-    t.after(async () => {
-      await configWrite('preferredVideoQuality', '2160p');
+    t.after(() => {
       if (prevWindow === undefined) delete globals.window;
       else globals.window = prevWindow;
       if (prevDocument === undefined) delete globals.document;
@@ -216,18 +214,12 @@ describe('attachPreferredQualityController', () => {
     };
 
     installPreferredVideoQuality();
-    await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(mock.videoListenerCount(), 1);
     assert.equal(mock.playerListenerCount(), 1);
 
     // Works on Home preview or Watch without needing URL route changes.
     mock.setState({ isPlaying: true });
     assert.deepEqual(mock.appliedRanges, [['hd2160', 'hd2160']]);
-    assert.equal(mock.playerListenerCount(), 0);
-
-    // Switching to 'auto' removes even the loadstart listener.
-    await configWrite('preferredVideoQuality', 'auto');
-    assert.equal(mock.videoListenerCount(), 0);
     assert.equal(mock.playerListenerCount(), 0);
   });
 });

@@ -1,36 +1,33 @@
-import { configRead } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { buttonItem, overlayPanelItemListRenderer, showModal } from './yt-ui.ts';
 
+const SPEED_INCREMENT = 0.25;
+let currentPlaybackSpeed = 1;
+
+export function setPlaybackSpeed(speed: number): void {
+  if (!Number.isFinite(speed) || speed <= 0) return;
+  currentPlaybackSpeed = speed;
+  const video = document.querySelector('video');
+  if (video) video.playbackRate = speed;
+}
+
 function initSpeedControls(video: HTMLVideoElement): void {
   video.addEventListener('canplay', () => {
-    video.playbackRate = configRead('videoSpeed');
+    video.playbackRate = currentPlaybackSpeed;
   });
 }
 
 export function speedSettings(): void {
-  const currentSpeed = configRead('videoSpeed');
   let selectedIndex = 0;
   const maxSpeed = 5;
-  const increment = configRead('speedSettingsIncrement') || 0.25;
   const buttons: unknown[] = [];
 
-  for (let speed = increment; speed <= maxSpeed; speed += increment) {
+  for (let speed = SPEED_INCREMENT; speed <= maxSpeed; speed += SPEED_INCREMENT) {
     const fixedSpeed = Math.round(speed * 100) / 100;
     buttons.push(
       buttonItem({ title: `${fixedSpeed}x` }, null, [
         { signalAction: { signal: 'POPUP_BACK' } },
-        {
-          setClientSettingEndpoint: {
-            settingDatas: [
-              {
-                clientSettingEnum: { item: 'videoSpeed' },
-                intValue: fixedSpeed.toString(),
-              },
-            ],
-          },
-        },
         {
           customAction: {
             action: 'SET_PLAYER_SPEED',
@@ -39,7 +36,7 @@ export function speedSettings(): void {
         },
       ])
     );
-    if (currentSpeed === fixedSpeed) {
+    if (currentPlaybackSpeed === fixedSpeed) {
       selectedIndex = buttons.length - 1;
     }
   }
@@ -47,16 +44,6 @@ export function speedSettings(): void {
   buttons.push(
     buttonItem({ title: t('player.playbackSpeed.fixStuttering') }, null, [
       { signalAction: { signal: 'POPUP_BACK' } },
-      {
-        setClientSettingEndpoint: {
-          settingDatas: [
-            {
-              clientSettingEnum: { item: 'videoSpeed' },
-              intValue: '1.0001',
-            },
-          ],
-        },
-      },
       {
         customAction: {
           action: 'SET_PLAYER_SPEED',

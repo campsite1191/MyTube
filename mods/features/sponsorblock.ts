@@ -1,5 +1,3 @@
-import type { ConfigKey } from '../core/config.ts';
-import { configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
 import {
   isPlayerBarVisible,
@@ -24,11 +22,31 @@ const CATEGORY_SPECS = {
   filler: { configKey: 'enableSponsorBlockFiller', color: '#7300FF', opacity: '0.9' },
   music_offtopic: { configKey: 'enableSponsorBlockMusicOfftopic', color: '#ff9900' },
   poi_highlight: { configKey: 'enableSponsorBlockHighlight', color: '#ff1684' },
-} as const satisfies Record<string, { configKey: ConfigKey; color: string; opacity?: string }>;
+} as const satisfies Record<string, { configKey: string; color: string; opacity?: string }>;
+
+const DEFAULT_ENABLED_CATEGORY_KEYS = new Set<string>([
+  'enableSponsorBlockSponsor',
+  'enableSponsorBlockIntro',
+  'enableSponsorBlockOutro',
+  'enableSponsorBlockInteraction',
+  'enableSponsorBlockSelfPromo',
+  'enableSponsorBlockHighlight',
+]);
+
+export const MANUAL_SKIP_CATEGORIES: readonly string[] = [
+  'intro',
+  'outro',
+  'filler',
+  'interaction',
+  'selfpromo',
+  'preview',
+  'music_offtopic',
+  'sponsor',
+];
 
 export type SponsorBlockCategory = keyof typeof CATEGORY_SPECS;
 
-type CategorySpec = { configKey: ConfigKey; color: string; opacity?: string };
+type CategorySpec = { configKey: string; color: string; opacity?: string };
 const CATEGORY_ENTRIES = Object.entries(CATEGORY_SPECS) as Array<[SponsorBlockCategory, CategorySpec]>;
 
 type SponsorBlockActionType = 'skip' | 'poi' | 'mute';
@@ -75,15 +93,15 @@ export async function computeSha256HexPrefix(input: string, prefixLength = 4): P
     .slice(0, prefixLength);
 }
 
-/** Returns only SponsorBlock categories currently enabled in settings for fetching. */
+/** Returns only active SponsorBlock categories for fetching. */
 export function getRequestedCategories(
-  readConfig: <K extends ConfigKey>(key: K) => boolean = (key) => Boolean(configRead(key))
+  readConfig: (key: string) => boolean = (key) => DEFAULT_ENABLED_CATEGORY_KEYS.has(key)
 ): SponsorBlockCategory[] {
   return CATEGORY_ENTRIES.filter(([, { configKey }]) => readConfig(configKey)).map(([category]) => category);
 }
 
 export function getEnabledSkipCategories(
-  readConfig: <K extends ConfigKey>(key: K) => boolean = (key) => Boolean(configRead(key))
+  readConfig: (key: string) => boolean = (key) => DEFAULT_ENABLED_CATEGORY_KEYS.has(key)
 ): SponsorBlockCategory[] {
   return getRequestedCategories(readConfig).filter((category) => category !== 'poi_highlight');
 }
@@ -260,8 +278,7 @@ class SponsorBlockHandler {
       if (this.signal.aborted || segments.length === 0) return [];
 
       this.segments = segments;
-      const manual = configRead('sponsorBlockManualSkips');
-      this.manualSkippableCategories = new Set(Array.isArray(manual) ? manual : []);
+      this.manualSkippableCategories = new Set(MANUAL_SKIP_CATEGORIES);
       this.skippableCategories = new Set(getEnabledSkipCategories());
 
       onVideo((video) => {
@@ -304,7 +321,7 @@ class SponsorBlockHandler {
     const transition = computeMuteTransition(this.muteState, activeMute, this.video.muted);
     this.muteState = transition.state;
     if (transition.nextMuted !== null) this.video.muted = transition.nextMuted;
-    if (transition.toastSegment && configRead('enableSponsorBlockToasts')) {
+    if (transition.toastSegment) {
       const name = BAR_TYPES[transition.toastSegment.category]?.name || transition.toastSegment.category;
       showToast('SponsorBlock', t('sponsorblock.toasts.muting', { segment: name }));
     }
@@ -444,7 +461,7 @@ class SponsorBlockHandler {
           const decision = getSuppressionDecision(existingSkip, now);
           this.skippedCategories.set(segment.UUID, decision.newState);
           if (decision.suppress) {
-            if (decision.showToast && configRead('enableSponsorBlockToasts')) {
+            if (decision.showToast) {
               showToast(
                 'SponsorBlock',
                 t('sponsorblock.toasts.notSkipping', { segment: skipName, count: decision.newState.count })
@@ -461,9 +478,7 @@ class SponsorBlockHandler {
           });
         }
 
-        if (configRead('enableSponsorBlockToasts')) {
-          showToast('SponsorBlock', t('sponsorblock.toasts.skipping', { segment: skipName }));
-        }
+        showToast('SponsorBlock', t('sponsorblock.toasts.skipping', { segment: skipName }));
         this.video.currentTime = computeTargetTimeAfterSkip(end, this.video.duration);
         this.scheduleSkip(true);
       },
@@ -486,16 +501,13 @@ export function getActiveSponsorBlockSegments(): readonly SponsorBlockSegment[] 
 export function installSponsorBlock(): void {
   if (sponsorBlockInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
   sponsorBlockInstalled = true;
-  void whenConfigReady().then(() => {
-    onWatchSession((videoId, signal) => {
+  onWatchSession((videoId, signal) => {
+    activeSegments = [];
+    onAbort(signal, () => {
       activeSegments = [];
-      onAbort(signal, () => {
-        activeSegments = [];
-      });
-      if (!configRead('enableSponsorBlock')) return;
-      void new SponsorBlockHandler(videoId, signal).init().then((segments) => {
-        if (!signal.aborted) activeSegments = segments;
-      });
+    });
+    void new SponsorBlockHandler(videoId, signal).init().then((segments) => {
+      if (!signal.aborted) activeSegments = segments;
     });
   });
 }

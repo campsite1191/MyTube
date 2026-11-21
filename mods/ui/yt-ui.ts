@@ -2,23 +2,17 @@ import { t } from '../core/i18n.ts';
 import resolveCommand from '../core/resolve-command.ts';
 import type { Thumbnail, WatchEndpoint } from '../types/innertube.ts';
 
-export interface ModalTitle {
-  title: string;
-  subtitle?: string;
-  overlayPanelHeaderRenderer?: Record<string, unknown>;
-}
-
-export interface ButtonItemTitle {
+interface ButtonItemTitle {
   title: string;
   subtitle?: string;
 }
 
-export interface ButtonItemIcon {
+interface ButtonItemIcon {
   icon: string;
   secondaryIcon?: string;
 }
 
-export interface LongPressDataInput {
+interface LongPressDataInput {
   videoId: string;
   thumbnails: Thumbnail[];
   title: string;
@@ -43,15 +37,10 @@ export function showToast(title: string, subtitle: string, thumbnails?: Thumbnai
   });
 }
 
-function Modal(header: string | ModalTitle, content: unknown, id: string, update?: boolean): Record<string, unknown> {
-  const titleSubtitleObj: ModalTitle = typeof header === 'string' ? { title: header, subtitle: '' } : header;
-  const overlayPanelHeaderRenderer: Record<string, unknown> = titleSubtitleObj.overlayPanelHeaderRenderer ?? {
-    title: { simpleText: titleSubtitleObj.title },
+function Modal(header: string, content: unknown, id: string, update?: boolean): Record<string, unknown> {
+  const overlayPanelHeaderRenderer: Record<string, unknown> = {
+    title: { simpleText: header },
   };
-
-  if (titleSubtitleObj.subtitle) {
-    overlayPanelHeaderRenderer.subtitle = { simpleText: titleSubtitleObj.subtitle };
-  }
 
   const openPopupAction: Record<string, unknown> = {
     popupType: 'MODAL',
@@ -93,7 +82,7 @@ function Modal(header: string | ModalTitle, content: unknown, id: string, update
   return { openPopupAction };
 }
 
-export function showModal(header: string | ModalTitle, content: unknown, id: string, update?: boolean): void {
+export function showModal(header: string, content: unknown, id: string, update?: boolean): void {
   resolveCommand(Modal(header, content, id, update));
 }
 
@@ -233,51 +222,6 @@ function MenuNavigationItemRenderer(text: string, navigateEndpoint: unknown) {
   };
 }
 
-export function SettingsCategory(categoryId: string, items: unknown[], title?: string) {
-  const settingCategoryCollectionRenderer: Record<string, unknown> = {
-    items,
-    categoryId,
-    focused: false,
-    trackingParams: 'null',
-  };
-
-  if (title) {
-    settingCategoryCollectionRenderer.title = { runs: [{ text: title }] };
-  }
-
-  return { settingCategoryCollectionRenderer };
-}
-
-export function SettingActionRenderer(
-  title: string,
-  itemId: string,
-  serviceEndpoint: unknown,
-  summary: string,
-  thumbnail: string
-) {
-  return {
-    settingActionRenderer: {
-      title: { runs: [{ text: title }] },
-      serviceEndpoint,
-      summary: { runs: [{ text: summary }] },
-      trackingParams: 'null',
-      actionLabel: { runs: [{ text: title }] },
-      itemId,
-      thumbnail: {
-        thumbnails: [{ url: thumbnail }],
-      },
-    },
-  };
-}
-
-export function overlayMessageRenderer(simpleText: string) {
-  return {
-    overlayMessageRenderer: {
-      title: { simpleText },
-    },
-  };
-}
-
 export function ButtonRenderer(disabled: boolean, text: string, iconType: string, command: unknown) {
   return {
     isDisabled: disabled,
@@ -286,21 +230,4 @@ export function ButtonRenderer(disabled: boolean, text: string, iconType: string
     command,
     trackingParams: null,
   };
-}
-
-export function GuideEntryRenderer(simpleText: string, navigationEndpoint: unknown, icon?: string, thumbnail?: string) {
-  const guideEntryRenderer: Record<string, unknown> = {
-    navigationEndpoint,
-    trackingParams: null,
-    formattedTitle: { simpleText },
-  };
-
-  if (icon) {
-    guideEntryRenderer.icon = { iconType: icon };
-  }
-  if (thumbnail) {
-    guideEntryRenderer.thumbnail = { thumbnails: [{ url: thumbnail }] };
-  }
-
-  return { guideEntryRenderer };
 }

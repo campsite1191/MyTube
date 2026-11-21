@@ -1,10 +1,9 @@
-import { configRead, onConfigChange, whenConfigReady } from '../core/config.ts';
 import { onAbort } from '../core/lifecycle.ts';
 import { onPlayer, onVideo } from '../core/player-observer.ts';
 import type { YtPlayerStateObject, YtQualityData } from '../types/yttv.ts';
 
 const PLAYER_STATE_CHANGE_EVENT = 'onStateChange';
-const PREFERRED_VIDEO_QUALITY_KEY = 'preferredVideoQuality';
+const PREFERRED_VIDEO_QUALITY = '2160p';
 const HIGHRES_QUALITY_ID = 'highres';
 
 export interface QualityControllablePlayer {
@@ -88,7 +87,7 @@ export function selectPlaybackQuality(
 
 export function applyPreferredQualityToPlayer(
   player: QualityControllablePlayer,
-  preferredQuality: string = configRead(PREFERRED_VIDEO_QUALITY_KEY)
+  preferredQuality: string = PREFERRED_VIDEO_QUALITY
 ): boolean {
   if (!player.setPlaybackQualityRange) return false;
 
@@ -107,7 +106,7 @@ export function applyPreferredQualityToPlayer(
 
 export function attachPreferredQualityController(
   player: QualityControllablePlayer,
-  getPreferredQuality: () => string = () => configRead(PREFERRED_VIDEO_QUALITY_KEY),
+  getPreferredQuality: () => string = () => PREFERRED_VIDEO_QUALITY,
   video?: QualityVideoTarget | null,
   signal?: AbortSignal
 ): PreferredQualityController {
@@ -172,20 +171,9 @@ let preferredQualityInstalled = false;
 export function installPreferredVideoQuality(): void {
   if (preferredQualityInstalled || typeof document === 'undefined' || typeof window === 'undefined') return;
   preferredQualityInstalled = true;
-  void whenConfigReady().then(() => {
-    onPlayer((player) => {
-      onVideo((video) => {
-        let activeController: PreferredQualityController | null = null;
-        const sync = (): void => {
-          const preferred = configRead(PREFERRED_VIDEO_QUALITY_KEY);
-          activeController?.dispose();
-          activeController = null;
-          if (!preferred || preferred === 'auto') return;
-          activeController = attachPreferredQualityController(player, () => preferred, video);
-        };
-        onConfigChange(PREFERRED_VIDEO_QUALITY_KEY, sync);
-        sync();
-      });
+  onPlayer((player) => {
+    onVideo((video) => {
+      attachPreferredQualityController(player, () => PREFERRED_VIDEO_QUALITY, video);
     });
   });
 }

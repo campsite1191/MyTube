@@ -170,23 +170,6 @@ export function dedupeAndSortSubscriptionTabs(
   });
 }
 
-export function extractBrowseIdFromResponse(payload: Record<string, unknown>): string | null {
-  const responseContext = isRecord(payload.responseContext) ? payload.responseContext : undefined;
-  const serviceTrackingParams = responseContext?.serviceTrackingParams;
-  if (!Array.isArray(serviceTrackingParams)) return null;
-
-  for (const service of serviceTrackingParams) {
-    if (!isRecord(service) || !Array.isArray(service.params)) continue;
-    for (const param of service.params) {
-      if (isRecord(param) && param.key === 'browse_id' && typeof param.value === 'string' && param.value) {
-        return param.value;
-      }
-    }
-  }
-
-  return null;
-}
-
 /**
  * Strips InnerTube ad placements, player ads, ad slots, and Shorts ad entries in place.
  */

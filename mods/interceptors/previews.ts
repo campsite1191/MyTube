@@ -1,11 +1,10 @@
-import { configRead } from '../core/config.ts';
 import { walkCommands } from '../transforms/feed-filter.ts';
 import type { FeedItem } from '../types/innertube.ts';
 import { isRecord } from '../utils/type-guards.ts';
 
 export function addPreviews(items: FeedItem[], shouldInject = true): void {
   if (!Array.isArray(items)) return;
-  const allowInject = Boolean(shouldInject && configRead('enablePreviews'));
+  const allowInject = Boolean(shouldInject);
 
   const tunePreview = (cmd: Record<string, unknown>): void => {
     cmd.blockAdoption = true;
@@ -15,7 +14,6 @@ export function addPreviews(items: FeedItem[], shouldInject = true): void {
     cmd.durationMs = 3600000;
     cmd.muted = true;
     cmd.resumeVideo = false;
-    if (!configRead('enablePreviews')) cmd.overrideSettingsSwitch = false;
     const ep = isRecord(cmd.playbackEndpoint) ? cmd.playbackEndpoint : undefined;
     const watchEndpoint = isRecord(ep?.watchEndpoint) ? ep.watchEndpoint : undefined;
     if (ep && watchEndpoint && 'endTimeSeconds' in watchEndpoint) {

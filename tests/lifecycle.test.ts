@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { configRead, configWrite, onConfigChange } from '../mods/core/config.ts';
 import { observeDom, onAbort, onWatchSession, scheduleAbortableTimeout } from '../mods/core/lifecycle.ts';
 
 describe('AbortSignal lifecycle helpers', () => {
@@ -80,46 +79,6 @@ describe('AbortSignal lifecycle helpers', () => {
     await new Promise((r) => setTimeout(r, 35));
     assert.equal(abortedRan, false);
     assert.equal(completed, true);
-  });
-});
-
-describe('onConfigChange helper', () => {
-  test('filters config change notifications by key and supports unsubscribe and AbortSignal', async () => {
-    const prevClock = configRead('enableClock');
-    const prev12h = configRead('isClock12HourFormat');
-    const seen: string[] = [];
-
-    const controller = new AbortController();
-    const stopMulti = onConfigChange(
-      ['enableClock', 'isClock12HourFormat'],
-      (value, key) => {
-        seen.push(`${key}:${String(value)}`);
-      },
-      { signal: controller.signal }
-    );
-    const stopSingle = onConfigChange('enableClock', (value) => {
-      seen.push(`single:${String(value)}`);
-    });
-
-    try {
-      await configWrite('enableShorts', configRead('enableShorts'));
-      await configWrite('enableClock', !prevClock);
-      await configWrite('isClock12HourFormat', !prev12h);
-      assert.deepEqual(seen, [
-        `enableClock:${String(!prevClock)}`,
-        `single:${String(!prevClock)}`,
-        `isClock12HourFormat:${String(!prev12h)}`,
-      ]);
-
-      controller.abort();
-      stopSingle();
-      stopMulti();
-      await configWrite('enableClock', prevClock);
-      assert.equal(seen.length, 3);
-    } finally {
-      await configWrite('enableClock', prevClock);
-      await configWrite('isClock12HourFormat', prev12h);
-    }
   });
 });
 

@@ -1,11 +1,14 @@
 import { t } from '../core/i18n.ts';
 import { getActiveWatchVideoId } from '../core/lifecycle.ts';
 import { setWatchLikeCount } from '../features/return-youtube-dislike.ts';
-import { getActiveSponsorBlockSegments, resolveSegmentActionType } from '../features/sponsorblock.ts';
+import {
+  getActiveSponsorBlockSegments,
+  MANUAL_SKIP_CATEGORIES,
+  resolveSegmentActionType,
+} from '../features/sponsorblock.ts';
 import { addPreviews } from '../interceptors/previews.ts';
 import { buildChaptersMarkerEntity } from '../transforms/chapters.ts';
 import {
-  extractItemChannelInfo,
   extractItemChannelName,
   filterFeedItemsSync,
   filterShelvesInPlaceSync,
@@ -17,7 +20,6 @@ import type { AudioFormatEntry, SubscriptionTab } from '../transforms/innertube-
 import {
   dedupeAndSortSubscriptionTabs,
   disableAutoCaptionsInPayload,
-  extractBrowseIdFromResponse,
   filterStreamingFormats,
   stripAdsFromPayload,
 } from '../transforms/innertube-player.ts';
@@ -28,13 +30,11 @@ import {
 } from '../transforms/thumbnails.ts';
 import type { FeedItem, InnertubeCommand, Thumbnail, WatchEndpoint } from '../types/innertube.ts';
 import { transformGuideResponse } from '../ui/custom-guide-action.ts';
-import { patchSettingsInPlace } from '../ui/custom-yt-settings.ts';
 import { ButtonRenderer, longPressData, MenuServiceItemRenderer, timelyAction } from '../ui/yt-ui.ts';
 import { buildLongPressPayload } from '../utils/feed-helpers.ts';
 import { isObjectLike, isRecord } from '../utils/type-guards.ts';
-import { configRead, onConfigChange, whenConfigReady } from './config.ts';
 import { findFeedbackToken } from './innertube-calls.ts';
-import resolveCommand, { patchResolveCommand } from './resolve-command.ts';
+import resolveCommand from './resolve-command.ts';
 import { whenYttvReady } from './yttv-bridge.ts';
 
 const ITEM_LIST_KEYS = [
@@ -206,41 +206,6 @@ function restoreFeedbackMenuItems(item: FeedItem, menuItems: Record<string, unkn
   );
 }
 
-function isFeedbackMenuItem(menuItem: Record<string, unknown>): boolean {
-  const service = isRecord(menuItem.menuServiceItemRenderer) ? menuItem.menuServiceItemRenderer : undefined;
-  const act = getCustomActionName(service?.serviceEndpoint);
-  if (act === 'NOT_INTERESTED' || act === 'DONT_RECOMMEND_CHANNEL') return true;
-  const label = readMenuItemText(menuItem)
-    .toLowerCase()
-    .replace(/\u2019/g, "'");
-  return label === 'not interested' || label === "don't recommend channel";
-}
-
-function addHideChannelMenuItem(item: FeedItem, menuItems: Record<string, unknown>[]): void {
-  const ch = extractItemChannelInfo(item);
-  if (!ch.name && !ch.id) return;
-  if (
-    menuItems.some((m) => {
-      const service = isRecord(m.menuServiceItemRenderer) ? m.menuServiceItemRenderer : undefined;
-      return getCustomActionName(service?.serviceEndpoint) === 'HIDE_CHANNEL';
-    })
-  ) {
-    return;
-  }
-  const hideItem = MenuServiceItemRenderer('Hide Channel', {
-    clickTrackingParams: null,
-    playlistEditEndpoint: {
-      customAction: { action: 'HIDE_CHANNEL', parameters: ch },
-    },
-  }) as Record<string, unknown>;
-  const feedbackIdx = menuItems.findIndex(isFeedbackMenuItem);
-  if (feedbackIdx !== -1) {
-    menuItems.splice(feedbackIdx, 0, hideItem);
-  } else {
-    menuItems.push(hideItem);
-  }
-}
-
 function addLongPress(items: FeedItem[]): void {
   if (!Array.isArray(items)) return;
   for (const entry of items) {
@@ -259,7 +224,6 @@ function addLongPress(items: FeedItem[]): void {
             normalizeMenuItemText(menuItem);
           }
         }
-        addHideChannelMenuItem(item, menuItems);
         restoreFeedbackMenuItems(item, menuItems);
       }
 
@@ -271,7 +235,7 @@ function addLongPress(items: FeedItem[]): void {
         }
         return false;
       });
-      if (item.tileRenderer && !hasShowMenuCmd && configRead('enableLongPress') && item.tileRenderer.contentId) {
+      if (item.tileRenderer && !hasShowMenuCmd && item.tileRenderer.contentId) {
         item.tileRenderer.onLongPressCommand = {
           showMenuCommand: { contentId: item.tileRenderer.contentId } as unknown as InnertubeCommand['showMenuCommand'],
         };
@@ -279,7 +243,6 @@ function addLongPress(items: FeedItem[]): void {
       continue;
     }
 
-    if (!configRead('enableLongPress')) continue;
     const tr = item.tileRenderer;
     const lv = item.lockupViewModel;
     const thumbnails: Thumbnail[] | undefined = tr
@@ -303,7 +266,6 @@ function addLongPress(items: FeedItem[]): void {
       item: buildLongPressPayload(item, videoId, watchEndpointData),
     }) as unknown as { showMenuCommand: { menu: { menuRenderer: { items: Record<string, unknown>[] } } } };
 
-    addHideChannelMenuItem(item, data.showMenuCommand.menu.menuRenderer.items);
     restoreFeedbackMenuItems(item, data.showMenuCommand.menu.menuRenderer.items);
 
     if (tr) {
@@ -446,7 +408,17 @@ function isUnwantedTransportButton(btn: unknown): boolean {
   if (/(?:REPORT|FEEDBACK)/i.test(String(btn.type || '')) || /(?:REPORT|FLAG|FEEDBACK)/i.test(iconType)) {
     return true;
   }
-  return Boolean(nav?.getReportVideoFormEndpoint || nav?.sendFeedbackEndpoint || nav?.feedbackEndpoint);
+  const label = readFormattedText(br?.text);
+  if (label && /\b(?:report|feedback)\b/i.test(label)) {
+    return true;
+  }
+  return Boolean(
+    nav?.getReportVideoFormEndpoint ||
+      nav?.getReportFormEndpoint ||
+      nav?.flagVideoEndpoint ||
+      nav?.sendFeedbackEndpoint ||
+      nav?.feedbackEndpoint
+  );
 }
 
 function injectChapters(r: Record<string, unknown>): void {
@@ -485,13 +457,12 @@ function transformPlayerOverlays(r: Record<string, unknown>): void {
     overlayRenderer.timelyActionRenderers = [];
   }
 
-  const manualSkipped = configRead('sponsorBlockManualSkips');
   const activeSegments = getActiveSponsorBlockSegments();
-  if (!Array.isArray(manualSkipped) || manualSkipped.length === 0 || activeSegments.length === 0) return;
+  if (activeSegments.length === 0) return;
 
   const target = overlayRenderer.timelyActionRenderers as unknown[];
   for (const segment of activeSegments) {
-    if (resolveSegmentActionType(segment) !== 'skip' || !manualSkipped.includes(segment.category)) continue;
+    if (resolveSegmentActionType(segment) !== 'skip' || !MANUAL_SKIP_CATEGORIES.includes(segment.category)) continue;
     target.push(
       timelyAction(
         t('sponsorblock.toasts.skip', { segment: t(`sponsorblock.segments.${segment.category}`) }),
@@ -512,7 +483,9 @@ function transformPlayerOverlays(r: Record<string, unknown>): void {
   }
 }
 
-function recordTransportLikeCount(r: Record<string, unknown>): void {
+const TRANSPORT_BUTTON_LIST_KEYS = ['promotedActions', 'actions', 'buttons', 'engagementActions'] as const;
+
+function getTransportControlsRenderer(r: Record<string, unknown>): Record<string, unknown> | undefined {
   const overlay = isRecord(r.playerOverlays) ? r.playerOverlays : undefined;
   const overlayRenderer = isRecord(overlay?.playerOverlayRenderer) ? overlay.playerOverlayRenderer : undefined;
   const tcWrapper = isRecord(r.transportControls)
@@ -520,7 +493,11 @@ function recordTransportLikeCount(r: Record<string, unknown>): void {
     : isRecord(overlayRenderer?.transportControls)
       ? overlayRenderer.transportControls
       : undefined;
-  const tc = isRecord(tcWrapper?.transportControlsRenderer) ? tcWrapper.transportControlsRenderer : undefined;
+  return isRecord(tcWrapper?.transportControlsRenderer) ? tcWrapper.transportControlsRenderer : undefined;
+}
+
+function recordTransportLikeCount(r: Record<string, unknown>): void {
+  const tc = getTransportControlsRenderer(r);
   if (!tc) return;
 
   const currentEp = isRecord(r.currentVideoEndpoint) ? r.currentVideoEndpoint : undefined;
@@ -535,7 +512,7 @@ function recordTransportLikeCount(r: Record<string, unknown>): void {
     getActiveWatchVideoId();
   if (!videoId) return;
 
-  for (const key of ['promotedActions', 'actions', 'buttons', 'engagementActions'] as const) {
+  for (const key of TRANSPORT_BUTTON_LIST_KEYS) {
     const list = tc[key];
     if (!Array.isArray(list)) continue;
     for (const item of list) {
@@ -561,19 +538,16 @@ function recordTransportLikeCount(r: Record<string, unknown>): void {
 }
 
 function transformTransportControls(r: Record<string, unknown>): void {
-  const transportControls = isRecord(r.transportControls) ? r.transportControls : undefined;
-  const tcRenderer = isRecord(transportControls?.transportControlsRenderer)
-    ? transportControls.transportControlsRenderer
-    : undefined;
+  const tcRenderer = getTransportControlsRenderer(r);
   if (!tcRenderer) return;
 
-  if (Array.isArray(tcRenderer.promotedActions)) {
-    tcRenderer.promotedActions = tcRenderer.promotedActions.filter((b) => !isUnwantedTransportButton(b));
+  for (const key of TRANSPORT_BUTTON_LIST_KEYS) {
+    const list = tcRenderer[key];
+    if (Array.isArray(list)) {
+      tcRenderer[key] = list.filter((b) => !isUnwantedTransportButton(b));
+    }
   }
-  if (Array.isArray(tcRenderer.actions)) {
-    tcRenderer.actions = tcRenderer.actions.filter((b) => !isUnwantedTransportButton(b));
-  }
-  if (!Array.isArray(tcRenderer.promotedActions) || !configRead('enableSponsorBlockHighlight')) return;
+  if (!Array.isArray(tcRenderer.promotedActions)) return;
 
   const highlight = getActiveSponsorBlockSegments().find((seg) => resolveSegmentActionType(seg) === 'poi');
   if (!highlight) return;
@@ -592,56 +566,11 @@ function transformTransportControls(r: Record<string, unknown>): void {
   });
 }
 
-function transformChannelHeaderButtons(
-  r: Record<string, unknown>,
-  tvSurface: Record<string, unknown> | undefined
-): void {
-  const surfaceHeader = isRecord(tvSurface?.header) ? tvSurface.header : undefined;
-  const channelHeader = isRecord(surfaceHeader?.channelHeaderRenderer)
-    ? surfaceHeader.channelHeaderRenderer
-    : undefined;
-  if (!channelHeader || !Array.isArray(channelHeader.buttons)) return;
-
-  const browseId = extractBrowseIdFromResponse(r);
-  const titleNode = isRecord(channelHeader.title) ? channelHeader.title : undefined;
-  const title = typeof titleNode?.simpleText === 'string' ? titleNode.simpleText : '';
-  const inSidebar = configRead('sidebarContentsOrder')?.some(
-    (orderItem) => (typeof orderItem === 'object' ? orderItem.browseId : orderItem) === browseId
-  );
-
-  channelHeader.buttons.push({
-    buttonRenderer: ButtonRenderer(
-      false,
-      inSidebar
-        ? t('settings.options.uiSettings.options.sortSidebarContents.removeFromSidebar')
-        : t('settings.options.uiSettings.options.sortSidebarContents.addToSidebar'),
-      inSidebar ? 'REMOVE' : 'ADD',
-      {
-        customAction: {
-          action: 'ADD_OR_REMOVE_CHANNEL_TO_SIDEBAR',
-          parameters: { browseId, title },
-        },
-      }
-    ),
-  });
-}
-
 const processedPayloads = new WeakSet<object>();
-
-function isSettingsPayload(r: Record<string, unknown>, items: readonly unknown[]): boolean {
-  if (items.some((entry) => isRecord(entry) && isRecord(entry.settingCategoryCollectionRenderer))) {
-    return true;
-  }
-  const title = isRecord(r.title) ? r.title : undefined;
-  return Boolean(
-    Array.isArray(title?.runs) && !items.some((entry) => isRecord(entry) && isRecord(entry.guideSectionRenderer))
-  );
-}
 
 function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefined): void {
   if (!Array.isArray(secondaryNav?.sections)) return;
   const seenTabs = new Set<string>();
-  const sortAlpha = Boolean(configRead('sortSubscriptionsByAlphabet'));
   for (const rawSection of secondaryNav.sections) {
     if (!isRecord(rawSection)) continue;
     const section = isRecord(rawSection.tvSecondaryNavSectionRenderer)
@@ -649,7 +578,7 @@ function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefin
       : undefined;
     if (!section || !Array.isArray(section.tabs)) continue;
 
-    section.tabs = dedupeAndSortSubscriptionTabs(section.tabs as SubscriptionTab[], seenTabs, sortAlpha);
+    section.tabs = dedupeAndSortSubscriptionTabs(section.tabs as SubscriptionTab[], seenTabs, true);
     for (const tab of section.tabs as SubscriptionTab[]) {
       const content = tab.tabRenderer?.content?.tvSurfaceContentRenderer?.content;
       if (content) processBrowseContentSync(content, true);
@@ -705,41 +634,29 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
 
   try {
     if (Array.isArray(r.items)) {
-      if (isSettingsPayload(r, r.items)) {
-        patchSettingsInPlace(r);
-        patchResolveCommand();
-        syncYttvPreviewAndJson();
-      } else {
-        transformGuideResponse(r);
-      }
+      transformGuideResponse(r);
     }
 
-    if ((r.adPlacements || r.playerAds || r.adSlots || r.entries) && configRead('enableAdBlock')) {
+    if (r.adPlacements || r.playerAds || r.adSlots || r.entries) {
       stripAdsFromPayload(r);
-    }
-
-    const signinReminderEnabled = configRead('enableSigninReminder');
-
-    if (r.paidContentOverlay && !configRead('enablePaidPromotionOverlay')) {
-      r.paidContentOverlay = null;
     }
 
     const streamingData = isRecord(r.streamingData) ? r.streamingData : undefined;
     if (Array.isArray(streamingData?.adaptiveFormats)) {
       streamingData.adaptiveFormats = filterStreamingFormats(
         streamingData.adaptiveFormats as AudioFormatEntry[],
-        configRead('preferredVideoCodec'),
-        Boolean(configRead('enableStableVolume'))
+        'any',
+        false
       );
     }
 
     disableAutoCaptionsInPayload(r);
 
-    if (r.endscreen && configRead('enableHideEndScreenCards')) {
+    if (r.endscreen) {
       r.endscreen = null;
     }
 
-    if (Array.isArray(r.messages) && !configRead('enableYouThereRenderer')) {
+    if (Array.isArray(r.messages)) {
       r.messages = r.messages.filter((msg) => !isRecord(msg) || !msg.youThereRenderer);
     }
 
@@ -815,11 +732,8 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
     const pivot = isRecord(watchNext?.pivot) ? watchNext.pivot : undefined;
     const pivotSectionList = isRecord(pivot?.sectionListRenderer) ? pivot.sectionListRenderer : undefined;
     if (pivotSectionList && Array.isArray(pivotSectionList.contents)) {
-      let pivotContents: unknown[] = pivotSectionList.contents;
-      if (!signinReminderEnabled) {
-        pivotContents = pivotContents.filter((elm) => !isRecord(elm) || !elm.alertWithActionsRenderer);
-        pivotSectionList.contents = pivotContents;
-      }
+      const pivotContents = pivotSectionList.contents.filter((elm) => !isRecord(elm) || !elm.alertWithActionsRenderer);
+      pivotSectionList.contents = pivotContents;
       processShelvesSync(pivotContents as FeedItem[], false);
     }
 
@@ -827,7 +741,6 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
     transformPlayerOverlays(r);
     recordTransportLikeCount(r);
     transformTransportControls(r);
-    transformChannelHeaderButtons(r, tvSurface);
   } catch (error) {
     console.error('[InnertubeInterceptor] Failed to process JSON payload:', error);
   }
@@ -881,10 +794,9 @@ function wrapJsonParseFn(origParse: typeof JSON.parse): typeof JSON.parse {
 
 function syncYttvPreviewAndJson(): void {
   if (typeof window === 'undefined' || !window._yttv) return;
-  const enablePreviews = Boolean(configRead('enablePreviews'));
   for (const entry of Object.values(window._yttv)) {
     if (entry instanceof Map && entry.has('ENABLE_PREVIEWS_WITH_SOUND')) {
-      entry.set('ENABLE_PREVIEWS_WITH_SOUND', enablePreviews);
+      entry.set('ENABLE_PREVIEWS_WITH_SOUND', true);
     }
     if (isObjectLike(entry) && isObjectLike(entry.JSON) && typeof entry.JSON.parse === 'function') {
       entry.JSON.parse = wrapJsonParseFn(entry.JSON.parse as typeof JSON.parse);
@@ -945,14 +857,8 @@ export function installInnertubeInterceptor(): void {
     };
   }
 
-  // 4. Sync feature flags & _yttv-scoped JSON.parse once YouTube TV runtime initializes, plus on toggle.
-  onConfigChange('enablePreviews', () => {
-    syncYttvPreviewAndJson();
-  });
-  whenYttvReady(() => {
-    syncYttvPreviewAndJson();
-    void whenConfigReady().then(syncYttvPreviewAndJson);
-  });
+  // 4. Sync feature flags & _yttv-scoped JSON.parse once YouTube TV runtime initializes.
+  whenYttvReady(syncYttvPreviewAndJson);
 
   installThumbnailErrorFallback();
 }

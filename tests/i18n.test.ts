@@ -6,7 +6,7 @@ import { EN_TRANSLATIONS, t } from '../mods/core/i18n.ts';
 describe('typed English i18n lookup', () => {
   test('resolves static translation keys', () => {
     assert.equal(t('common.back'), 'Back');
-    assert.equal(t('settings.ttSettings.title'), 'Custom Settings');
+    assert.equal(t('player.playbackSpeed.title'), 'Playback Speed');
     assert.equal(t('videoMenu.dontRecommendChannel'), "Don't Recommend Channel");
   });
 

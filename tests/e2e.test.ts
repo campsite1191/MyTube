@@ -1,19 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import vm from 'node:vm';
-
-const requireFromMods = createRequire(new URL('../mods/package.json', import.meta.url));
-const { IDBFactory, IDBKeyRange } = requireFromMods('fake-indexeddb') as {
-  IDBFactory: typeof globalThis.IDBFactory;
-  IDBKeyRange: typeof globalThis.IDBKeyRange;
-};
-const { createStore, get: idbGet } = requireFromMods('idb-keyval') as {
-  createStore: (dbName: string, storeName: string) => unknown;
-  get: <T>(key: string, customStore?: unknown) => Promise<T | undefined>;
-};
 
 const BUNDLE_PATH = path.resolve(import.meta.dirname, '..', 'mods', 'dist', 'userscript.js');
 
@@ -222,7 +211,6 @@ describe('End-to-end userscript bundle lifecycle', () => {
     const resolvedCommands: unknown[] = [];
     const executedActions: string[] = [];
     const pressureListeners: Array<() => void> = [];
-    const fakeIdb = new IDBFactory();
     const localStorageMap = new Map<string, string>([
       [
         'yt.leanback.default::recurring_actions',
@@ -425,8 +413,6 @@ describe('End-to-end userscript bundle lifecycle', () => {
       document: fakeDocument,
       location: fakeLocation,
       localStorage: fakeLocalStorage,
-      indexedDB: fakeIdb,
-      IDBKeyRange,
       fetch: mockFetch,
       Response: MockResponse,
       Map: globalThis.Map,
@@ -557,26 +543,8 @@ describe('End-to-end userscript bundle lifecycle', () => {
       updatedRecurring.data.data['startup-screen-account-selector-with-guest'].lastFired > Date.now() + 5 * 86400_000
     );
 
-    // 4. Test JSON.parse (Settings + Guide) and Response.prototype.json (Home Browse)
+    // 4. Test JSON.parse (Guide) and Response.prototype.json (Home Browse)
     const vmJson = sandbox.JSON as typeof JSON;
-    const settingsParsed = vmJson.parse(
-      JSON.stringify({
-        title: { runs: [{ text: 'Settings' }] },
-        items: [{ settingCategoryCollectionRenderer: { categoryId: 'ABOUT', items: [] } }],
-      })
-    ) as {
-      items: Array<{
-        settingCategoryCollectionRenderer: {
-          categoryId: string;
-          items?: Array<{ settingActionRenderer?: { serviceEndpoint?: unknown } }>;
-        };
-      }>;
-    };
-    assert.equal(settingsParsed.items[0]?.settingCategoryCollectionRenderer.categoryId, 'custom_settings_category');
-    const customSettingsEndpoint =
-      settingsParsed.items[0]?.settingCategoryCollectionRenderer.items?.[0]?.settingActionRenderer?.serviceEndpoint;
-    assert.ok(customSettingsEndpoint, 'Custom settings item exposes serviceEndpoint');
-
     const guideParsed = vmJson.parse(
       JSON.stringify({
         items: [
@@ -651,15 +619,10 @@ describe('End-to-end userscript bundle lifecycle', () => {
       'https://i.ytimg.com/vi/homeVid1/hq720.jpg'
     );
 
-    // 5. Test resolveCommand user actions (Custom Settings modal via injected SettingActionRenderer, toggle setting, speed menu, captions auto-translate)
+    // 5. Test resolveCommand user actions (late host patching via action key, speed menu, captions auto-translate)
     resolvedCommands.length = 0;
-    resolveHost.instance.resolveCommand(customSettingsEndpoint);
-    assert.equal(
-      (resolvedCommands.at(-1) as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId,
-      'tt-settings'
-    );
 
-    // Late-loaded _yttv command host (registered after startup) must still be patched via Settings parse / action key
+    // Late-loaded _yttv command host (registered after startup) must still be patched via action key
     const lateResolvedCommands: unknown[] = [];
     const lateHost = {
       instance: {
@@ -675,40 +638,14 @@ describe('End-to-end userscript bundle lifecycle', () => {
       key: 'Enter',
       keyCode: 13,
     });
-    lateHost.instance.resolveCommand(customSettingsEndpoint);
+    lateHost.instance.resolveCommand({ customAction: { action: 'TT_SPEED_SETTINGS_SHOW', parameters: [] } });
     assert.equal(
       (lateResolvedCommands.at(-1) as { openPopupAction?: { uniqueId?: string } })?.openPopupAction?.uniqueId,
-      'tt-settings'
+      'tt-speed'
     );
 
-    resolveHost.instance.resolveCommand({
-      setClientSettingEndpoint: {
-        settingDatas: [
-          { clientSettingEnum: { item: 'enableAdBlock' }, boolValue: false },
-          { clientSettingEnum: { item: 'sponsorBlockManualSkips' }, arrayValue: 'outro' },
-        ],
-      },
-    });
     // Non-string customAction must fall through cleanly rather than recursing infinitely.
     assert.doesNotThrow(() => resolveHost.instance.resolveCommand({ customAction: { action: 123 } }));
-    const prevIdb = (globalThis as { indexedDB?: unknown }).indexedDB;
-    (globalThis as { indexedDB?: unknown }).indexedDB = fakeIdb;
-    let storedConfig: { enableAdBlock?: boolean; sponsorBlockManualSkips?: string[] } | undefined;
-    try {
-      await waitFor(async () => {
-        storedConfig = await idbGet<{ enableAdBlock?: boolean; sponsorBlockManualSkips?: string[] }>(
-          'ytaf-configuration',
-          createStore('MyTubeDB', 'settings')
-        );
-        return (
-          storedConfig?.enableAdBlock === false && storedConfig?.sponsorBlockManualSkips?.includes('outro') === false
-        );
-      });
-    } finally {
-      (globalThis as { indexedDB?: unknown }).indexedDB = prevIdb;
-    }
-    assert.equal(storedConfig?.enableAdBlock, false);
-    assert.equal(storedConfig?.sponsorBlockManualSkips?.includes('outro'), false);
 
     const playbackCmd: {
       openPopupAction: {
@@ -723,10 +660,13 @@ describe('End-to-end userscript bundle lifecycle', () => {
                       overlayPanelItemListRenderer: {
                         items: Array<{
                           compactLinkRenderer: {
+                            title?: { simpleText?: string };
                             icon: { iconType: string };
-                            subtitle: { simpleText: string };
+                            subtitle?: { simpleText: string };
                             serviceEndpoint?: {
                               signalAction?: { customAction?: { action?: string } };
+                              getReportVideoFormEndpoint?: Record<string, unknown>;
+                              sendFeedbackEndpoint?: Record<string, unknown>;
                             };
                           };
                         }>;
@@ -753,8 +693,23 @@ describe('End-to-end userscript bundle lifecycle', () => {
                         items: [
                           {
                             compactLinkRenderer: {
+                              title: { simpleText: 'Playback speed' },
                               icon: { iconType: 'SPEEDOMETER' },
                               subtitle: { simpleText: 'Normal' },
+                            },
+                          },
+                          {
+                            compactLinkRenderer: {
+                              title: { simpleText: 'Report' },
+                              icon: { iconType: 'FLAG' },
+                              serviceEndpoint: { getReportVideoFormEndpoint: {} },
+                            },
+                          },
+                          {
+                            compactLinkRenderer: {
+                              title: { simpleText: 'Send feedback' },
+                              icon: { iconType: 'FEEDBACK' },
+                              serviceEndpoint: { sendFeedbackEndpoint: {} },
                             },
                           },
                         ],
@@ -769,10 +724,12 @@ describe('End-to-end userscript bundle lifecycle', () => {
       },
     };
     resolveHost.instance.resolveCommand(playbackCmd);
-    assert.equal(
+    const playbackItems =
       playbackCmd.openPopupAction.popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel
-        .overlayPanelRenderer.content.overlayPanelItemListRenderer.items[0]?.compactLinkRenderer.serviceEndpoint
-        ?.signalAction?.customAction?.action,
+        .overlayPanelRenderer.content.overlayPanelItemListRenderer.items;
+    assert.equal(playbackItems.length, 1);
+    assert.equal(
+      playbackItems[0]?.compactLinkRenderer.serviceEndpoint?.signalAction?.customAction?.action,
       'TT_SPEED_SETTINGS_SHOW'
     );
 

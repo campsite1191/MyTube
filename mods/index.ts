@@ -1,5 +1,4 @@
 import './core/trusted-types.ts';
-import { initConfig } from './core/config.ts';
 import { preconnectOrigins, schedulePostFirstPaint, waitForDomReady } from './core/idle-scheduler.ts';
 import './core/innertube-interceptor.ts';
 import { setupMemoryPressureListener } from './core/memory-pressure.ts';
@@ -12,16 +11,13 @@ import { installSponsorBlock } from './features/sponsorblock.ts';
 import { initClock } from './ui/clock.ts';
 
 setupMemoryPressureListener();
-
-const configReady = initConfig();
 installDisableWhosWatching();
 
 import './ui/ui.ts';
 import './ui/speed-ui.ts';
-import './ui/custom-ui.ts';
 import './ui/custom-guide-action.ts';
 
-void Promise.all([configReady, waitForDomReady()]).then(() => {
+void waitForDomReady().then(() => {
   schedulePostFirstPaint(() => {
     preconnectOrigins(['https://sponsor.ajay.app', 'https://returnyoutubedislikeapi.com']);
     initClock();

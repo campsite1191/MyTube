@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import { describe, test } from 'node:test';
-import { configWrite } from '../mods/core/config.ts';
-import { applyWhosWatchingPolicy, installDisableWhosWatching } from '../mods/features/disable-whos-watching.ts';
-
-const requireFromMods = createRequire(new URL('../mods/package.json', import.meta.url));
-const { IDBFactory } = requireFromMods('fake-indexeddb') as { IDBFactory: typeof globalThis.IDBFactory };
+import { installDisableWhosWatching, suppressWhosWatching } from '../mods/features/disable-whos-watching.ts';
 
 function installMockLocalStorage(initial: Record<string, string> = {}): {
   map: Map<string, string>;
@@ -32,12 +27,12 @@ function installMockLocalStorage(initial: Record<string, string> = {}): {
   };
 }
 
-describe('applyWhosWatchingPolicy', () => {
-  test('seeds recurring_actions synchronously on fresh install when disabled', (t) => {
+describe('suppressWhosWatching', () => {
+  test('seeds recurring_actions synchronously on fresh install', (t) => {
     const storage = installMockLocalStorage();
     t.after(storage.restore);
 
-    applyWhosWatchingPolicy(false, false);
+    suppressWhosWatching();
 
     const parsed = JSON.parse(storage.map.get('yt.leanback.default::recurring_actions') || '{}');
     const data = parsed?.data?.data;
@@ -63,7 +58,7 @@ describe('applyWhosWatchingPolicy', () => {
     });
     t.after(storage.restore);
 
-    applyWhosWatchingPolicy(false, false);
+    suppressWhosWatching();
 
     const parsed = JSON.parse(storage.map.get('yt.leanback.default::recurring_actions') || '{}');
     assert.equal(parsed.creation, 12345);
@@ -72,22 +67,16 @@ describe('applyWhosWatchingPolicy', () => {
     assert.ok(parsed.data.data.whos_watching_fullscreen_zero_accounts.lastFired > Date.now() + 6 * 86400_000);
   });
 
-  test('installDisableWhosWatching applies synchronously at startup without waiting for _yttv and reacts to config', async (t) => {
+  test('installDisableWhosWatching applies synchronously at startup without waiting for _yttv', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
-    const prevIndexedDb = globals.indexedDB;
     const storage = installMockLocalStorage();
     globals.window = {};
-    globals.indexedDB = new IDBFactory();
 
-    t.after(async () => {
-      await configWrite('permanentlyEnableWhoIsWatchingMenu', false);
-      await configWrite('enableWhoIsWatchingMenu', false);
+    t.after(() => {
       storage.restore();
       if (prevWindow === undefined) delete globals.window;
       else globals.window = prevWindow;
-      if (prevIndexedDb === undefined) delete globals.indexedDB;
-      else globals.indexedDB = prevIndexedDb;
     });
 
     installDisableWhosWatching();
@@ -96,20 +85,6 @@ describe('applyWhosWatchingPolicy', () => {
     const initialParsed = JSON.parse(storage.map.get('yt.leanback.default::recurring_actions') || '{}');
     assert.ok(
       initialParsed.data.data['startup-screen-account-selector-with-guest'].lastFired > Date.now() + 6 * 86400_000
-    );
-
-    // Enabling permanent mode rewinds timestamps 7 days into the past and disabling pushes them ahead again.
-    await configWrite('permanentlyEnableWhoIsWatchingMenu', true);
-    await configWrite('enableWhoIsWatchingMenu', true);
-    const enabledParsed = JSON.parse(storage.map.get('yt.leanback.default::recurring_actions') || '{}');
-    assert.ok(
-      enabledParsed.data.data['startup-screen-account-selector-with-guest'].lastFired < Date.now() - 6 * 86400_000
-    );
-
-    await configWrite('enableWhoIsWatchingMenu', false);
-    const disabledParsed = JSON.parse(storage.map.get('yt.leanback.default::recurring_actions') || '{}');
-    assert.ok(
-      disabledParsed.data.data['startup-screen-account-selector-with-guest'].lastFired > Date.now() + 6 * 86400_000
     );
   });
 });

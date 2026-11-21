@@ -1,6 +1,5 @@
 import pLimit from 'p-limit';
 import { createLruCache } from '../core/cache.ts';
-import { configRead } from '../core/config.ts';
 import type { FeedItem, FormattedText, Thumbnail } from '../types/innertube.ts';
 
 const HQ_THUMBNAIL_WIDTH = 1280;
@@ -141,7 +140,7 @@ export function upgradeFeedItemThumbnails(entry: FeedItem | null | undefined): b
   return true;
 }
 
-export function upgradeFeedThumbnails(items: FeedItem[], isEnabled: boolean = configRead('enableHqThumbnails')): void {
+export function upgradeFeedThumbnails(items: FeedItem[], isEnabled = true): void {
   if (!isEnabled || !Array.isArray(items)) return;
   for (const entry of items) {
     upgradeFeedItemThumbnails(entry);
@@ -290,8 +289,8 @@ function fetchBrandingForVideo(
 }
 
 export async function applyDeArrowBranding(items: FeedItem[], options: DeArrowOptions = {}): Promise<void> {
-  const enableDeArrow = options.enableDeArrow ?? configRead('enableDeArrow');
-  const enableDeArrowThumbnails = options.enableDeArrowThumbnails ?? configRead('enableDeArrowThumbnails');
+  const enableDeArrow = options.enableDeArrow ?? true;
+  const enableDeArrowThumbnails = options.enableDeArrowThumbnails ?? true;
   if (!enableDeArrow || !Array.isArray(items)) return;
 
   const requestController = activeNavigationController;

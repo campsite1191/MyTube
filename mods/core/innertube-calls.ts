@@ -2,18 +2,6 @@ import { isRecord } from '../utils/type-guards.ts';
 import resolveCommand from './resolve-command.ts';
 import { getCurrentIdentityService, getKabukiInnerTubeClient } from './yttv-bridge.ts';
 
-let guideCache: unknown | null = null;
-
-let currentAbortController: AbortController | null = null;
-
-function getAbortSignal(): AbortSignal {
-  if (currentAbortController) {
-    currentAbortController.abort();
-  }
-  currentAbortController = new AbortController();
-  return currentAbortController.signal;
-}
-
 interface NextNavParams {
   tileRenderer?: {
     contentId?: string;
@@ -95,24 +83,6 @@ export function requestNextAndNavigateChannel(params: NextNavParams): void {
       }
     });
   });
-}
-
-export async function getGuide(): Promise<unknown> {
-  const client = getKabukiInnerTubeClient();
-  if (!client) return null;
-
-  if (guideCache) return guideCache;
-
-  const { promise, resolve } = Promise.withResolvers<unknown>();
-  client.fetch({ path: '/youtubei/v1/guide', signal: getAbortSignal() }).subscribe(resolve, () => resolve(null));
-
-  const response = await promise;
-  if (response !== null) guideCache = response;
-  return response;
-}
-
-export function clearGuideCache(): void {
-  guideCache = null;
 }
 
 /**

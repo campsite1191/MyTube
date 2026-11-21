@@ -1,4 +1,3 @@
-import { configRead } from '../core/config.ts';
 import { isRecord } from '../utils/type-guards.ts';
 
 export interface SubtitleLanguageDescriptor {
@@ -112,8 +111,7 @@ function getAutoTranslateMenuItems(command: unknown): Record<string, unknown>[] 
   return Array.isArray(list?.items) ? (list.items as Record<string, unknown>[]) : null;
 }
 
-export function patchAutoTranslateCommand(command: unknown, enabled = configRead('enableShowUserLanguage')): boolean {
-  if (!enabled) return false;
+export function patchAutoTranslateCommand(command: unknown): boolean {
   const items = getAutoTranslateMenuItems(command);
   if (!items) return false;
 

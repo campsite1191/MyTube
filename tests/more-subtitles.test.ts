@@ -82,7 +82,7 @@ describe('filterAutoTranslateLanguages', () => {
 });
 
 describe('patchAutoTranslateCommand', () => {
-  test('filters auto-translate overlay popups only when enabled', () => {
+  test('filters auto-translate overlay popups unconditionally to English and Hindi', () => {
     const items: Record<string, unknown>[] = [
       { overlayMessageRenderer: { subtitle: { simpleText: 'Recommended languages' } } },
       createAutoTranslateLanguageOption('es', 'Spanish'),
@@ -90,15 +90,12 @@ describe('patchAutoTranslateCommand', () => {
     ];
     const popupCommand = createAutoTranslatePopup(items);
 
-    assert.equal(patchAutoTranslateCommand(popupCommand, false), false);
-    assert.equal(items.length, 3);
-
-    assert.equal(patchAutoTranslateCommand(popupCommand, true), true);
+    assert.equal(patchAutoTranslateCommand(popupCommand), true);
     assert.equal(items.length, 2);
     assert.equal(readOptionCode(items[0]), 'en');
     assert.equal(readOptionCode(items[1]), 'hi');
 
-    assert.equal(patchAutoTranslateCommand({ openPopupAction: { uniqueId: 'OTHER_POPUP' } }, true), false);
-    assert.equal(patchAutoTranslateCommand(null, true), false);
+    assert.equal(patchAutoTranslateCommand({ openPopupAction: { uniqueId: 'OTHER_POPUP' } }), false);
+    assert.equal(patchAutoTranslateCommand(null), false);
   });
 });

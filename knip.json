@@ -1,8 +1,7 @@
 {
   "workspaces": {
     "mods": {
-      "project": ["**/*.ts"],
-      "ignoreDependencies": ["fake-indexeddb"]
+      "project": ["**/*.ts"]
     },
     ".": {
       "entry": ["tests/*.test.ts"],

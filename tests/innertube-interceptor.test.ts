@@ -6,12 +6,10 @@ import type { AudioFormatEntry, SubscriptionTab } from '../mods/transforms/inner
 import {
   dedupeAndSortSubscriptionTabs,
   disableAutoCaptionsInPayload,
-  extractBrowseIdFromResponse,
   filterStreamingFormats,
   getAudioTier,
   stripAdsFromPayload,
 } from '../mods/transforms/innertube-player.ts';
-import { patchSettingsInPlace } from '../mods/ui/custom-yt-settings.ts';
 
 describe('getAudioTier and filterStreamingFormats', () => {
   test('ranks 7.1 > 5.1 > Voice Boost > Original Stereo > DRC', () => {
@@ -112,7 +110,7 @@ describe('disableAutoCaptionsInPayload', () => {
     disableAutoCaptionsInPayload(payload);
     const tl = (payload.captions as Record<string, Record<string, unknown>>).playerCaptionsTracklistRenderer;
     assert.equal(tl?.captionsInitialState, 'CAPTIONS_INITIAL_STATE_OFF_REQUIRED');
-    const track = (tl?.audioTracks as Array<Record<string, unknown>>)[0];
+    const track = (tl?.audioTracks as Array<Record<string, unknown>> | undefined)?.[0];
     assert.equal(track?.visibility, 'OFF');
     assert.equal(track?.hasDefaultTrack, false);
     assert.equal('defaultCaptionTrackIndex' in (track ?? {}), false);
@@ -133,21 +131,6 @@ describe('dedupeAndSortSubscriptionTabs', () => {
       result.map((t) => t.tabRenderer?.title),
       ['Selected', 'Alpha', 'Zeta']
     );
-  });
-});
-
-describe('extractBrowseIdFromResponse', () => {
-  test('extracts browse_id from responseContext.serviceTrackingParams', () => {
-    const payload = {
-      responseContext: {
-        serviceTrackingParams: [
-          { service: 'GUID', params: [{ key: 'foo', value: 'bar' }] },
-          { service: 'BROWSE', params: [{ key: 'browse_id', value: 'UC12345' }] },
-        ],
-      },
-    };
-    assert.equal(extractBrowseIdFromResponse(payload), 'UC12345');
-    assert.equal(extractBrowseIdFromResponse({}), null);
   });
 });
 
@@ -173,30 +156,7 @@ describe('stripAdsFromPayload', () => {
   });
 });
 
-describe('patchSettingsInPlace and TV browse/JSON.parse transforms', () => {
-  test('prepends custom settings category once for YouTube TV settings payloads', () => {
-    const payload = {
-      title: { runs: [{ text: 'Settings' }] },
-      items: [
-        {
-          settingCategoryCollectionRenderer: {
-            categoryId: 'GENERAL',
-            items: [],
-          },
-        },
-      ],
-    };
-
-    assert.equal(patchSettingsInPlace(payload), true);
-    assert.equal(payload.items.length, 2);
-    const inserted = (payload.items[0] as Record<string, Record<string, unknown>>).settingCategoryCollectionRenderer;
-    assert.equal(inserted?.categoryId, 'custom_settings_category');
-
-    // Calling again (or via transformInnertubeResponseSync) must not duplicate the entry.
-    assert.equal(patchSettingsInPlace(payload), false);
-    assert.equal(payload.items.length, 2);
-  });
-
+describe('TV browse/JSON.parse transforms', () => {
   test('transforms tvBrowseRenderer home feed shelves synchronously via JSON.parse', (t) => {
     const prevParse = JSON.parse;
     installInnertubeInterceptor();
@@ -303,12 +263,12 @@ describe('patchSettingsInPlace and TV browse/JSON.parse transforms', () => {
       'https://i.ytimg.com/vi/abc123/hq720.jpg'
     );
 
-    // Ensure settings payload parses cleanly through transformInnertubeResponseSync too.
+    // Ensure native settings payloads pass through untouched by transformInnertubeResponseSync.
     const settingsPayload = {
       title: { runs: [{ text: 'Settings' }] },
       items: [{ settingCategoryCollectionRenderer: { categoryId: 'ABOUT', items: [] } }],
     };
     transformInnertubeResponseSync(settingsPayload);
-    assert.equal(settingsPayload.items.length, 2);
+    assert.equal(settingsPayload.items.length, 1);
   });
 });

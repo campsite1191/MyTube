@@ -1,5 +1,4 @@
-import { configRead, onConfigChange } from '../core/config.ts';
-import { observeDom, scheduleAbortableTimeout } from '../core/lifecycle.ts';
+import { onAbort, onWatchSession, scheduleAbortableTimeout } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 
@@ -7,20 +6,12 @@ const CLOCK_ID = 'custom-clock';
 const MAX_VOD_DURATION_SEC = 86400 * 7;
 
 let tickAbort: AbortController | null = null;
-let watchAttrAbort: AbortController | null = null;
-let observedWatchDefault: Element | null = null;
 let stylesInstalled = false;
-let cachedWatchDefault: Element | null = null;
-let cachedVideo: HTMLVideoElement | null = null;
-let listenedVideo: HTMLVideoElement | null = null;
-let videoListenersAbort: AbortController | null = null;
-let clockListenersAbort: AbortController | null = null;
-let updateHandler: (() => void) | null = null;
 
 /**
  * Formats a `Date` into `HH:MM` or `HH:MM AM/PM`.
  */
-export function formatClockTime(date: Date, is12HourFormat: boolean): string {
+export function formatClockTime(date: Date, is12HourFormat = false): string {
   let hours = date.getHours();
   const suffix = is12HourFormat ? (hours >= 12 ? ' PM' : ' AM') : '';
   if (is12HourFormat) {
@@ -39,7 +30,7 @@ export function computeEndTimeLabel(
   durationSec: number,
   currentTimeSec: number,
   playbackRate: number,
-  is12HourFormat: boolean
+  is12HourFormat = false
 ): string {
   if (!Number.isFinite(durationSec) || durationSec <= 0 || durationSec >= MAX_VOD_DURATION_SEC) return '';
   const rate = playbackRate > 0 ? playbackRate : 1;
@@ -56,22 +47,9 @@ export function getNextClockDelayMs(now: Date): number {
   return Math.max(50, (60 - now.getSeconds()) * 1000 - now.getMilliseconds());
 }
 
-function resolveNativeTypography(): { fontFamily: string; color: string } {
-  const fallback = { fontFamily: "'Roboto', 'YouTube Sans', sans-serif", color: '#f1f1f1' };
-  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return fallback;
-  const host = document.querySelector('ytlr-app, ytlr-browse-page, ytlr-watch-default') ?? document.body;
-  if (!host) return fallback;
-  const computed = getComputedStyle(host);
-  return {
-    fontFamily: computed.fontFamily || fallback.fontFamily,
-    color: computed.color || fallback.color,
-  };
-}
-
 function installClockStyles(): void {
   if (stylesInstalled || typeof document === 'undefined') return;
   stylesInstalled = true;
-  const { fontFamily, color } = resolveNativeTypography();
   injectCss(`
       #${CLOCK_ID} {
         position: fixed;
@@ -79,8 +57,8 @@ function installClockStyles(): void {
         pointer-events: none;
         top: max(2%, env(safe-area-inset-top, 0px));
         right: max(4%, env(safe-area-inset-right, 0px));
-        font-family: ${fontFamily};
-        color: ${color};
+        font-family: 'YouTube Sans', 'Roboto', Arial, sans-serif;
+        color: #f1f1f1;
       }
       #${CLOCK_ID} .tt-clock-inner {
         display: flex;
@@ -102,35 +80,6 @@ function installClockStyles(): void {
     `);
 }
 
-function pickActiveVideo(): HTMLVideoElement | null {
-  if (
-    cachedVideo?.isConnected &&
-    !cachedVideo.ended &&
-    !cachedVideo.paused &&
-    cachedVideo.readyState > 0 &&
-    Number.isFinite(cachedVideo.duration) &&
-    cachedVideo.duration > 0 &&
-    cachedVideo.duration < MAX_VOD_DURATION_SEC
-  ) {
-    return cachedVideo;
-  }
-
-  let fallback: HTMLVideoElement | null = null;
-  const all = document.querySelectorAll('video');
-  for (let i = 0; i < all.length; i++) {
-    const el = all[i];
-    if (!el) continue;
-    const usable = Number.isFinite(el.duration) && el.duration > 0 && el.duration < MAX_VOD_DURATION_SEC;
-    if (usable && !el.paused && el.readyState > 0) {
-      cachedVideo = el;
-      return el;
-    }
-    if (usable && !fallback) fallback = el;
-  }
-  cachedVideo = fallback;
-  return fallback;
-}
-
 const VIDEO_SYNC_EVENTS = [
   'loadedmetadata',
   'play',
@@ -141,53 +90,17 @@ const VIDEO_SYNC_EVENTS = [
   'ended',
 ] as const;
 
-function syncVideoListeners(video: HTMLVideoElement | null, onUpdate: () => void): void {
-  if (listenedVideo === video) return;
-  videoListenersAbort?.abort();
-  videoListenersAbort = null;
-  listenedVideo = video;
-  if (!video) return;
-  videoListenersAbort = new AbortController();
-  const { signal } = videoListenersAbort;
-  for (const evt of VIDEO_SYNC_EVENTS) video.addEventListener(evt, onUpdate, { signal });
-}
-
-function syncWatchAttrObserver(watchEl: Element | null, onUpdate: () => void): void {
-  if (!watchEl || observedWatchDefault === watchEl) return;
-  watchAttrAbort?.abort();
-  watchAttrAbort = new AbortController();
-  observedWatchDefault = watchEl;
-  observeDom(watchEl, onUpdate, { attributes: true, attributeFilter: ['hybridnavfocusable'] }, watchAttrAbort.signal);
-}
-
 function clearScheduledTick(): void {
   tickAbort?.abort();
   tickAbort = null;
 }
 
-function cleanupClockListeners(): void {
-  clearScheduledTick();
-  watchAttrAbort?.abort();
-  watchAttrAbort = null;
-  observedWatchDefault = null;
-  videoListenersAbort?.abort();
-  videoListenersAbort = null;
-  listenedVideo = null;
-  clockListenersAbort?.abort();
-  clockListenersAbort = null;
-  updateHandler = null;
-}
+let clockInitialized = false;
 
-function toggleClock(enabled: boolean): void {
-  if (typeof document === 'undefined') return;
-  const existingClock = document.getElementById(CLOCK_ID);
-  if (enabled && existingClock) return;
-
-  cleanupClockListeners();
-  if (!enabled) {
-    existingClock?.remove();
-    return;
-  }
+/** Initializes the always-on 24h overlay clock and Watch end-time projection via `onWatchSession`. */
+export function initClock(): void {
+  if (clockInitialized || typeof document === 'undefined' || document.getElementById(CLOCK_ID)) return;
+  clockInitialized = true;
 
   installClockStyles();
 
@@ -208,44 +121,21 @@ function toggleClock(enabled: boolean): void {
   if (!host) return;
   host.appendChild(clock);
 
+  let activeVideo: HTMLVideoElement | null = null;
+  let inWatchSession = false;
+
   const renderAndSchedule = (): void => {
     clearScheduledTick();
     if (!clock.isConnected) return;
 
     const now = new Date();
-    const is12HourFormat = configRead('isClock12HourFormat');
-    const shouldHideWhenVideoPlaying = configRead('clockHideWhenVideoPlaying');
-
-    if (!cachedWatchDefault || !cachedWatchDefault.isConnected) {
-      cachedWatchDefault = document.querySelector('ytlr-watch-default');
-      syncWatchAttrObserver(cachedWatchDefault, renderAndSchedule);
-    }
-    const isWatching = cachedWatchDefault?.getAttribute('hybridnavfocusable') === 'true';
-
-    if (shouldHideWhenVideoPlaying) {
-      const nextDisplay = isWatching ? 'none' : 'block';
-      if (clock.style.display !== nextDisplay) clock.style.display = nextDisplay;
-      if (isWatching) return;
-    } else if (clock.style.display !== 'block') {
-      clock.style.display = 'block';
-    }
-
-    const nextClock = formatClockTime(now, is12HourFormat);
+    const nextClock = formatClockTime(now);
     if (clockTimeEl.textContent !== nextClock) clockTimeEl.textContent = nextClock;
 
-    const onWatchPage = location.hash.includes('watch') || location.hash.includes('v=');
-    let nextEnd = '';
-    if (onWatchPage) {
-      const video = pickActiveVideo() ?? document.querySelector('video');
-      if (video && video !== listenedVideo) {
-        syncVideoListeners(video, renderAndSchedule);
-      }
-      if (video && !video.ended) {
-        nextEnd = computeEndTimeLabel(now, video.duration, video.currentTime, video.playbackRate, is12HourFormat);
-      }
-    } else if (listenedVideo) {
-      syncVideoListeners(null, renderAndSchedule);
-    }
+    const nextEnd =
+      inWatchSession && activeVideo && !activeVideo.ended
+        ? computeEndTimeLabel(now, activeVideo.duration, activeVideo.currentTime, activeVideo.playbackRate)
+        : '';
 
     const nextEndDisplay = nextEnd ? 'block' : 'none';
     if (endTimeEl.style.display !== nextEndDisplay) endTimeEl.style.display = nextEndDisplay;
@@ -257,27 +147,23 @@ function toggleClock(enabled: boolean): void {
     }
   };
 
-  updateHandler = renderAndSchedule;
-  clockListenersAbort = new AbortController();
-  const { signal } = clockListenersAbort;
-  window.addEventListener('hashchange', renderAndSchedule, { signal });
-  document.addEventListener('visibilitychange', renderAndSchedule, { signal });
-  onVideo((videoEl) => {
-    syncVideoListeners(videoEl, renderAndSchedule);
-    renderAndSchedule();
+  document.addEventListener('visibilitychange', renderAndSchedule);
+  onWatchSession((_videoId, signal) => {
+    inWatchSession = true;
+    onVideo((video) => {
+      if (signal.aborted) return;
+      activeVideo = video;
+      for (const evt of VIDEO_SYNC_EVENTS) {
+        video.addEventListener(evt, renderAndSchedule, { signal });
+      }
+      renderAndSchedule();
+    });
+    onAbort(signal, () => {
+      inWatchSession = false;
+      activeVideo = null;
+      renderAndSchedule();
+    });
   });
+
   renderAndSchedule();
-}
-
-let clockInitialized = false;
-
-/** Initializes the optional overlay clock and binds config change listeners once. */
-export function initClock(): void {
-  if (clockInitialized || typeof document === 'undefined') return;
-  clockInitialized = true;
-
-  onConfigChange('enableClock', (value) => toggleClock(Boolean(value)));
-  onConfigChange(['isClock12HourFormat', 'clockHideWhenVideoPlaying'], () => updateHandler?.());
-
-  toggleClock(configRead('enableClock'));
 }

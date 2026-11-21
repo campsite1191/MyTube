@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { configChangeEmitter, configRead, configWrite, initConfig } from '../mods/core/config.ts';
 import { patchResolveCommand } from '../mods/core/resolve-command.ts';
 import { injectCss } from '../mods/core/styles.ts';
 import { whenYttvReady } from '../mods/core/yttv-bridge.ts';
@@ -9,36 +8,6 @@ import { applyDeArrowBranding, clearDeArrowCache } from '../mods/transforms/thum
 import { transformGuideResponse } from '../mods/ui/custom-guide-action.ts';
 
 describe('regression fixes', () => {
-  test('initConfig and configWrite recover cleanly when IndexedDB is unavailable', async () => {
-    const warnings: unknown[][] = [];
-    const origWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args);
-    };
-
-    try {
-      await assert.doesNotReject(() => initConfig());
-      assert.equal(configRead('enableAdBlock'), true);
-
-      let eventSeen = false;
-      const listener = () => {
-        eventSeen = true;
-      };
-      configChangeEmitter.addEventListener('configChange', listener);
-      try {
-        await assert.doesNotReject(() => configWrite('enableAdBlock', false));
-        assert.equal(configRead('enableAdBlock'), false);
-        assert.equal(eventSeen, true);
-      } finally {
-        configChangeEmitter.removeEventListener('configChange', listener);
-        await configWrite('enableAdBlock', true);
-      }
-      assert.ok(warnings.length >= 1);
-    } finally {
-      console.warn = origWarn;
-    }
-  });
-
   test('transformGuideResponse orders and filters sections synchronously even when sidebar order grows', () => {
     const payload = {
       items: [
@@ -221,23 +190,55 @@ describe('regression fixes', () => {
       (fakeWindow._yttv as Record<string, unknown>).lateRouter = lateHost;
       patchResolveCommand();
 
-      // Replaced and late resolveCommand functions must intercept TT_SETTINGS_SHOW cleanly.
-      firstHost.instance.resolveCommand({ customAction: { action: 'TT_SETTINGS_SHOW', parameters: [] } });
+      // Replaced and late resolveCommand functions must intercept TT_SPEED_SETTINGS_SHOW cleanly.
+      firstHost.instance.resolveCommand({ customAction: { action: 'TT_SPEED_SETTINGS_SHOW', parameters: [] } });
       assert.equal(secondCalls.length, 1);
       assert.equal(
         (secondCalls[0] as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId,
-        'tt-settings'
+        'tt-speed'
       );
 
       lateHost.instance.resolveCommand({
-        signalAction: { customAction: { action: 'TT_SETTINGS_SHOW', parameters: [] } },
+        signalAction: { customAction: { action: 'TT_SPEED_SETTINGS_SHOW', parameters: [] } },
       });
       assert.equal(lateCalls.length, 1);
-      assert.equal(
-        (lateCalls[0] as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId,
-        'tt-settings'
-      );
+      assert.equal((lateCalls[0] as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId, 'tt-speed');
       assert.equal(firstCalls.length, 0);
+
+      // Player settings popups strip Report and Feedback entries regardless of icon/endpoint/title variation.
+      const settingsMenuItems = [
+        { compactLinkRenderer: { title: { runs: [{ text: 'Quality' }] }, icon: { iconType: 'SETTINGS' } } },
+        { compactLinkRenderer: { title: { simpleText: 'Report video' }, icon: { iconType: 'OUTLINED_FLAG' } } },
+        { compactLinkRenderer: { title: { simpleText: 'Bug' }, serviceEndpoint: { sendFeedbackEndpoint: {} } } },
+      ];
+      lateHost.instance.resolveCommand({
+        openPopupAction: {
+          uniqueId: 'playback-settings',
+          popup: {
+            overlaySectionRenderer: {
+              overlay: {
+                overlayTwoPanelRenderer: {
+                  actionPanel: {
+                    overlayPanelRenderer: {
+                      content: {
+                        overlayPanelItemListRenderer: {
+                          items: settingsMenuItems,
+                          selectedIndex: 2,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      assert.equal(settingsMenuItems.length, 1);
+      assert.equal(
+        (settingsMenuItems[0]?.compactLinkRenderer.title as { runs?: Array<{ text?: string }> }).runs?.[0]?.text,
+        'Quality'
+      );
     } finally {
       (globalThis as { window?: unknown }).window = origWindow;
       (globalThis as { document?: unknown }).document = origDoc;

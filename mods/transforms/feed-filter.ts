@@ -1,7 +1,9 @@
-import { configRead } from '../core/config.ts';
 import type { FeedItem, FormattedText, HiddenChannel } from '../types/innertube.ts';
 import { compactInPlace } from '../utils/feed-helpers.ts';
 import { isRecord } from '../utils/type-guards.ts';
+
+const EMPTY_HIDDEN_CHANNELS: readonly HiddenChannel[] = [];
+const EMPTY_HIDDEN_PAGES: readonly string[] = [];
 
 interface ComputedItemMetadata {
   channelInfo?: HiddenChannel;
@@ -287,9 +289,9 @@ export function isShortsItem(item: FeedItem | null | undefined): boolean {
 
   if (
     item.shelfRenderer?.tvhtml5ShelfRendererType === 'TVHTML5_SHELF_RENDERER_TYPE_SHORTS' ||
-    Boolean(item.reelShelfRenderer) ||
-    Boolean(item.shortsLockupViewModel) ||
-    Boolean(target.shortsLockupViewModel)
+    item.reelShelfRenderer ||
+    item.shortsLockupViewModel ||
+    target.shortsLockupViewModel
   ) {
     return true;
   }
@@ -427,7 +429,7 @@ export function hasPaidOfferEndpoint(item: FeedItem | null | undefined): boolean
 }
 
 export function isChannelHidden(item: FeedItem | null | undefined, hiddenChannels?: readonly HiddenChannel[]): boolean {
-  const configuredHidden = hiddenChannels ?? configRead('hiddenChannels');
+  const configuredHidden = hiddenChannels ?? EMPTY_HIDDEN_CHANNELS;
   if (!Array.isArray(configuredHidden) || configuredHidden.length === 0) return false;
 
   const target = unwrapFeedItem(item);
@@ -517,10 +519,10 @@ export function resolveFeedPageName(locationHash?: string): string {
 }
 
 export function shouldHideWatchedItem(item: FeedItem | null | undefined, options: FeedFilterOptions = {}): boolean {
-  const enabled = options.enableHideWatchedVideos ?? configRead('enableHideWatchedVideos');
+  const enabled = options.enableHideWatchedVideos ?? false;
   if (!enabled) return false;
 
-  const pages = options.hideWatchedVideosPages ?? configRead('hideWatchedVideosPages');
+  const pages = options.hideWatchedVideosPages ?? EMPTY_HIDDEN_PAGES;
   if (!Array.isArray(pages) || pages.length === 0) return false;
 
   const pageName = resolveFeedPageName(options.locationHash);
@@ -529,7 +531,7 @@ export function shouldHideWatchedItem(item: FeedItem | null | undefined, options
   const percentWatched = extractWatchedPercent(item);
   if (percentWatched === null) return false;
 
-  const threshold = options.hideWatchedVideosThreshold ?? configRead('hideWatchedVideosThreshold');
+  const threshold = options.hideWatchedVideosThreshold ?? 80;
   if (threshold >= 100) {
     return percentWatched >= 100;
   }
@@ -556,9 +558,9 @@ export function shouldHideFeedItem(item: FeedItem | null | undefined, options: F
   const target = unwrapFeedItem(item);
   if (!target) return false;
 
-  const enableAdBlock = options.enableAdBlock ?? configRead('enableAdBlock');
-  const enableSigninReminder = options.enableSigninReminder ?? configRead('enableSigninReminder');
-  const enableShorts = options.enableShorts ?? configRead('enableShorts');
+  const enableAdBlock = options.enableAdBlock ?? true;
+  const enableSigninReminder = options.enableSigninReminder ?? false;
+  const enableShorts = options.enableShorts ?? true;
 
   if (enableAdBlock && (item.adSlotRenderer || target.adSlotRenderer)) return true;
   if (!enableSigninReminder && (item.feedNudgeRenderer || target.feedNudgeRenderer)) return true;
