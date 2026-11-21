@@ -697,11 +697,11 @@ describe('End-to-end userscript bundle lifecycle', () => {
                       overlayPanelItemListRenderer: {
                         items: Array<{
                           compactLinkRenderer: {
-                            title?: { simpleText?: string };
+                            title?: { simpleText?: string; runs?: Array<{ text?: string }> };
                             icon: { iconType: string };
                             subtitle?: { simpleText: string };
                             serviceEndpoint?: {
-                              signalAction?: { customAction?: { action?: string } };
+                              signalAction?: { signal?: string; customAction?: { action?: string } };
                               getReportVideoFormEndpoint?: Record<string, unknown>;
                               sendFeedbackEndpoint?: Record<string, unknown>;
                             };
@@ -749,6 +749,13 @@ describe('End-to-end userscript bundle lifecycle', () => {
                               serviceEndpoint: { sendFeedbackEndpoint: {} },
                             },
                           },
+                          {
+                            compactLinkRenderer: {
+                              title: { runs: [{ text: 'Stats for nerds' }] },
+                              icon: { iconType: 'BUG_REPORT' },
+                              serviceEndpoint: { signalAction: { signal: 'TOGGLE_VIDEO_INFO' } },
+                            },
+                          },
                         ],
                       },
                     },
@@ -764,11 +771,13 @@ describe('End-to-end userscript bundle lifecycle', () => {
     const playbackItems =
       playbackCmd.openPopupAction.popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel
         .overlayPanelRenderer.content.overlayPanelItemListRenderer.items;
-    assert.equal(playbackItems.length, 1);
+    assert.equal(playbackItems.length, 2);
+    assert.equal(playbackItems[0]?.compactLinkRenderer.subtitle?.simpleText, '1x');
     assert.equal(
       playbackItems[0]?.compactLinkRenderer.serviceEndpoint?.signalAction?.customAction?.action,
       'TT_SPEED_SETTINGS_SHOW'
     );
+    assert.equal(playbackItems[1]?.compactLinkRenderer.icon?.iconType, 'BUG_REPORT');
 
     // 6. Navigate to watch page & mount player DOM -> verify Clock End Time, Remaining Time, RYD badges, SponsorBlock, Rewind
     const watchDefault = createMockElement('ytlr-watch-default', docRef);

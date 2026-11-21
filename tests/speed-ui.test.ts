@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { installSpeedControls, setPlaybackSpeed, speedSettings } from '../mods/ui/speed-ui.ts';
+import {
+  formatPlaybackSpeedLabel,
+  getActivePlaybackSpeed,
+  setPlaybackSpeed,
+  speedSettings,
+} from '../mods/ui/speed-ui.ts';
 
 interface ModalItem {
   compactLinkRenderer?: {
@@ -116,45 +121,35 @@ describe('speed-ui', () => {
     );
   });
 
-  test('installSpeedControls applies playback speed on Watch sessions and ignores Home previews', (t) => {
+  test('getActivePlaybackSpeed and formatPlaybackSpeedLabel reflect the active video without carryover', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
 
-    const winListeners = new Map<string, Set<() => void>>();
-    const videoListeners = new Map<string, Set<() => void>>();
     let playbackRateValue = 1;
-    let rateWrites = 0;
     const fakeVideo = {
       get playbackRate() {
         return playbackRateValue;
       },
       set playbackRate(val: number) {
-        rateWrites++;
         playbackRateValue = val;
-      },
-      addEventListener: (type: string, cb: () => void, options?: { signal?: AbortSignal }) => {
-        if (options?.signal?.aborted) return;
-        const set = videoListeners.get(type) ?? new Set();
-        set.add(cb);
-        videoListeners.set(type, set);
-        options?.signal?.addEventListener('abort', () => set.delete(cb), { once: true });
-      },
-      removeEventListener: (type: string, cb: () => void) => {
-        videoListeners.get(type)?.delete(cb);
       },
     };
 
-    const fakeLocation = { hash: '#/', search: '' };
+    const resolvedCmds: unknown[] = [];
     globals.window = {
-      location: fakeLocation,
-      addEventListener: (type: string, cb: () => void) => {
-        const set = winListeners.get(type) ?? new Set();
-        set.add(cb);
-        winListeners.set(type, set);
-      },
-      removeEventListener: (type: string, cb: () => void) => {
-        winListeners.get(type)?.delete(cb);
+      location: { hash: '#/watch?v=speedVid1', search: '' },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      _yttv: {
+        router: {
+          instance: {
+            resolveCommand: (cmd: unknown) => {
+              resolvedCmds.push(cmd);
+              return true;
+            },
+          },
+        },
       },
     };
     globals.document = {
@@ -162,41 +157,57 @@ describe('speed-ui', () => {
     };
 
     t.after(() => {
-      setPlaybackSpeed(1);
-      fakeLocation.hash = '#/';
-      for (const cb of winListeners.get('hashchange') ?? []) cb();
       if (prevWindow === undefined) delete globals.window;
       else globals.window = prevWindow;
       if (prevDocument === undefined) delete globals.document;
       else globals.document = prevDocument;
     });
 
-    setPlaybackSpeed(1.5);
-    assert.equal(playbackRateValue, 1.5);
+    assert.equal(getActivePlaybackSpeed(), 1);
+    assert.equal(formatPlaybackSpeedLabel(), '1x');
 
-    installSpeedControls();
-    // Calling a second time is a no-op
-    installSpeedControls();
+    setPlaybackSpeed(1.25);
+    assert.equal(playbackRateValue, 1.25);
+    assert.equal(getActivePlaybackSpeed(), 1.25);
+    assert.equal(formatPlaybackSpeedLabel(), '1.25x');
 
-    // Still on Home (#/) -> no listeners bound to video, preview resetting to 1x stays untouched
-    assert.equal(videoListeners.get('canplay')?.size ?? 0, 0);
+    speedSettings();
+    const lastCmd = resolvedCmds.at(-1) as {
+      openPopupAction?: {
+        popup?: {
+          overlaySectionRenderer?: {
+            overlay?: {
+              overlayTwoPanelRenderer?: {
+                actionPanel?: {
+                  overlayPanelRenderer?: {
+                    content?: {
+                      overlayPanelItemListRenderer?: {
+                        selectedIndex?: number;
+                      };
+                    };
+                  };
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+    // 0.25x(0), 0.5x(1), 0.75x(2), 1x(3), 1.25x(4)
+    assert.equal(
+      lastCmd.openPopupAction?.popup?.overlaySectionRenderer?.overlay?.overlayTwoPanelRenderer?.actionPanel
+        ?.overlayPanelRenderer?.content?.overlayPanelItemListRenderer?.selectedIndex,
+      4
+    );
+
+    // Simulate switching to a new video that resets playbackRate to 1 — no carryover
     playbackRateValue = 1;
-    rateWrites = 0;
+    assert.equal(getActivePlaybackSpeed(), 1);
+    assert.equal(formatPlaybackSpeedLabel(), '1x');
 
-    // Entering Watch binds loadedmetadata & canplay and restores 1.5x
-    fakeLocation.hash = '#/watch?v=speedVid1';
-    for (const cb of winListeners.get('hashchange') ?? []) cb();
-    assert.equal(playbackRateValue, 1.5);
-    assert.equal(rateWrites, 1);
-    assert.equal(videoListeners.get('canplay')?.size, 1);
-
-    // Repeating canplay when already 1.5x performs zero redundant writes
-    for (const cb of videoListeners.get('canplay') ?? []) cb();
-    assert.equal(rateWrites, 1);
-
-    // Leaving Watch cleans up listeners automatically via AbortSignal
-    fakeLocation.hash = '#/';
-    for (const cb of winListeners.get('hashchange') ?? []) cb();
-    assert.equal(videoListeners.get('canplay')?.size, 0);
+    // Missing video element falls back cleanly to 1x
+    globals.document = { querySelector: () => null };
+    assert.equal(getActivePlaybackSpeed(), 1);
+    assert.equal(formatPlaybackSpeedLabel(), '1x');
   });
 });

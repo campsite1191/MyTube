@@ -1,7 +1,7 @@
 import { patchAutoTranslateCommand } from '../features/more-subtitles.ts';
 import { readFormattedText, walkCommands } from '../transforms/feed-filter.ts';
 import type { FormattedText, InnertubeCommand } from '../types/innertube.ts';
-import { setPlaybackSpeed, speedSettings } from '../ui/speed-ui.ts';
+import { formatPlaybackSpeedLabel, setPlaybackSpeed, speedSettings } from '../ui/speed-ui.ts';
 import { buttonItem, overlayPanelItemListRenderer, showModal } from '../ui/yt-ui.ts';
 import { compactInPlace } from '../utils/feed-helpers.ts';
 import { isObjectLike, isRecord, readRecordPath } from '../utils/type-guards.ts';
@@ -48,6 +48,7 @@ function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
   return false;
 }
 
+const NON_REPORT_ICONS = new Set(['BUG_REPORT']);
 const REPORT_OR_FEEDBACK_ICON_RE = /(?:REPORT|FLAG|FEEDBACK)/i;
 const REPORT_OR_FEEDBACK_TEXT_RE = /\b(?:report|feedback)\b/i;
 const POPUP_ITEM_RENDERER_KEYS = [
@@ -66,7 +67,7 @@ function unwrapPopupItemRenderer(item: unknown): Record<string, unknown> | undef
 }
 
 export function isReportOrFeedbackIcon(iconType: unknown): boolean {
-  return typeof iconType === 'string' && REPORT_OR_FEEDBACK_ICON_RE.test(iconType);
+  return typeof iconType === 'string' && !NON_REPORT_ICONS.has(iconType) && REPORT_OR_FEEDBACK_ICON_RE.test(iconType);
 }
 
 export function isReportOrFeedbackText(text: unknown): boolean {
@@ -153,9 +154,7 @@ function patchPlaybackSettingsPopup(cmd: Record<string, unknown>, isPrimaryPlayb
     const icon = isRecord(clr.icon) ? clr.icon : undefined;
     const iconType = icon?.iconType;
     if (iconType === 'SLOW_MOTION_VIDEO' || iconType === 'SPEEDOMETER') {
-      if (isRecord(clr.subtitle)) {
-        clr.subtitle.simpleText = t('player.withCustomSpeed');
-      }
+      clr.subtitle = { simpleText: formatPlaybackSpeedLabel() };
       clr.serviceEndpoint = {
         clickTrackingParams: 'null',
         signalAction: {

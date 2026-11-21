@@ -220,11 +220,25 @@ describe('regression fixes', () => {
       assert.equal((lateCalls[0] as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId, 'tt-speed');
       assert.equal(firstCalls.length, 0);
 
-      // Player settings popups strip Report and Feedback entries regardless of icon/endpoint/title variation.
+      // Player settings popups strip Report and Feedback entries while preserving Stats for nerds and active speed label.
       const settingsMenuItems = [
         { compactLinkRenderer: { title: { runs: [{ text: 'Quality' }] }, icon: { iconType: 'SETTINGS' } } },
+        {
+          compactLinkRenderer: {
+            title: { runs: [{ text: 'Speed' }] },
+            icon: { iconType: 'SPEEDOMETER' },
+            subtitle: { simpleText: 'Normal' },
+          },
+        },
         { compactLinkRenderer: { title: { simpleText: 'Report video' }, icon: { iconType: 'OUTLINED_FLAG' } } },
         { compactLinkRenderer: { title: { simpleText: 'Bug' }, serviceEndpoint: { sendFeedbackEndpoint: {} } } },
+        {
+          compactLinkRenderer: {
+            title: { runs: [{ text: 'Stats for nerds' }] },
+            icon: { iconType: 'BUG_REPORT' },
+            serviceEndpoint: { signalAction: { signal: 'TOGGLE_VIDEO_INFO' } },
+          },
+        },
       ];
       lateHost.instance.resolveCommand({
         openPopupAction: {
@@ -238,7 +252,7 @@ describe('regression fixes', () => {
                       content: {
                         overlayPanelItemListRenderer: {
                           items: settingsMenuItems,
-                          selectedIndex: 2,
+                          selectedIndex: 4,
                         },
                       },
                     },
@@ -249,10 +263,15 @@ describe('regression fixes', () => {
           },
         },
       });
-      assert.equal(settingsMenuItems.length, 1);
+      assert.equal(settingsMenuItems.length, 3);
       assert.equal(
         (settingsMenuItems[0]?.compactLinkRenderer.title as { runs?: Array<{ text?: string }> }).runs?.[0]?.text,
         'Quality'
+      );
+      assert.equal(settingsMenuItems[1]?.compactLinkRenderer.subtitle?.simpleText, '1x');
+      assert.equal(
+        (settingsMenuItems[2]?.compactLinkRenderer.title as { runs?: Array<{ text?: string }> }).runs?.[0]?.text,
+        'Stats for nerds'
       );
     } finally {
       (globalThis as { window?: unknown }).window = origWindow;

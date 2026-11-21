@@ -8,7 +8,6 @@ export const EN_TRANSLATIONS = {
   'player.chapters.title': 'Chapters',
   'player.playbackSpeed.fixStuttering': 'Fix Stuttering (1.0001x)',
   'player.playbackSpeed.title': 'Playback Speed',
-  'player.withCustomSpeed': 'Custom Speed',
   'sponsorblock.segments.filler': 'Tangents',
   'sponsorblock.segments.interaction': 'Interaction Reminder',
   'sponsorblock.segments.intro': 'Intro',

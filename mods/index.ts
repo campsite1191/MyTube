@@ -11,7 +11,6 @@ import { installSponsorBlock } from './features/sponsorblock.ts';
 import { installTransportControlsStyles } from './transforms/player-overlays.ts';
 import { setupMemoryPressureListener } from './transforms/thumbnails.ts';
 import { initClock } from './ui/clock.ts';
-import { installSpeedControls } from './ui/speed-ui.ts';
 import './ui/ui.ts';
 
 setupMemoryPressureListener();
@@ -23,7 +22,6 @@ void waitForDomReady().then(() => {
     preconnectOrigins(['https://sponsor.ajay.app', 'https://returnyoutubedislikeapi.com']);
     initClock();
     installPreferredVideoQuality();
-    installSpeedControls();
     installSponsorBlock();
     installRemainingTime();
     installReturnYouTubeDislike();
