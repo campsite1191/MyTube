@@ -1,7 +1,6 @@
 import { configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
 import { whenYttvReady } from '../core/yttv-bridge.ts';
-import { applyDislikeCountToActions } from '../features/return-youtube-dislike.ts';
 import { extractPlayerActionMethodNames } from '../utils/ast-parser.ts';
 import { isRecord } from '../utils/type-guards.ts';
 import { ButtonRenderer } from './yt-ui.ts';
@@ -92,7 +91,7 @@ function applyPatches(): void {
           });
         }
 
-        return applyDislikeCountToActions(filtered);
+        return filtered;
       };
     }
 

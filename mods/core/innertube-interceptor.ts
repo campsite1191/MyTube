@@ -1,5 +1,4 @@
 import { t } from '../core/i18n.ts';
-import { processRydResponse } from '../features/return-youtube-dislike.ts';
 import { getActiveSponsorBlockSegments, resolveSegmentActionType } from '../features/sponsorblock.ts';
 import { addPreviews } from '../interceptors/previews.ts';
 import { buildChaptersMarkerEntity } from '../transforms/chapters.ts';
@@ -25,7 +24,7 @@ import {
   installThumbnailErrorFallback,
   upgradeFeedThumbnails,
 } from '../transforms/thumbnails.ts';
-import type { FeedItem, InnertubeCommand, PlayerResponse, Thumbnail, WatchEndpoint } from '../types/innertube.ts';
+import type { FeedItem, InnertubeCommand, Thumbnail, WatchEndpoint } from '../types/innertube.ts';
 import { transformGuideResponse } from '../ui/custom-guide-action.ts';
 import { patchSettingsInPlace } from '../ui/custom-yt-settings.ts';
 import { ButtonRenderer, longPressData, MenuServiceItemRenderer, timelyAction } from '../ui/yt-ui.ts';
@@ -777,7 +776,6 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
     injectChapters(r);
     transformPlayerOverlays(r);
     transformTransportControls(r);
-    processRydResponse(r as PlayerResponse);
     transformChannelHeaderButtons(r, tvSurface);
   } catch (error) {
     console.error('[InnertubeInterceptor] Failed to process JSON payload:', error);

@@ -813,7 +813,6 @@ describe('End-to-end userscript bundle lifecycle', () => {
       () =>
         elapsedEl.textContent === '0:30 (-1:30) / 2:00' &&
         Boolean(clockEl.children[0]?.children[1]?.textContent.startsWith('Ends ')) &&
-        likeBtn.dataset.ttCount === '5K' &&
         dislikeBtn.dataset.ttCount === '120' &&
         fetchCalls.some((c) => c.url.includes('sponsor.ajay.app/api/skipSegments'))
     );
@@ -822,7 +821,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
     assert.ok(clockEl.querySelectorAll('div').length >= 1);
     const endEl = clockEl.children[0]?.children[1];
     assert.ok(endEl?.textContent.startsWith('Ends '), `Expected Ends HH:MM, got ${endEl?.textContent}`);
-    assert.equal(likeBtn.dataset.ttCount, '5K');
+    assert.equal(likeBtn.dataset.ttCount, undefined);
     assert.equal(dislikeBtn.dataset.ttCount, '120');
 
     // Verify SponsorBlock fetched segments for e2eVid123

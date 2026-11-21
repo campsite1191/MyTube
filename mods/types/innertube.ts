@@ -173,24 +173,3 @@ export interface AdaptiveFormat {
   };
   [key: string]: unknown;
 }
-
-interface StreamingData {
-  formats?: AdaptiveFormat[];
-  adaptiveFormats?: AdaptiveFormat[];
-  [key: string]: unknown;
-}
-
-export interface PlayerResponse {
-  videoDetails?: {
-    videoId?: string;
-    title?: string;
-    author?: string;
-    lengthSeconds?: string;
-  };
-  streamingData?: StreamingData;
-  adPlacements?: unknown[];
-  adSlots?: unknown[];
-  playerAds?: unknown;
-  paidContentOverlay?: unknown;
-  [key: string]: unknown;
-}
