@@ -8,6 +8,7 @@ import { installRemainingTime } from './features/remaining-time.ts';
 import { installReturnYouTubeDislike } from './features/return-youtube-dislike.ts';
 import { installRewindOnPause } from './features/rewind-on-pause.ts';
 import { installSponsorBlock } from './features/sponsorblock.ts';
+import { installTransportControlsStyles } from './transforms/player-overlays.ts';
 import { setupMemoryPressureListener } from './transforms/thumbnails.ts';
 import { initClock } from './ui/clock.ts';
 import { installSpeedControls } from './ui/speed-ui.ts';
@@ -27,5 +28,6 @@ void waitForDomReady().then(() => {
     installRemainingTime();
     installReturnYouTubeDislike();
     installRewindOnPause();
+    installTransportControlsStyles();
   });
 });

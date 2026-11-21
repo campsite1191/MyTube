@@ -4,21 +4,24 @@ import { injectCss } from '../core/styles.ts';
 import { formatCompactCount } from '../utils/feed-helpers.ts';
 
 const LIKE_BUTTON_SELECTOR =
-  'ytlr-watch-default ytlr-like-button-renderer, ytlr-watch-default yt-button-container[idomkey="like-button"], ytlr-watch-default [idomkey="like-button"], ytlr-watch-default [idomkey="like"]';
+  'ytlr-watch-default yt-button-container[idomkey="like-button"], ytlr-watch-default [idomkey="like-button"]';
 const DISLIKE_BUTTON_SELECTOR =
-  'ytlr-watch-default ytlr-dislike-button-renderer, ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike"]';
-const BUTTON_WRAPPER_SELECTOR =
-  'ytlr-like-button-renderer, ytlr-dislike-button-renderer, ytlr-toggle-button-renderer, yt-button-container';
+  'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
+const VOTE_CONTAINER_SELECTOR =
+  'ytlr-watch-default ytlr-like-button-renderer, ytlr-watch-default [idomkey="like-dislike-container"]';
 const FOCUSABLE_CHILD_SELECTOR =
   '[hybridnavfocusable]:not([hybridnavfocusable="false"]), [tabindex]:not([tabindex="-1"])';
+const TRANSPORT_CONTROLS_DOM_SELECTOR =
+  'ytlr-watch-default [idomkey="transport-controls"], ytlr-watch-default ytlr-player-actions-container';
 
 let currentLike: { videoId: string; count: string } | null = null;
 let currentDislike: { videoId: string; count: string } | null = null;
 let stylesInstalled = false;
 let rydInstalled = false;
+const patchedTransportInstances = new WeakSet<object>();
 
 const VOTE_TARGET =
-  ':is(ytlr-like-button-renderer, ytlr-dislike-button-renderer, [idomkey="like-button"], [idomkey="dislike-button"], [idomkey="like"], [idomkey="dislike"])';
+  ':is(ytlr-like-button-renderer, [idomkey="like-dislike-container"], [idomkey="like-button"], [idomkey="dislike-button"])';
 
 function installVoteLabelStyles(): void {
   if (stylesInstalled || typeof document === 'undefined') return;
@@ -60,7 +63,7 @@ function installVoteLabelStyles(): void {
     `);
 }
 
-function queryButtonElements(selector: string): HTMLElement[] {
+function queryElements(selector: string): HTMLElement[] {
   if (typeof document === 'undefined') return [];
   if (typeof document.querySelectorAll === 'function') {
     const matches = Array.from(document.querySelectorAll<HTMLElement>(selector));
@@ -88,13 +91,48 @@ function disableFocus(node: HTMLElement): void {
   }
 }
 
-function applyButtonLabel(selector: string, count: string | null): void {
-  const matches = queryButtonElements(selector);
+function patchTransportFocusSkip(): void {
+  if (typeof document === 'undefined') return;
+  const tcEl = document.querySelector?.(TRANSPORT_CONTROLS_DOM_SELECTOR) as
+    | (Element & { __instance?: Record<string, unknown> })
+    | null;
+  const inst = tcEl?.__instance;
+  if (!inst || patchedTransportInstances.has(inst)) return;
+
+  let predicateKey: string | null = null;
+  for (const key of Object.getOwnPropertyNames(inst)) {
+    const fn = inst[key];
+    if (typeof fn !== 'function') continue;
+    const src = Function.prototype.toString.call(fn);
+    if (/\.length[\s\S]*\+\s*3\b/.test(src)) {
+      predicateKey = key;
+      break;
+    }
+    if (!predicateKey && src.includes('this.buttons')) {
+      const match = src.match(/if\s*\(\s*this\.(\w+)\s*\(/);
+      if (match?.[1] && typeof inst[match[1]] === 'function') {
+        predicateKey = match[1];
+      }
+    }
+  }
+  if (!predicateKey) return;
+
+  const origPredicate = inst[predicateKey] as (idx: number) => boolean;
+  inst[predicateKey] = function (this: { buttons?: ArrayLike<HTMLElement> }, idx: number): boolean {
+    const btn = this.buttons?.[idx];
+    if (btn && (btn.inert || btn.getAttribute?.('hybridnavfocusable') === 'false')) {
+      return false;
+    }
+    return origPredicate.call(this, idx);
+  };
+  patchedTransportInstances.add(inst);
+}
+
+function applyButtonLabels(selector: string, count: string | null): HTMLElement[] {
+  const matches = queryElements(selector);
   for (const el of matches) {
     // Treat like/dislike strictly as display-only count labels so D-pad skips them cleanly without tooltip overlap.
     disableFocus(el);
-    const wrapper = el.closest?.<HTMLElement>(BUTTON_WRAPPER_SELECTOR);
-    if (wrapper && wrapper !== el) disableFocus(wrapper);
 
     const hasInnerMatch = matches.some((other) => other !== el && el.contains?.(other));
     if (!hasInnerMatch && count) {
@@ -103,6 +141,7 @@ function applyButtonLabel(selector: string, count: string | null): void {
       delete el.dataset.ttCount;
     }
   }
+  return matches;
 }
 
 function findObserverTarget(
@@ -125,10 +164,7 @@ function findObserverTarget(
     }
   }
   return (
-    document.querySelector?.('ytlr-watch-default ytlr-transport-controls-renderer') ??
-    watchHost ??
-    document.body ??
-    document.documentElement
+    document.querySelector?.(TRANSPORT_CONTROLS_DOM_SELECTOR) ?? watchHost ?? document.body ?? document.documentElement
   );
 }
 
@@ -141,7 +177,9 @@ export function setWatchLikeCount(videoId: string | null, count: string | null):
   if (!compact) return;
   currentLike = { videoId, count: compact };
   if (videoId === getActiveWatchVideoId() && typeof document !== 'undefined') {
-    applyButtonLabel(LIKE_BUTTON_SELECTOR, compact);
+    for (const container of queryElements(VOTE_CONTAINER_SELECTOR)) disableFocus(container);
+    applyButtonLabels(LIKE_BUTTON_SELECTOR, compact);
+    patchTransportFocusSkip();
   }
 }
 
@@ -176,10 +214,19 @@ export function installReturnYouTubeDislike(): void {
       if (currentDislike?.videoId === videoId) currentDislike = null;
     });
 
-    const applyForSession = (): void => {
-      if (signal.aborted) return;
-      applyButtonLabel(LIKE_BUTTON_SELECTOR, currentLike?.videoId === videoId ? currentLike.count : null);
-      applyButtonLabel(DISLIKE_BUTTON_SELECTOR, currentDislike?.videoId === videoId ? currentDislike.count : null);
+    const applyForSession = (): { likeEls: HTMLElement[]; dislikeEls: HTMLElement[] } => {
+      if (signal.aborted) return { likeEls: [], dislikeEls: [] };
+      for (const container of queryElements(VOTE_CONTAINER_SELECTOR)) disableFocus(container);
+      const likeEls = applyButtonLabels(
+        LIKE_BUTTON_SELECTOR,
+        currentLike?.videoId === videoId ? currentLike.count : null
+      );
+      const dislikeEls = applyButtonLabels(
+        DISLIKE_BUTTON_SELECTOR,
+        currentDislike?.videoId === videoId ? currentDislike.count : null
+      );
+      patchTransportFocusSkip();
+      return { likeEls, dislikeEls };
     };
 
     void fetchDislikeCount(videoId, signal).then((dislikes) => {
@@ -199,14 +246,10 @@ export function installReturnYouTubeDislike(): void {
       });
 
       const syncTargetObserverAndLabels = (): void => {
-        applyForSession();
+        const { likeEls, dislikeEls } = applyForSession();
         if (signal.aborted) return;
-        const watchHost = document.querySelector('ytlr-watch-default');
-        const desiredTarget = findObserverTarget(
-          queryButtonElements(LIKE_BUTTON_SELECTOR),
-          queryButtonElements(DISLIKE_BUTTON_SELECTOR),
-          watchHost
-        );
+        const watchHost = document.querySelector?.('ytlr-watch-default') ?? null;
+        const desiredTarget = findObserverTarget(likeEls, dislikeEls, watchHost);
         if (!desiredTarget || (desiredTarget === observedTarget && observedTarget.isConnected !== false)) return;
 
         hostAbort?.abort();

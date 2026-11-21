@@ -79,12 +79,14 @@ function syncWatchSession(): void {
 export const PLAYER_BAR_SELECTOR = 'ytlr-progress-bar';
 
 export function isPlayerBarVisible(bar: Element | null | undefined): boolean {
-  return Boolean(bar && bar.getAttribute?.('hybridnavfocusable') !== 'false');
+  return Boolean(
+    bar && bar.getAttribute?.('hybridnavfocusable') !== 'false' && !bar.classList?.contains('zylon-hidden')
+  );
 }
 
 /**
  * Observes the Watch player bar (`ytlr-progress-bar`) for the lifetime of `signal`,
- * temporarily waiting on the document root only until it mounts.
+ * re-binding automatically if YouTube TV swaps or remounts the player bar element.
  */
 export function observePlayerBar(
   signal: AbortSignal,
@@ -93,7 +95,7 @@ export function observePlayerBar(
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['hybridnavfocusable'],
+    attributeFilter: ['hybridnavfocusable', 'class'],
   }
 ): () => Element | null {
   let observedBar: Element | null = null;
@@ -137,7 +139,18 @@ export function observePlayerBar(
     barAbort?.abort();
     observedBar = bar;
     barAbort = new AbortController();
-    observeDom(bar, () => onBar(bar), options, barAbort.signal);
+    observeDom(
+      bar,
+      () => {
+        if (!bar.isConnected) {
+          bind();
+          return;
+        }
+        onBar(bar);
+      },
+      options,
+      barAbort.signal
+    );
     onBar(bar);
     return bar;
   };

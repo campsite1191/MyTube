@@ -55,7 +55,8 @@ describe('return-youtube-dislike', () => {
       nodeName: 'DIV',
       isConnected: true,
       parentElement: null as unknown,
-      contains: (node: unknown) => node === likeWrapper || node === likeButton || node === dislikeButton,
+      contains: (node: unknown) =>
+        node === likeOuterHost || node === likeWrapper || node === likeButton || node === dislikeButton,
     };
     const makeButton = (parentElement: unknown = controlsStrip, children: Array<Record<string, unknown>> = []) => {
       const attrs: Record<string, string> = { hybridnavfocusable: 'true', tabindex: '0' };
@@ -85,8 +86,12 @@ describe('return-youtube-dislike', () => {
       },
       attrs: nestedLikeChildAttrs,
     };
-    const likeWrapper = makeButton(controlsStrip);
+    const likeOuterHost = makeButton(controlsStrip);
+    likeOuterHost.querySelectorAll = () => [];
+    const likeWrapper = makeButton(likeOuterHost);
+    likeWrapper.querySelectorAll = () => [];
     const likeButton = makeButton(likeWrapper, [nestedLikeChild]);
+    likeOuterHost.children.push(likeWrapper);
     likeWrapper.children.push(likeButton);
     likeButton.closest = () => likeWrapper;
     const dislikeButton = makeButton(controlsStrip);
@@ -149,8 +154,9 @@ describe('return-youtube-dislike', () => {
       addEventListener: () => {},
       querySelectorAll: (selector: string) => {
         if (!controlsMounted) return [];
+        if (selector.includes('like-dislike-container')) return [likeOuterHost, likeWrapper];
         if (selector.includes('dislike-button')) return [dislikeButton];
-        if (selector.includes('like-button')) return [likeWrapper, likeButton];
+        if (selector.includes('like-button')) return [likeButton];
         return [];
       },
       querySelector: (selector: string) => {
@@ -175,7 +181,11 @@ describe('return-youtube-dislike', () => {
 
     assert.equal(likeButton.dataset.ttCount, '12.5K');
     assert.equal(likeWrapper.dataset.ttCount, undefined);
+    assert.equal(likeOuterHost.dataset.ttCount, undefined);
     assert.equal(dislikeButton.dataset.ttCount, '420');
+    assert.equal(likeOuterHost.inert, true);
+    assert.equal(likeOuterHost.attrs.hybridnavfocusable, 'false');
+    assert.equal(likeOuterHost.attrs.tabindex, '-1');
     assert.equal(likeWrapper.inert, true);
     assert.equal(likeButton.inert, true);
     assert.equal(dislikeButton.inert, true);

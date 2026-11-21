@@ -153,27 +153,33 @@ export function installRemainingTime(): void {
         return cachedTarget;
       };
 
-      const render = (bar: Element): void => {
-        if (signal.aborted || !isPlayerBarVisible(bar) || !Number.isFinite(video.duration) || video.duration <= 0) {
-          if (video.duration === Number.POSITIVE_INFINITY) desiredText = null;
-          return;
+      const render = (bar: Element): boolean => {
+        if (signal.aborted || !isPlayerBarVisible(bar)) return false;
+        if (video.duration === Number.POSITIVE_INFINITY) {
+          desiredText = null;
+          return false;
         }
         const target = getTarget(bar);
-        if (!target) return;
+        if (!target) return false;
         const durEl =
           target.el.parentElement?.querySelector('[idomkey="duration"]') ??
           target.el.closest?.('[idomkey="time-label"]')?.querySelector('[idomkey="duration"]');
         const durOverride = parseClockSeconds(durEl?.textContent);
+        const effectiveDuration =
+          Number.isFinite(video.duration) && video.duration > 0 ? video.duration : (durOverride ?? 0);
+        if (effectiveDuration <= 0) return false;
+
         const next = formatRemainingLabel(
           readTarget(target),
-          video.duration,
+          effectiveDuration,
           video.currentTime,
           durOverride,
           target.fallbackDur
         );
-        if (next === null) return;
+        if (next === null) return false;
         desiredText = next;
         writeTarget(target, next);
+        return true;
       };
 
       const getBar = observePlayerBar(
@@ -183,14 +189,16 @@ export function installRemainingTime(): void {
           const target = getTarget(bar);
           if (!target) return;
           if (desiredText !== null && readTarget(target) === desiredText) return;
-          render(bar);
+          if (render(bar)) {
+            lastAppliedSec = Math.floor(video.currentTime);
+          }
         },
         {
           characterData: true,
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['hybridnavfocusable'],
+          attributeFilter: ['hybridnavfocusable', 'class'],
         }
       );
 
@@ -206,8 +214,9 @@ export function installRemainingTime(): void {
           if (!liveBar || !isPlayerBarVisible(liveBar)) return;
           const sec = Math.floor(video.currentTime);
           if (e?.type === 'timeupdate' && sec === lastAppliedSec) return;
-          lastAppliedSec = sec;
-          render(liveBar);
+          if (render(liveBar)) {
+            lastAppliedSec = sec;
+          }
         });
       };
 

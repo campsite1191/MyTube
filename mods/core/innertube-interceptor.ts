@@ -229,7 +229,12 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       stripAdsFromPayload(r);
     }
 
-    const streamingData = isRecord(r.streamingData) ? r.streamingData : undefined;
+    const playerResponse = isRecord(r.playerResponse) ? r.playerResponse : undefined;
+    const streamingData = isRecord(r.streamingData)
+      ? r.streamingData
+      : isRecord(playerResponse?.streamingData)
+        ? playerResponse.streamingData
+        : undefined;
     if (Array.isArray(streamingData?.adaptiveFormats)) {
       streamingData.adaptiveFormats = filterStreamingFormats(streamingData.adaptiveFormats as AudioFormatEntry[]);
     }

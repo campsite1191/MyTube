@@ -25,7 +25,7 @@ describe('clock helpers', () => {
     assert.equal(getNextClockDelayMs(midMinute), 44_750);
   });
 
-  test('initClock installs #f1f1f1 YTSans clock and updates Watch end-time via onWatchSession', (t) => {
+  test('initClock installs #f1f1f1 Roboto clock and updates Watch end-time via onWatchSession', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
@@ -118,7 +118,8 @@ describe('clock helpers', () => {
 
     const css = fakeDoc.adoptedStyleSheets.map((s) => s.cssText).join('\n');
     assert.match(css, /color:\s*#f1f1f1/);
-    assert.match(css, /font-family:\s*'YTSans'/);
+    assert.match(css, /font-family:\s*'Roboto'/);
+    assert.doesNotMatch(css, /'YTSans'/);
     assert.doesNotMatch(css, /\.tt-clock-end\s*\{[^}]*(?:color|opacity)\s*:/);
     assert.doesNotMatch(css, /#aaaaaa/i);
 

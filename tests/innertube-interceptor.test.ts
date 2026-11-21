@@ -10,6 +10,7 @@ import {
   getAudioTier,
   stripAdsFromPayload,
 } from '../mods/transforms/innertube-player.ts';
+import { installTransportControlsStyles } from '../mods/transforms/player-overlays.ts';
 
 describe('getAudioTier and filterStreamingFormats', () => {
   test('ranks 7.1 > 5.1 > Voice Boost > Original Stereo > DRC', () => {
@@ -252,5 +253,85 @@ describe('TV browse/JSON.parse transforms', () => {
     };
     transformInnertubeResponseSync(settingsPayload);
     assert.equal(settingsPayload.items.length, 1);
+
+    // Verify Previous/Next transport controls are stripped while Like and Comments remain intact.
+    const nextPayload = {
+      transportControls: {
+        transportControlsRenderer: {
+          skipPreviousButton: { buttonRenderer: {} },
+          skipNextButton: { buttonRenderer: {} },
+          promotedActions: [
+            {
+              type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_PREVIOUS',
+              button: { buttonRenderer: { icon: { iconType: 'SKIP_PREVIOUS' } } },
+            },
+            {
+              type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_NEXT',
+              button: {
+                buttonRenderer: {
+                  icon: { iconType: 'SKIP_NEXT' },
+                  navigationEndpoint: { signalAction: { signal: 'PLAYER_PLAY_NEXT' } },
+                },
+              },
+            },
+            {
+              type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPONSORBLOCK_HIGHLIGHT',
+              button: {
+                buttonRenderer: {
+                  icon: { iconType: 'SKIP_NEXT' },
+                  navigationEndpoint: { customAction: { action: 'SKIP', parameters: { time: 42 } } },
+                },
+              },
+            },
+            { type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_LIKE_BUTTON', button: { likeButtonRenderer: {} } },
+            { type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_COMMENTS', button: { buttonRenderer: {} } },
+          ],
+        },
+      },
+    };
+    transformInnertubeResponseSync(nextPayload);
+    const tc = nextPayload.transportControls.transportControlsRenderer;
+    assert.equal('skipPreviousButton' in tc, false);
+    assert.equal('skipNextButton' in tc, false);
+    assert.deepEqual(
+      tc.promotedActions.map((entry) => entry.type),
+      [
+        'TRANSPORT_CONTROLS_BUTTON_TYPE_SPONSORBLOCK_HIGHLIGHT',
+        'TRANSPORT_CONTROLS_BUTTON_TYPE_LIKE_BUTTON',
+        'TRANSPORT_CONTROLS_BUTTON_TYPE_COMMENTS',
+      ]
+    );
+  });
+
+  test('installTransportControlsStyles injects static display:none CSS for skipPrevious/skipNext controls once', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+    t.after(() => {
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+    });
+
+    globals.CSSStyleSheet = class {
+      cssText = '';
+      replaceSync(text: string): void {
+        this.cssText = text;
+      }
+    };
+    const fakeDoc = { adoptedStyleSheets: [] as Array<{ cssText: string }> };
+    globals.document = fakeDoc;
+
+    installTransportControlsStyles();
+    installTransportControlsStyles();
+
+    assert.equal(fakeDoc.adoptedStyleSheets.length, 1);
+    const css = fakeDoc.adoptedStyleSheets[0]?.cssText ?? '';
+    assert.match(css, /\[idomkey="skipPrevious"\]/);
+    assert.match(css, /\[idomkey="skipNext"\]/);
+    assert.match(css, /WEB_PAGE_TYPE_SHORTS/);
+    assert.match(css, /background-color:\s*#000\s*!important/);
+    assert.match(css, /display:\s*none\s*!important/);
   });
 });

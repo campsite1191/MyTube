@@ -122,12 +122,20 @@ describe('installRemainingTime Watch session lifecycle', () => {
       for (const fn of winListeners.get('hashchange') ?? []) fn();
       assert.equal(videoListeners.get('timeupdate')?.size ?? 0, 1);
 
-      // Player bar hidden -> timeupdate does not touch DOM.
+      // Player bar hidden via hybridnavfocusable or zylon-hidden -> timeupdate does not touch DOM.
       for (const fn of videoListeners.get('timeupdate') ?? []) fn({ type: 'timeupdate' } as Event);
       assert.equal(elapsedEl.textContent, '0:30 / 2:00');
 
-      // Player bar becomes visible -> observer refreshes elapsed text.
       barFocusable = 'true';
+      const classes = new Set(['zylon-hidden']);
+      (progressBar as { classList?: { contains: (cls: string) => boolean } }).classList = {
+        contains: (cls: string) => classes.has(cls),
+      };
+      for (const cb of [...observerCbs]) cb();
+      assert.equal(elapsedEl.textContent, '0:30 / 2:00');
+
+      // Player bar becomes visible -> observer refreshes elapsed text.
+      classes.delete('zylon-hidden');
       for (const cb of [...observerCbs]) cb();
       assert.equal(elapsedEl.textContent, '0:30 (-1:30) / 2:00');
 

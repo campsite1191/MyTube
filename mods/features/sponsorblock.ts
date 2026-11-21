@@ -52,6 +52,8 @@ export interface SponsorBlockSegment {
 
 const SPONSORBLOCK_API_URL = 'https://sponsor.ajay.app/api';
 const SPONSORBLOCK_ACTION_TYPES = ['skip', 'poi'] as const;
+const PROGRESS_TRACK_SELECTOR = 'div[idomkey="slider"], ytlr-progress-bar div[idomkey="progress-bar"]';
+const PROGRESS_HOST_SELECTOR = 'ytlr-redux-connect-ytlr-progress-bar';
 
 export const BAR_TYPES: Readonly<Record<string, SponsorBlockBarType>> = Object.fromEntries(
   CATEGORY_ENTRIES.map(([category, { color, opacity = '0.7' }]) => [
@@ -113,14 +115,13 @@ class SponsorBlockHandler {
   readonly videoId: string;
   private readonly signal: AbortSignal;
   private video: HTMLVideoElement | null = null;
-  private waitingForSlider = false;
+  private waitingForTrack = false;
   private segmentsOverlay: HTMLDivElement | null = null;
   private segments: SponsorBlockSegment[] = [];
-  private isModernUi = false;
 
   private readonly durationChangeHandler = (): void => {
     this.buildOverlay();
-    this.syncOldUiOverlayTop();
+    this.syncOverlayLayout();
   };
 
   constructor(videoId: string, signal: AbortSignal) {
@@ -145,7 +146,6 @@ class SponsorBlockHandler {
         this.video = video;
         video.addEventListener('durationchange', this.durationChangeHandler, { signal: this.signal });
         this.buildOverlay();
-        this.syncOldUiOverlayTop();
       });
       return segments;
     } catch (error) {
@@ -155,14 +155,26 @@ class SponsorBlockHandler {
     }
   }
 
-  private syncOldUiOverlayTop(): void {
-    if (!this.segmentsOverlay || this.isModernUi) return;
-    if (document.querySelector('div[idomkey="Metadata-Section"]')) {
-      this.isModernUi = true;
-      return;
-    }
-    const sliderRect = document.querySelector('div[idomkey="slider"]')?.getBoundingClientRect();
-    if (sliderRect) this.segmentsOverlay.style.setProperty('top', `${sliderRect.top}px`, 'important');
+  private findProgressTrack(): Element | null {
+    return document.querySelector(PROGRESS_TRACK_SELECTOR);
+  }
+
+  private syncOverlayLayout(): void {
+    if (!this.segmentsOverlay) return;
+    const track = this.findProgressTrack();
+    const host = document.querySelector(PROGRESS_HOST_SELECTOR);
+    if (!track || !host) return;
+
+    const trackRect = track.getBoundingClientRect?.();
+    const hostRect = host.getBoundingClientRect?.();
+    if (!trackRect || trackRect.width <= 0 || trackRect.height <= 0) return;
+
+    const left = hostRect && hostRect.width > 0 ? trackRect.left - hostRect.left : trackRect.left;
+    const top = hostRect && hostRect.height > 0 ? trackRect.top - hostRect.top : trackRect.top;
+    this.segmentsOverlay.style.setProperty('left', `${left}px`, 'important');
+    this.segmentsOverlay.style.setProperty('top', `${top}px`, 'important');
+    this.segmentsOverlay.style.setProperty('width', `${trackRect.width}px`, 'important');
+    this.segmentsOverlay.style.setProperty('height', `${trackRect.height}px`, 'important');
   }
 
   private syncOverlayVisibility(bar?: Element | null): void {
@@ -174,17 +186,14 @@ class SponsorBlockHandler {
     }
   }
 
-  private mountOverlay(slider: Element, host: Element, duration: number): void {
+  private mountOverlay(track: Element, host: Element, duration: number): void {
     const overlay = document.createElement('div');
     overlay.classList.add('ytLrProgressBarSlider', 'ytLrProgressBarSliderRectangularProgressBar');
     overlay.style.cssText =
-      'z-index: 1 !important; pointer-events: none !important; background-color: rgba(0, 0, 0, 0) !important; width: 72rem !important; left: 4rem !important;';
+      'position: absolute !important; z-index: 1 !important; pointer-events: none !important; background-color: rgba(0, 0, 0, 0) !important; width: 72rem !important; left: 4rem !important; height: 0.5rem !important;';
 
-    if (!slider.classList.contains('ytLrProgressBarSlider')) {
-      const rect = slider.getBoundingClientRect();
-      overlay.classList.add(...slider.classList);
-      overlay.style.setProperty('height', `${rect.height}px`, 'important');
-      overlay.style.setProperty('bottom', `${rect.bottom - rect.top}px`, 'important');
+    if (track.classList && !track.classList.contains('ytLrProgressBarSlider')) {
+      overlay.classList.add(...track.classList);
     }
 
     const bars = this.segments.map((segment) => {
@@ -196,10 +205,18 @@ class SponsorBlockHandler {
     overlay.append(...bars);
 
     this.segmentsOverlay = overlay;
-    observePlayerBar(this.signal, (bar) => this.syncOverlayVisibility(bar), {
-      attributes: true,
-      attributeFilter: ['hybridnavfocusable'],
-    });
+    this.syncOverlayLayout();
+    observePlayerBar(
+      this.signal,
+      (bar) => {
+        this.syncOverlayVisibility(bar);
+        this.syncOverlayLayout();
+      },
+      {
+        attributes: true,
+        attributeFilter: ['hybridnavfocusable', 'class'],
+      }
+    );
     observeDom(
       host,
       (mutations) => {
@@ -213,6 +230,7 @@ class SponsorBlockHandler {
           }
         }
         this.syncOverlayVisibility();
+        this.syncOverlayLayout();
       },
       { childList: true },
       this.signal
@@ -224,21 +242,20 @@ class SponsorBlockHandler {
     if (this.signal.aborted || this.segmentsOverlay || !this.video?.duration) return;
 
     const tryMount = (): boolean => {
-      const slider = document.querySelector('div[idomkey="slider"]');
-      const host = document.querySelector('ytlr-redux-connect-ytlr-progress-bar');
-      if (!slider || !host || !this.video?.duration) return false;
-      this.mountOverlay(slider, host, this.video.duration);
-      this.syncOldUiOverlayTop();
+      const track = this.findProgressTrack();
+      const host = document.querySelector(PROGRESS_HOST_SELECTOR);
+      if (!track || !host || !this.video?.duration) return false;
+      this.mountOverlay(track, host, this.video.duration);
       return true;
     };
 
-    if (tryMount() || this.waitingForSlider) return;
-    this.waitingForSlider = true;
+    if (tryMount() || this.waitingForTrack) return;
+    this.waitingForTrack = true;
     const observer = observeDom(
       document.body ?? document.documentElement,
       () => {
         if (this.signal.aborted || !this.video?.duration || this.segmentsOverlay || tryMount()) {
-          this.waitingForSlider = false;
+          this.waitingForTrack = false;
           observer?.disconnect();
         }
       },

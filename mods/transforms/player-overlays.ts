@@ -5,6 +5,7 @@ import resolveCommand, {
   isReportOrFeedbackIcon,
   isReportOrFeedbackText,
 } from '../core/resolve-command.ts';
+import { injectCss } from '../core/styles.ts';
 import { setWatchLikeCount } from '../features/return-youtube-dislike.ts';
 import { getActiveSponsorBlockSegments, resolveSegmentActionType } from '../features/sponsorblock.ts';
 import { ButtonRenderer, timelyAction } from '../ui/yt-ui.ts';
@@ -13,12 +14,52 @@ import { buildChaptersMarkerEntity } from './chapters.ts';
 import { readFormattedText } from './feed-filter.ts';
 
 const TRANSPORT_BUTTON_LIST_KEYS = ['promotedActions', 'actions', 'buttons', 'engagementActions'] as const;
+const DIRECT_PREV_NEXT_KEYS = ['skipPreviousButton', 'skipNextButton'] as const;
+
+let transportStylesInstalled = false;
+
+/**
+ * Installs zero-loop static CSS rules hiding native Previous/Next player-bar controls
+ * (`skipPrevious` / `skipNext`) and making the Shorts page backdrop pure `#000`.
+ */
+export function installTransportControlsStyles(): void {
+  if (transportStylesInstalled || typeof document === 'undefined') return;
+  transportStylesInstalled = true;
+  injectCss(`
+      ytlr-watch-default [idomkey="transport-controls"] :is([idomkey="skipPrevious"], [idomkey="skipNext"]) {
+        display: none !important;
+      }
+      body.WEB_PAGE_TYPE_SHORTS,
+      body.WEB_PAGE_TYPE_SHORTS > div,
+      body.WEB_PAGE_TYPE_SHORTS :is(ytlr-app, ytlr-app-background-container, ytlr-player-container, ytlr-shorts-page) {
+        background-color: #000 !important;
+        background-image: none !important;
+      }
+    `);
+}
 
 function isUnwantedTransportButton(btn: unknown): boolean {
   if (!isRecord(btn)) return false;
-  if (/SUBSCRIBE/i.test(String(btn.type || ''))) return true;
+  const btnType = String(btn.type || '');
+  if (/SUBSCRIBE/i.test(btnType)) return true;
+  if (
+    btnType !== 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPONSORBLOCK_HIGHLIGHT' &&
+    /(?:^|_)(?:PREVIOUS|NEXT)(?:_BUTTON)?$/i.test(btnType)
+  ) {
+    return true;
+  }
   const nestedBtn = isRecord(btn.button) ? btn.button : undefined;
-  if (btn.subscribeButton || btn.subscribeButtonRenderer || nestedBtn?.subscribeButtonRenderer) return true;
+  if (
+    btn.subscribeButton ||
+    btn.subscribeButtonRenderer ||
+    nestedBtn?.subscribeButtonRenderer ||
+    btn.previousButtonRenderer ||
+    btn.nextButtonRenderer ||
+    nestedBtn?.previousButtonRenderer ||
+    nestedBtn?.nextButtonRenderer
+  ) {
+    return true;
+  }
   const br = isRecord(nestedBtn?.buttonRenderer)
     ? nestedBtn.buttonRenderer
     : isRecord(btn.buttonRenderer)
@@ -30,7 +71,14 @@ function isUnwantedTransportButton(btn: unknown): boolean {
   if (nav?.subscribeEndpoint || nav?.unsubscribeEndpoint || nav?.subscribeCommand || /SUBSCRIBE/i.test(iconType)) {
     return true;
   }
-  if (/(?:REPORT|FEEDBACK)/i.test(String(btn.type || '')) || isReportOrFeedbackIcon(icon?.iconType)) {
+  const signal = isRecord(nav?.signalAction) ? nav.signalAction.signal : undefined;
+  if (signal === 'PLAYER_PLAY_PREVIOUS' || signal === 'PLAYER_PLAY_NEXT') {
+    return true;
+  }
+  if (iconType === 'SKIP_PREVIOUS' || (iconType === 'SKIP_NEXT' && !nav?.customAction)) {
+    return true;
+  }
+  if (/(?:REPORT|FEEDBACK)/i.test(btnType) || isReportOrFeedbackIcon(icon?.iconType)) {
     return true;
   }
   if (isReportOrFeedbackText(readFormattedText(br?.text))) {
@@ -163,6 +211,12 @@ export function recordTransportLikeCount(r: Record<string, unknown>): void {
 export function transformTransportControls(r: Record<string, unknown>): void {
   const tcRenderer = getTransportControlsRenderer(r);
   if (!tcRenderer) return;
+
+  for (const directKey of DIRECT_PREV_NEXT_KEYS) {
+    if (directKey in tcRenderer) {
+      delete tcRenderer[directKey];
+    }
+  }
 
   for (const key of TRANSPORT_BUTTON_LIST_KEYS) {
     const list = tcRenderer[key];

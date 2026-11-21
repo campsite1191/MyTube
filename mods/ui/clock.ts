@@ -51,7 +51,7 @@ function installClockStyles(): void {
         pointer-events: none;
         top: max(2%, env(safe-area-inset-top, 0px));
         right: max(4%, env(safe-area-inset-right, 0px));
-        font-family: 'YTSans', 'Roboto', Arial, sans-serif;
+        font-family: 'Roboto', 'Noto Sans', Arial, Helvetica, sans-serif;
         color: #f1f1f1;
       }
       #${CLOCK_ID} .tt-clock-inner {
@@ -59,15 +59,16 @@ function installClockStyles(): void {
         flex-direction: column;
         align-items: flex-end;
         text-align: right;
-        font-size: 1.25rem;
-        line-height: 1.75rem;
+        font-size: 1.125rem;
+        line-height: 1.5rem;
         font-variant-numeric: tabular-nums;
         font-weight: 500;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+        text-shadow: 0 0.0625rem 0.25rem rgba(0, 0, 0, 0.8);
       }
       #${CLOCK_ID} .tt-clock-end {
         font-size: 0.875rem;
         line-height: 1.25rem;
+        font-weight: 400;
         display: none;
       }
     `);
