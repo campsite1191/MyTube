@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 import {
   fetchDislikeCount,
   installReturnYouTubeDislike,
+  setShortsOverlayStats,
   setWatchLikeCount,
 } from '../mods/features/return-youtube-dislike.ts';
 
@@ -209,5 +210,116 @@ describe('return-youtube-dislike', () => {
     fakeLocation.hash = '#/';
     for (const fn of winListeners.get('hashchange') ?? []) fn();
     assert.equal(disconnected, true);
+  });
+
+  test('setShortsOverlayStats labels Like & RYD Dislike on Shorts action bar and aborts stale Shorts', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevMutationObserver = globals.MutationObserver;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+
+    t.after(() => {
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+    });
+
+    const makeShortsBtn = () => {
+      const attrs: Record<string, string> = { hybridnavfocusable: 'true', tabindex: '0' };
+      return {
+        dataset: {} as Record<string, string>,
+        inert: false,
+        getAttribute: (name: string) => attrs[name] ?? null,
+        hasAttribute: (name: string) => Object.hasOwn(attrs, name),
+        setAttribute: (name: string, value: string) => {
+          attrs[name] = value;
+        },
+        closest: () => null,
+        querySelectorAll: () => [],
+        attrs,
+      };
+    };
+
+    const shortLikeBtn = makeShortsBtn();
+    const shortDislikeBtn = makeShortsBtn();
+    const overlayEl = { nodeName: 'YTLR-REEL-PLAYER-OVERLAY-RENDERER', isConnected: true };
+
+    const signals = new Map<string, AbortSignal | undefined>();
+    let resolveFirst: ((resp: Response) => void) | undefined;
+    let disconnectCount = 0;
+
+    globals.MutationObserver = class {
+      observe(): void {}
+      disconnect(): void {
+        disconnectCount += 1;
+      }
+    };
+    globals.CSSStyleSheet = class {
+      cssText = '';
+      replaceSync(text: string): void {
+        this.cssText = text;
+      }
+    };
+    globals.document = {
+      body: { isConnected: true },
+      documentElement: { isConnected: true },
+      adoptedStyleSheets: [] as Array<{ cssText: string }>,
+      querySelector: (selector: string) => {
+        if (selector === 'ytlr-reel-player-overlay-renderer') return overlayEl;
+        return null;
+      },
+      querySelectorAll: (selector: string) => {
+        if (selector.includes('ytlr-toggle-button-view-model')) return [shortLikeBtn];
+        if (selector.includes('aria-label="Dislike"')) return [shortDislikeBtn];
+        return [];
+      },
+    };
+    globals.fetch = ((url: string | URL | Request, init?: RequestInit) => {
+      const videoId = new URL(String(url)).searchParams.get('videoId') ?? '';
+      signals.set(videoId, init?.signal ?? undefined);
+      if (videoId === 'shortStale') {
+        return new Promise<Response>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ dislikes: 3200 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      );
+    }) as typeof fetch;
+
+    setShortsOverlayStats('shortStale', '100 K');
+    assert.equal(signals.get('shortStale')?.aborted, false);
+    assert.equal(shortLikeBtn.dataset.ttCount, '100K');
+
+    // Swiping to the next Short aborts the previous fetch + observer and replaces labels.
+    setShortsOverlayStats('shortCurrent', '385 K');
+    assert.equal(signals.get('shortStale')?.aborted, true);
+    assert.ok(disconnectCount >= 1);
+
+    // Late resolution from aborted Short must be ignored.
+    resolveFirst?.(
+      new Response(JSON.stringify({ dislikes: 99999 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    assert.equal(shortLikeBtn.dataset.ttCount, '385K');
+    // Like button remains focusable while synthetic Dislike button has focus disabled.
+    assert.equal(shortLikeBtn.inert, false);
+    assert.equal(shortLikeBtn.attrs.tabindex, '0');
+    assert.equal(shortDislikeBtn.dataset.ttCount, '3.2K');
+    assert.equal(shortDislikeBtn.inert, true);
+    assert.equal(shortDislikeBtn.attrs.hybridnavfocusable, 'false');
+    assert.equal(shortDislikeBtn.attrs.tabindex, '-1');
   });
 });

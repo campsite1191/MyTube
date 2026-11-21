@@ -9,6 +9,7 @@ import { installReturnYouTubeDislike } from './features/return-youtube-dislike.t
 import { installRewindOnPause } from './features/rewind-on-pause.ts';
 import { installSponsorBlock } from './features/sponsorblock.ts';
 import { installTransportControlsStyles } from './transforms/player-overlays.ts';
+import { installShortsMetadata } from './transforms/shorts-metadata.ts';
 import { setupMemoryPressureListener } from './transforms/thumbnails.ts';
 import { initClock } from './ui/clock.ts';
 import './ui/ui.ts';
@@ -26,6 +27,7 @@ void waitForDomReady().then(() => {
     installPlayerBarInfo();
     installReturnYouTubeDislike();
     installRewindOnPause();
+    installShortsMetadata();
     installTransportControlsStyles();
   });
 });

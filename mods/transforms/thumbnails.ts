@@ -1,7 +1,8 @@
 import pLimit from 'p-limit';
 import QuickLRU from 'quick-lru';
 import type { FeedItem, FormattedText, Thumbnail } from '../types/innertube.ts';
-import { unwrapFeedItem } from '../utils/feed-helpers.ts';
+import { FEED_METADATA_CACHE_MAX_SIZE, unwrapFeedItem } from '../utils/feed-helpers.ts';
+import { clearShortsMetadataCache } from './shorts-metadata.ts';
 
 const HQ_THUMBNAIL_WIDTH = 1280;
 const HQ_THUMBNAIL_HEIGHT = 720;
@@ -218,11 +219,10 @@ export function applyDeArrowBrandingToItem(entry: FeedItem, videoId: string, bra
 }
 
 const MAX_DEARROW_CONCURRENCY = 6;
-const DEARROW_CACHE_MAX_SIZE = 2000;
 const EMPTY_DEARROW_BRANDING: DeArrowBrandingResponse = { titles: [], thumbnails: [] };
 
 const deArrowLimit = pLimit(MAX_DEARROW_CONCURRENCY);
-const deArrowCache = new QuickLRU<string, DeArrowBrandingResponse>({ maxSize: DEARROW_CACHE_MAX_SIZE });
+const deArrowCache = new QuickLRU<string, DeArrowBrandingResponse>({ maxSize: FEED_METADATA_CACHE_MAX_SIZE });
 const inFlightDeArrow = new Map<string, Promise<DeArrowBrandingResponse | null>>();
 let activeNavigationController: AbortController | null =
   typeof AbortController === 'function' ? new AbortController() : null;
@@ -251,6 +251,7 @@ export function setupMemoryPressureListener(): void {
     onMemoryPressure.addListener(() => {
       console.warn('Memory pressure detected, clearing caches...');
       clearDeArrowCache();
+      clearShortsMetadataCache();
     });
   }
 }

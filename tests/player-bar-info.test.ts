@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
+  computeRemainingText,
   formatClockTime,
   formatDurationLabel,
   formatRemainingLabel,
@@ -23,10 +24,12 @@ describe('player-bar-info helpers', () => {
     assert.equal(formatClockTime(-5), '0:00');
   });
 
-  test('formatRemainingLabel appends remaining time and preserves suffix', () => {
-    assert.equal(formatRemainingLabel('1:00', 180, 60, null, false), '1:00 (-2:00)');
-    assert.equal(formatRemainingLabel('1:00 (-9:99) / 3:00', 180, 60, 180, false), '1:00 (-2:00) / 3:00');
-    assert.equal(formatRemainingLabel('3:00', 180, 60, null, true), '3:00 (-2:00)');
+  test('computeRemainingText and formatRemainingLabel format • -remaining cleanly', () => {
+    assert.equal(computeRemainingText('1:00', 180, 60, null, false), '-2:00');
+    assert.equal(computeRemainingText('3:00', 180, 60, null, true), '-2:00');
+    assert.equal(formatRemainingLabel('1:00', 180, 60, null, false), '1:00 • -2:00');
+    assert.equal(formatRemainingLabel('1:00 (-9:99) / 3:00', 180, 60, 180, false), '1:00 • -2:00 / 3:00');
+    assert.equal(formatRemainingLabel('3:00', 180, 60, null, true), '3:00 • -2:00');
   });
 
   test('readActiveQualityLabel and formatDurationLabel format right-side speed, quality, and total time', () => {
@@ -86,6 +89,7 @@ describe('installPlayerBarInfo Watch session lifecycle', () => {
       nodeType: 1,
       isConnected: true,
       textContent: '0:30 / 2:00',
+      dataset: {} as Record<string, string>,
       childNodes: [] as Node[],
       parentElement: null,
       closest: () => null,
@@ -186,10 +190,11 @@ describe('installPlayerBarInfo Watch session lifecycle', () => {
       for (const cb of [...observerCbs]) cb();
       assert.equal(elapsedEl.textContent, '0:30 / 2:00');
 
-      // Player bar becomes visible -> observer refreshes elapsed + right-side quality • total time.
+      // Player bar becomes visible -> observer refreshes data-tt-remaining + right-side quality • total time without mutating elapsed textContent.
       classes.delete('zylon-hidden');
       for (const cb of [...observerCbs]) cb();
-      assert.equal(elapsedEl.textContent, '0:30 (-1:30) / 2:00');
+      assert.equal(elapsedEl.textContent, '0:30 / 2:00');
+      assert.equal(elapsedEl.dataset.ttRemaining, '-1:30');
       assert.equal(durationEl.textContent, '720p • 2:00');
 
       // Non-1x rate and quality changes update right-side label dynamically, omitting speed again when reset to 1x.

@@ -836,7 +836,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
 
     await waitFor(
       () =>
-        elapsedEl.textContent === '0:30 (-1:30)' &&
+        elapsedEl.dataset.ttRemaining === '-1:30' &&
         durationEl.textContent === '1.25x • 1080p • 2:00' &&
         Boolean(clockEl.children[0]?.children[1]?.textContent.startsWith('Ends ')) &&
         likeBtn.dataset.ttCount === '5K' &&
@@ -844,7 +844,8 @@ describe('End-to-end userscript bundle lifecycle', () => {
         fetchCalls.some((c) => c.url.includes('sponsor.ajay.app/api/skipSegments'))
     );
 
-    assert.equal(elapsedEl.textContent, '0:30 (-1:30)');
+    assert.equal(elapsedEl.textContent, '0:30');
+    assert.equal(elapsedEl.dataset.ttRemaining, '-1:30');
     assert.equal(durationEl.textContent, '1.25x • 1080p • 2:00');
     assert.ok(clockEl.querySelectorAll('div').length >= 1);
     const endEl = clockEl.children[0]?.children[1];

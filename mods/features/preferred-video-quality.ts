@@ -1,8 +1,13 @@
-import { onAbort } from '../core/lifecycle.ts';
-import { onPlayer, onVideo } from '../core/player-observer.ts';
+import { onAbort, onWatchSession } from '../core/lifecycle.ts';
+import { onPlayer } from '../core/player-observer.ts';
 import type { YtPlayerStateObject, YtQualityData } from '../types/yttv.ts';
+import { isRecord } from '../utils/type-guards.ts';
 
 const PLAYER_STATE_CHANGE_EVENT = 'onStateChange';
+const PLAYER_QUALITY_STORAGE_KEY = 'yt-player-quality';
+// YouTube TV's storage reader rejects entries older than 30 days and writes 360-day expiry.
+const PLAYER_QUALITY_MAX_AGE_MS = 2_592_000_000;
+const PLAYER_QUALITY_EXPIRY_MS = 31_104_000_000;
 const TARGET_VIDEO_HEIGHT = 2160;
 const HIGHRES_QUALITY_ID = 'highres';
 
@@ -14,17 +19,9 @@ export interface QualityControllablePlayer {
   ) => void;
   removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
   getPlayerStateObject?: () => YtPlayerStateObject | null | undefined;
+  getPlaybackQuality?: () => string | null | undefined;
   getAvailableQualityData?: () => readonly YtQualityData[] | null | undefined;
   setPlaybackQualityRange?: (minQuality: string, maxQuality: string) => void;
-}
-
-export interface QualityVideoTarget {
-  addEventListener: (
-    type: string,
-    listener: EventListenerOrEventListenerObject,
-    options?: boolean | AddEventListenerOptions
-  ) => void;
-  removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
 }
 
 export interface PreferredQualityController {
@@ -36,6 +33,56 @@ export interface PreferredQualityController {
 interface ResolutionCandidate {
   quality: string;
   height: number;
+}
+
+function readStoredQualityHeight(raw: string | null, now: number): number | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return null;
+    if (typeof parsed.expiration !== 'number' || parsed.expiration <= now) return null;
+    if (typeof parsed.creation !== 'number' || parsed.creation <= now - PLAYER_QUALITY_MAX_AGE_MS) return null;
+
+    const payload: unknown = typeof parsed.data === 'string' ? JSON.parse(parsed.data) : parsed.data;
+    if (!isRecord(payload)) return null;
+    return typeof payload.quality === 'number' ? payload.quality : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Seeds YouTube's `yt-player-quality` storage preference to 2160p unless a valid entry at or
+ * above 2160p is already stored, so Watch playback initializes at the target tier natively.
+ */
+export function seedPreferredQualityStorage(): boolean {
+  let storage: Storage | null = null;
+  try {
+    storage = typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return false;
+  }
+  if (!storage) return false;
+
+  const now = Date.now();
+  try {
+    const existingQuality = readStoredQualityHeight(storage.getItem(PLAYER_QUALITY_STORAGE_KEY), now);
+    if (existingQuality !== null && existingQuality >= TARGET_VIDEO_HEIGHT) {
+      return false;
+    }
+
+    storage.setItem(
+      PLAYER_QUALITY_STORAGE_KEY,
+      JSON.stringify({
+        data: JSON.stringify({ quality: TARGET_VIDEO_HEIGHT, previousQuality: TARGET_VIDEO_HEIGHT }),
+        expiration: now + PLAYER_QUALITY_EXPIRY_MS,
+        creation: now,
+      })
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function parseResolutionHeight(label: string | null | undefined): number {
@@ -82,6 +129,10 @@ export function applyPreferredQualityToPlayer(player: QualityControllablePlayer)
 
   try {
     const targetQuality = selectPlaybackQuality(player.getAvailableQualityData?.());
+    // Skipping setPlaybackQualityRange when already active avoids YouTube's unconditional MSE reload.
+    if (player.getPlaybackQuality?.() === targetQuality) {
+      return true;
+    }
     player.setPlaybackQualityRange(targetQuality, targetQuality);
     return true;
   } catch (error) {
@@ -92,15 +143,14 @@ export function applyPreferredQualityToPlayer(player: QualityControllablePlayer)
 
 export function attachPreferredQualityController(
   player: QualityControllablePlayer,
-  video?: QualityVideoTarget | null,
   signal?: AbortSignal
 ): PreferredQualityController {
   const controllerAbort = new AbortController();
-  let playAbort: AbortController | null = null;
+  let locked = false;
 
-  const disarmFirstPlay = (): void => {
-    playAbort?.abort();
-    playAbort = null;
+  const dispose = (): void => {
+    if (controllerAbort.signal.aborted) return;
+    controllerAbort.abort();
     player.removeEventListener?.(PLAYER_STATE_CHANGE_EVENT, handleStateChange);
   };
 
@@ -110,34 +160,28 @@ export function attachPreferredQualityController(
   };
 
   const handleStateChange = (): void => {
-    if (controllerAbort.signal.aborted || !player.getPlayerStateObject?.()?.isPlaying) return;
-    // Once quality locks on first play for the loaded media, detach onStateChange until next loadstart.
+    if (controllerAbort.signal.aborted || locked) return;
+    const state = player.getPlayerStateObject?.();
+    if (!state?.isOrWillBePlaying && !state?.isPlaying) return;
+
+    const availableQualities = player.getAvailableQualityData?.();
+    if (player.getAvailableQualityData && (!availableQualities || availableQualities.length === 0)) {
+      return;
+    }
+
+    // Lock at most once per Watch session so mid-playback MSE loadstart events cannot re-trigger a seek to 0.
     if (applyQuality()) {
-      disarmFirstPlay();
+      locked = true;
+      dispose();
     }
-  };
-
-  const armFirstPlay = (): void => {
-    if (controllerAbort.signal.aborted) return;
-    disarmFirstPlay();
-    playAbort = new AbortController();
-    handleStateChange();
-    if (playAbort && !playAbort.signal.aborted) {
-      player.addEventListener(PLAYER_STATE_CHANGE_EVENT, handleStateChange, { signal: playAbort.signal });
-    }
-  };
-
-  const dispose = (): void => {
-    if (controllerAbort.signal.aborted) return;
-    controllerAbort.abort();
-    disarmFirstPlay();
-    video?.removeEventListener?.('loadstart', armFirstPlay);
   };
 
   onAbort(signal, dispose);
   if (!signal?.aborted) {
-    video?.addEventListener('loadstart', armFirstPlay, { signal: controllerAbort.signal });
-    armFirstPlay();
+    handleStateChange();
+    if (!controllerAbort.signal.aborted) {
+      player.addEventListener(PLAYER_STATE_CHANGE_EVENT, handleStateChange, { signal: controllerAbort.signal });
+    }
   }
 
   return {
@@ -150,15 +194,16 @@ export function attachPreferredQualityController(
 let preferredQualityInstalled = false;
 
 /**
- * Applies preferred playback quality on first play for every media load across the app
- * (Watch videos, Shorts, and inline Previews), keeping zero state listeners active after lock.
+ * Seeds persistent quality preferences and locks Watch sessions to 2160p on initial startup
+ * without interrupting Home inline previews or Shorts.
  */
 export function installPreferredVideoQuality(): void {
   if (preferredQualityInstalled || typeof document === 'undefined' || typeof window === 'undefined') return;
   preferredQualityInstalled = true;
+  seedPreferredQualityStorage();
   onPlayer((player) => {
-    onVideo((video) => {
-      attachPreferredQualityController(player, video);
+    onWatchSession((_videoId, signal) => {
+      attachPreferredQualityController(player, signal);
     });
   });
 }

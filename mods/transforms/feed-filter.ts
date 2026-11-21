@@ -1,9 +1,10 @@
-import type { FeedItem, FormattedText } from '../types/innertube.ts';
+import type { FeedItem } from '../types/innertube.ts';
 import { compactInPlace, unwrapFeedItem } from '../utils/feed-helpers.ts';
-import { isRecord } from '../utils/type-guards.ts';
+import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 
 const BADGE_KEY_RE = /badge/i;
 const SURVEY_KEY_RE = /survey|questionnaire/i;
+const HIDDEN_SHELF_TITLES = new Set(['top channels you watch', 'explore more topics']);
 const BADGE_SKIP_KEYS = new Set([
   'parameters',
   'trackingParams',
@@ -132,6 +133,25 @@ export function getExistingMenuItemLists(item: FeedItem | null | undefined): Arr
   return Array.from(new Set(lists));
 }
 
+function getShelfTitleSources(item: Record<string, unknown>): unknown[] {
+  const sr = isRecord(item.shelfRenderer) ? item.shelfRenderer : undefined;
+  const richContent = readRecordPath(item, 'richSectionRenderer', 'content');
+  const richShelf = readRecordPath(richContent, 'richShelfRenderer');
+  const nestedShelf = readRecordPath(richContent, 'shelfRenderer');
+  const isr = isRecord(item.itemSectionRenderer) ? item.itemSectionRenderer : undefined;
+
+  return [
+    sr?.title,
+    readRecordPath(sr, 'headerRenderer', 'shelfHeaderRenderer')?.title,
+    richShelf?.title,
+    readRecordPath(richShelf, 'headerRenderer', 'shelfHeaderRenderer')?.title,
+    nestedShelf?.title,
+    readRecordPath(nestedShelf, 'headerRenderer', 'shelfHeaderRenderer')?.title,
+    readRecordPath(isr, 'header', 'shelfHeaderRenderer')?.title,
+    item.title,
+  ];
+}
+
 function isSurveyTitle(titleText: unknown): boolean {
   if (!titleText) return false;
   const normalized = String(titleText).toLowerCase();
@@ -145,14 +165,21 @@ export function isSurveyItem(item: FeedItem | null | undefined): boolean {
     if (Object.hasOwn(item, key) && SURVEY_KEY_RE.test(key)) return true;
   }
 
-  const textSources: Array<FormattedText | string | undefined> = [
-    item.shelfRenderer?.title,
-    item.shelfRenderer?.headerRenderer?.shelfHeaderRenderer?.title,
-    item.title,
-  ];
-
-  for (const candidate of textSources) {
+  for (const candidate of getShelfTitleSources(item)) {
     if (isSurveyTitle(readFormattedText(candidate))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isHiddenShelf(item: FeedItem | null | undefined): boolean {
+  if (!isRecord(item)) return false;
+
+  for (const candidate of getShelfTitleSources(item)) {
+    const title = readFormattedText(candidate).trim().toLowerCase();
+    if (title && HIDDEN_SHELF_TITLES.has(title)) {
       return true;
     }
   }
@@ -287,6 +314,7 @@ export function shouldHideFeedItem(item: FeedItem | null | undefined): boolean {
   if (item.adSlotRenderer || target.adSlotRenderer) return true;
   if (item.feedNudgeRenderer || target.feedNudgeRenderer) return true;
   if (isSurveyItem(item) || isSurveyItem(target)) return true;
+  if (isHiddenShelf(item) || isHiddenShelf(target)) return true;
 
   if (isShelfContainer(target)) {
     return false;

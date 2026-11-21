@@ -1,32 +1,34 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { QualityControllablePlayer, QualityVideoTarget } from '../mods/features/preferred-video-quality.ts';
+import type { QualityControllablePlayer } from '../mods/features/preferred-video-quality.ts';
 import {
   applyPreferredQualityToPlayer,
   attachPreferredQualityController,
   installPreferredVideoQuality,
   parseResolutionHeight,
+  seedPreferredQualityStorage,
   selectPlaybackQuality,
 } from '../mods/features/preferred-video-quality.ts';
 import type { YtPlayerStateObject, YtQualityData } from '../mods/types/yttv.ts';
 
 interface MockPlayerOptions {
   availableQualities?: YtQualityData[];
+  currentQuality?: string;
   playerState?: YtPlayerStateObject;
   throwOnSet?: boolean;
 }
 
 function createMockMedia(options: MockPlayerOptions = {}): {
   player: QualityControllablePlayer;
-  video: QualityVideoTarget;
   appliedRanges: Array<[string, string]>;
   setState: (state: YtPlayerStateObject) => void;
-  emitLoadStart: () => void;
+  setAvailableQualities: (qualities: YtQualityData[]) => void;
+  setCurrentQuality: (quality: string) => void;
   playerListenerCount: () => number;
-  videoListenerCount: () => number;
 } {
   let currentState: YtPlayerStateObject = options.playerState ?? {};
-  const availableQualities = options.availableQualities ?? [
+  let currentQuality = options.currentQuality ?? 'unknown';
+  let availableQualities = options.availableQualities ?? [
     { quality: 'hd2160', qualityLabel: '2160p' },
     { quality: 'hd1080', qualityLabel: '1080p' },
     { quality: 'hd720', qualityLabel: '720p' },
@@ -34,7 +36,6 @@ function createMockMedia(options: MockPlayerOptions = {}): {
   ];
 
   const playerListeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
-  const videoListeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
   const appliedRanges: Array<[string, string]> = [];
 
   const bindListeners = (map: Map<string, Set<EventListenerOrEventListenerObject>>) => ({
@@ -61,39 +62,36 @@ function createMockMedia(options: MockPlayerOptions = {}): {
   });
 
   const pBus = bindListeners(playerListeners);
-  const vBus = bindListeners(videoListeners);
 
   const player: QualityControllablePlayer = {
     addEventListener: pBus.add,
     removeEventListener: pBus.remove,
     getPlayerStateObject: () => currentState,
+    getPlaybackQuality: () => currentQuality,
     getAvailableQualityData: () => availableQualities,
     setPlaybackQualityRange(minQuality, maxQuality) {
       if (options.throwOnSet) {
         throw new Error('Player quality range unavailable');
       }
       appliedRanges.push([minQuality, maxQuality]);
+      currentQuality = maxQuality;
     },
-  };
-
-  const video: QualityVideoTarget = {
-    addEventListener: vBus.add,
-    removeEventListener: vBus.remove,
   };
 
   return {
     player,
-    video,
     appliedRanges,
     setState(state) {
       currentState = state;
       pBus.emit('onStateChange');
     },
-    emitLoadStart() {
-      vBus.emit('loadstart');
+    setAvailableQualities(qualities) {
+      availableQualities = qualities;
+    },
+    setCurrentQuality(quality) {
+      currentQuality = quality;
     },
     playerListenerCount: () => playerListeners.get('onStateChange')?.size ?? 0,
-    videoListenerCount: () => videoListeners.get('loadstart')?.size ?? 0,
   };
 }
 
@@ -145,9 +143,58 @@ describe('selectPlaybackQuality', () => {
   });
 });
 
+describe('seedPreferredQualityStorage', () => {
+  test('seeds missing, expired, or lower yt-player-quality entries to 2160p without overwriting valid >=2160p entries', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevStorage = globals.localStorage;
+    const store = new Map<string, string>();
+
+    t.after(() => {
+      if (prevStorage === undefined) delete globals.localStorage;
+      else globals.localStorage = prevStorage;
+    });
+
+    globals.localStorage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+    };
+
+    assert.equal(seedPreferredQualityStorage(), true);
+    const seeded = JSON.parse(store.get('yt-player-quality') ?? '{}') as {
+      data: string;
+      expiration: number;
+      creation: number;
+    };
+    assert.deepEqual(JSON.parse(seeded.data), { quality: 2160, previousQuality: 2160 });
+    assert.ok(seeded.expiration > Date.now());
+
+    // Valid 2160p entry should not be rewritten.
+    assert.equal(seedPreferredQualityStorage(), false);
+
+    // Lower 720p entry should be upgraded back to 2160p.
+    store.set(
+      'yt-player-quality',
+      JSON.stringify({
+        data: JSON.stringify({ quality: 720, previousQuality: 720 }),
+        expiration: Date.now() + 100_000,
+        creation: Date.now(),
+      })
+    );
+    assert.equal(seedPreferredQualityStorage(), true);
+    const upgraded = JSON.parse(store.get('yt-player-quality') ?? '{}') as { data: string };
+    assert.deepEqual(JSON.parse(upgraded.data), { quality: 2160, previousQuality: 2160 });
+  });
+});
+
 describe('applyPreferredQualityToPlayer', () => {
-  test('applies selected quality range and catches player exceptions cleanly', () => {
+  test('applies selected quality range, skips redundant switches, and catches player exceptions cleanly', () => {
     const { player, appliedRanges } = createMockMedia();
+    assert.equal(applyPreferredQualityToPlayer(player), true);
+    assert.deepEqual(appliedRanges, [['hd2160', 'hd2160']]);
+
+    // Second call sees currentQuality === 'hd2160' and skips setPlaybackQualityRange.
     assert.equal(applyPreferredQualityToPlayer(player), true);
     assert.deepEqual(appliedRanges, [['hd2160', 'hd2160']]);
 
@@ -157,66 +204,123 @@ describe('applyPreferredQualityToPlayer', () => {
 });
 
 describe('attachPreferredQualityController', () => {
-  test('locks quality once on first play, detaches onStateChange, and re-arms on next loadstart (Watch/Shorts/Previews)', () => {
-    const mock = createMockMedia({ playerState: { isPlaying: false } });
-    const controller = attachPreferredQualityController(mock.player, mock.video);
+  test('locks once when playback starts with populated qualities and ignores subsequent state changes', () => {
+    const mock = createMockMedia({ availableQualities: [], playerState: { isOrWillBePlaying: false } });
+    const controller = attachPreferredQualityController(mock.player);
 
-    assert.equal(mock.videoListenerCount(), 1);
     assert.equal(mock.playerListenerCount(), 1);
 
-    // First play locks quality and detaches onStateChange immediately.
-    mock.setState({ isPlaying: true });
+    // Empty quality list keeps controller armed without firing premature highres fallback.
+    mock.setState({ isOrWillBePlaying: true, isPlaying: false });
+    assert.deepEqual(mock.appliedRanges, []);
+    assert.equal(mock.playerListenerCount(), 1);
+
+    // Once qualities arrive and player isOrWillBePlaying, locks once and detaches immediately.
+    mock.setAvailableQualities([
+      { quality: 'hd2160', qualityLabel: '2160p' },
+      { quality: 'hd1080', qualityLabel: '1080p' },
+    ]);
+    mock.setState({ isOrWillBePlaying: true, isPlaying: false });
     assert.deepEqual(mock.appliedRanges, [['hd2160', 'hd2160']]);
     assert.equal(mock.playerListenerCount(), 0);
 
-    // Pausing/playing later in same video fires zero callbacks.
+    // Subsequent playing/seek transitions do not re-trigger setPlaybackQualityRange.
     mock.setState({ isPlaying: false });
     mock.setState({ isPlaying: true });
+    controller.handleStateChange();
     assert.equal(mock.appliedRanges.length, 1);
 
-    // Next preview / Short / Watch video loads (loadstart) -> arms first play and locks cleanly.
-    mock.setState({ isPlaying: false });
-    mock.emitLoadStart();
-    assert.equal(mock.playerListenerCount(), 1);
-    mock.setState({ isPlaying: true });
-    assert.equal(mock.appliedRanges.length, 2);
-    assert.equal(mock.playerListenerCount(), 0);
-
     controller.dispose();
-    assert.equal(mock.videoListenerCount(), 0);
   });
 
-  test('installPreferredVideoQuality locks 2160p across player loads on Home previews and Watch videos', async (t) => {
+  test('disposes listener cleanly when Watch session AbortSignal aborts before lock', () => {
+    const abortController = new AbortController();
+    const mock = createMockMedia({ playerState: { isOrWillBePlaying: false } });
+    attachPreferredQualityController(mock.player, abortController.signal);
+    assert.equal(mock.playerListenerCount(), 1);
+
+    abortController.abort();
+    assert.equal(mock.playerListenerCount(), 0);
+
+    mock.setState({ isOrWillBePlaying: true });
+    assert.deepEqual(mock.appliedRanges, []);
+  });
+
+  test('installPreferredVideoQuality seeds storage and scopes locking strictly to Watch sessions', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
+    const prevStorage = globals.localStorage;
+    const winListeners = new Map<string, Set<() => void>>();
+    const store = new Map<string, string>();
+    const fakeLocation = { hash: '#/', search: '' };
 
     t.after(() => {
       if (prevWindow === undefined) delete globals.window;
       else globals.window = prevWindow;
       if (prevDocument === undefined) delete globals.document;
       else globals.document = prevDocument;
+      if (prevStorage === undefined) delete globals.localStorage;
+      else globals.localStorage = prevStorage;
     });
 
-    const mock = createMockMedia({ playerState: { isPlaying: false } });
-    globals.window = {};
+    const mock = createMockMedia({ playerState: { isOrWillBePlaying: false } });
+    globals.localStorage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+    };
+    globals.window = {
+      location: fakeLocation,
+      addEventListener: (type: string, fn: () => void) => {
+        let set = winListeners.get(type);
+        if (!set) {
+          set = new Set();
+          winListeners.set(type, set);
+        }
+        set.add(fn);
+      },
+    };
     globals.document = {
       body: {},
       documentElement: {},
-      querySelector: (selector: string) => {
-        if (selector === '.html5-video-player') return mock.player;
-        if (selector === 'video') return mock.video;
-        return null;
-      },
+      querySelector: (selector: string) => (selector === '.html5-video-player' ? mock.player : null),
+    };
+
+    const emitHashChange = (hash: string) => {
+      fakeLocation.hash = hash;
+      for (const fn of winListeners.get('hashchange') ?? []) fn();
     };
 
     installPreferredVideoQuality();
-    assert.equal(mock.videoListenerCount(), 1);
-    assert.equal(mock.playerListenerCount(), 1);
+    assert.ok(store.get('yt-player-quality')?.includes('2160'));
 
-    // Works on Home preview or Watch without needing URL route changes.
-    mock.setState({ isPlaying: true });
+    // Home inline previews and Shorts must remain untouched.
+    assert.equal(mock.playerListenerCount(), 0);
+    emitHashChange('#/shorts/abc123');
+    assert.equal(mock.playerListenerCount(), 0);
+
+    // Watch session attaches and locks once before playback presents.
+    emitHashChange('#/watch?v=first123');
+    assert.equal(mock.playerListenerCount(), 1);
+    mock.setState({ isOrWillBePlaying: true, isPlaying: false });
     assert.deepEqual(mock.appliedRanges, [['hd2160', 'hd2160']]);
+    assert.equal(mock.playerListenerCount(), 0);
+
+    // Switching to another Watch video starts a fresh Watch lock.
+    mock.setCurrentQuality('large');
+    mock.setState({ isOrWillBePlaying: false, isPlaying: false });
+    emitHashChange('#/watch?v=next456');
+    assert.equal(mock.playerListenerCount(), 1);
+    mock.setState({ isOrWillBePlaying: true, isPlaying: false });
+    assert.deepEqual(mock.appliedRanges, [
+      ['hd2160', 'hd2160'],
+      ['hd2160', 'hd2160'],
+    ]);
+    assert.equal(mock.playerListenerCount(), 0);
+
+    emitHashChange('#/');
     assert.equal(mock.playerListenerCount(), 0);
   });
 });

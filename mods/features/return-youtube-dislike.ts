@@ -16,12 +16,19 @@ const TRANSPORT_CONTROLS_DOM_SELECTOR =
 
 let currentLike: { videoId: string; count: string } | null = null;
 let currentDislike: { videoId: string; count: string } | null = null;
+let currentShorts: { videoId: string; likeCount: string | null; dislikeCount: string | null } | null = null;
+let activeShortsAbort: AbortController | null = null;
 let stylesInstalled = false;
 let rydInstalled = false;
 const patchedTransportInstances = new WeakSet<object>();
 
 const VOTE_TARGET =
   ':is(ytlr-like-button-renderer, [idomkey="like-dislike-container"], [idomkey="like-button"], [idomkey="dislike-button"])';
+const SHORTS_LIKE_SELECTOR =
+  'ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(ytlr-toggle-button-view-model)';
+const SHORTS_DISLIKE_SELECTOR =
+  'ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(yt-button-container[aria-label="Dislike"])';
+const SHORTS_COUNT_TARGET = 'ytlr-reel-action-bar-button-view-model[data-tt-count]';
 
 function installVoteLabelStyles(): void {
   if (stylesInstalled || typeof document === 'undefined') return;
@@ -30,13 +37,16 @@ function installVoteLabelStyles(): void {
       ytlr-watch-default ${VOTE_TARGET} {
         pointer-events: none !important;
       }
-      ytlr-watch-default ${VOTE_TARGET}:has([data-tt-count]) {
+      ytlr-watch-default ${VOTE_TARGET}:has([data-tt-count]),
+      ${SHORTS_COUNT_TARGET},
+      ${SHORTS_COUNT_TARGET} :is(yt-icon-button, yt-button-container) {
         width: auto !important;
         min-width: fit-content !important;
         max-width: none !important;
         overflow: visible !important;
       }
-      ytlr-watch-default ${VOTE_TARGET}[data-tt-count] {
+      ytlr-watch-default ${VOTE_TARGET}[data-tt-count],
+      ${SHORTS_COUNT_TARGET} {
         display: inline-flex !important;
         flex-direction: row !important;
         align-items: center !important;
@@ -46,7 +56,11 @@ function installVoteLabelStyles(): void {
         gap: 0.375rem;
         overflow: visible !important;
       }
-      ytlr-watch-default ${VOTE_TARGET}[data-tt-count]::after {
+      ${SHORTS_COUNT_TARGET} {
+        margin-right: 0.75rem !important;
+      }
+      ytlr-watch-default ${VOTE_TARGET}[data-tt-count]::after,
+      ${SHORTS_COUNT_TARGET}::after {
         content: attr(data-tt-count);
         flex-shrink: 0;
         padding-right: 0.25rem;
@@ -128,11 +142,13 @@ function patchTransportFocusSkip(): void {
   patchedTransportInstances.add(inst);
 }
 
-function applyButtonLabels(selector: string, count: string | null): HTMLElement[] {
+function applyButtonLabels(selector: string, count: string | null, lockFocus = true): HTMLElement[] {
   const matches = queryElements(selector);
   for (const el of matches) {
-    // Treat like/dislike strictly as display-only count labels so D-pad skips them cleanly without tooltip overlap.
-    disableFocus(el);
+    if (lockFocus) {
+      // Treat Watch like/dislike strictly as display-only count labels so D-pad skips them cleanly without tooltip overlap.
+      disableFocus(el);
+    }
 
     const hasInnerMatch = matches.some((other) => other !== el && el.contains?.(other));
     if (!hasInnerMatch && count) {
@@ -183,6 +199,62 @@ export function setWatchLikeCount(videoId: string | null, count: string | null):
   }
 }
 
+function clearShortsOverlayState(): void {
+  activeShortsAbort?.abort();
+  activeShortsAbort = null;
+  currentShorts = null;
+}
+
+function applyShortsOverlayLabels(): void {
+  if (!currentShorts || typeof document === 'undefined') return;
+  applyButtonLabels(SHORTS_LIKE_SELECTOR, currentShorts.likeCount, false);
+  applyButtonLabels(SHORTS_DISLIKE_SELECTOR, currentShorts.dislikeCount, true);
+}
+
+/**
+ * Displays like counts from `reel_item_watch` and RYD dislike counts on the Shorts action bar.
+ */
+export function setShortsOverlayStats(videoId: string | null, likeCount: string | null): void {
+  if (!videoId) return;
+  const compactLikes = typeof likeCount === 'string' && likeCount.trim() ? likeCount.replace(/\s+/g, '') : null;
+  if (currentShorts?.videoId === videoId) {
+    if (compactLikes) currentShorts.likeCount = compactLikes;
+    applyShortsOverlayLabels();
+    return;
+  }
+
+  activeShortsAbort?.abort();
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  activeShortsAbort = controller;
+  currentShorts = { videoId, likeCount: compactLikes, dislikeCount: null };
+
+  if (typeof document === 'undefined') return;
+  installVoteLabelStyles();
+
+  const sync = (): void => {
+    if (!controller?.signal.aborted && currentShorts?.videoId === videoId) {
+      applyShortsOverlayLabels();
+    }
+  };
+
+  const scheduleFrame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb: () => void) => cb();
+  scheduleFrame(() => {
+    if (controller?.signal.aborted || currentShorts?.videoId !== videoId) return;
+    sync();
+    const target =
+      document.querySelector?.('ytlr-reel-player-overlay-renderer') ?? document.body ?? document.documentElement;
+    if (target) {
+      observeDom(target, sync, { childList: true, subtree: true }, controller?.signal);
+    }
+  });
+
+  void fetchDislikeCount(videoId, controller?.signal).then((dislikes) => {
+    if (!dislikes || controller?.signal.aborted || currentShorts?.videoId !== videoId) return;
+    currentShorts.dislikeCount = dislikes;
+    sync();
+  });
+}
+
 export async function fetchDislikeCount(videoId: string, signal?: AbortSignal): Promise<string | null> {
   if (!videoId || signal?.aborted || typeof fetch !== 'function') return null;
   try {
@@ -205,7 +277,14 @@ export function installReturnYouTubeDislike(): void {
   rydInstalled = true;
   installVoteLabelStyles();
 
+  window.addEventListener('hashchange', () => {
+    if (!window.location.hash.includes('shorts')) {
+      clearShortsOverlayState();
+    }
+  });
+
   onWatchSession((videoId, signal) => {
+    clearShortsOverlayState();
     if (currentLike?.videoId !== videoId) currentLike = null;
     if (currentDislike?.videoId !== videoId) currentDislike = null;
 

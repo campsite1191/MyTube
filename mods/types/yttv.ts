@@ -4,6 +4,7 @@ export interface YtPlayerStateObject {
   isPlaying?: boolean;
   isPaused?: boolean;
   isEnded?: boolean;
+  isOrWillBePlaying?: boolean;
 }
 
 interface YtVideoData {
@@ -21,6 +22,7 @@ export interface YtPlayerElement extends HTMLElement {
   getPlayerStateObject?: () => YtPlayerStateObject;
   getVideoData?: () => YtVideoData;
   getVideoStats?: () => Record<string, unknown>;
+  getPlaybackQuality?: () => string;
   getPlaybackQualityLabel?: () => string;
   getAvailableQualityData?: () => YtQualityData[];
   setPlaybackQualityRange?: (min: string, max: string) => void;

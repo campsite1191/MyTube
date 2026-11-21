@@ -9,7 +9,7 @@ const TIME_LABEL_SELECTOR = '[idomkey="time-label"]';
 const ELAPSED_SELECTOR = '[idomkey="elapsedTime"]';
 const DURATION_SELECTOR = '[idomkey="duration"]';
 const TEXT_NODE_TYPE = 3; // Node.TEXT_NODE (numeric fallback avoids ReferenceError when Node is unmocked in tests)
-const OURS = /\s*\(-\d+:\d{2}(?::\d{2})?\)/g;
+const OURS = /\s*(?:\(-\d+:\d{2}(?::\d{2})?\)|•\s*-\d+:\d{2}(?::\d{2})?)/g;
 const CLOCK_RE = /\d+:\d{2}(?::\d{2})?/;
 const CLOCK_SPLIT_RE = /^(.*?\d+:\d{2}(?::\d{2})?)([\s\S]*)$/;
 const TRAILING_CLOCK_RE = /(\d+:\d{2}(?::\d{2})?)\s*$/;
@@ -28,7 +28,7 @@ const VIDEO_EVENTS = [
 interface ClockTarget {
   node: Node;
   isText: boolean;
-  el: Element;
+  el: HTMLElement;
   fallbackDur: boolean;
 }
 
@@ -58,9 +58,9 @@ export function formatClockTime(totalSeconds: number): string {
 }
 
 /**
- * Formats an elapsed/duration label by appending `(-remaining)`.
+ * Computes the formatted remaining-time label (`-m:ss` or `-h:mm:ss`) for the player bar.
  */
-export function formatRemainingLabel(
+export function computeRemainingText(
   rawText: string,
   durationSec: number,
   currentTimeSec: number,
@@ -77,12 +77,29 @@ export function formatRemainingLabel(
     elapsedSec !== null
       ? Math.max(0, effectiveDuration - elapsedSec)
       : Math.max(0, effectiveDuration - Math.floor(currentTimeSec));
-  const rem = `(-${formatClockTime(secondsLeft)})`;
+  return `-${formatClockTime(secondsLeft)}`;
+}
+
+/**
+ * Formats a combined elapsed/duration fallback label by inserting `• -remaining`.
+ */
+export function formatRemainingLabel(
+  rawText: string,
+  durationSec: number,
+  currentTimeSec: number,
+  durationOverrideSec: number | null,
+  fallbackDur: boolean
+): string | null {
+  const rem = computeRemainingText(rawText, durationSec, currentTimeSec, durationOverrideSec, fallbackDur);
+  if (rem === null) return null;
+  const clean = rawText.replace(OURS, '');
+  const m = clean.match(CLOCK_SPLIT_RE);
+  if (!m || m[1] === undefined) return null;
   const suffix = m[2];
   if (suffix && /\S/.test(suffix)) {
-    return `${m[1]} ${rem}${/^\s/.test(suffix) ? '' : ' '}${suffix}`;
+    return `${m[1]}${META_SEPARATOR}${rem}${/^\s/.test(suffix) ? '' : ' '}${suffix}`;
   }
-  return `${m[1].trim()} ${rem}`;
+  return `${m[1].trim()}${META_SEPARATOR}${rem}`;
 }
 
 /**
@@ -146,9 +163,10 @@ function findClockTextNode(node: Node | null | undefined): Text | null {
 }
 
 function toClockTarget(el: Element, fallbackDur = false): ClockTarget {
-  const textNode = findClockTextNode(el);
-  if (textNode) return { node: textNode, isText: true, el, fallbackDur };
-  return { node: el, isText: false, el, fallbackDur };
+  const htmlEl = el as HTMLElement;
+  const textNode = findClockTextNode(htmlEl);
+  if (textNode) return { node: textNode, isText: true, el: htmlEl, fallbackDur };
+  return { node: htmlEl, isText: false, el: htmlEl, fallbackDur };
 }
 
 function findElapsedTarget(bar: Element): ClockTarget | null {
@@ -189,10 +207,24 @@ function writeTarget(target: ClockTarget, value: string): void {
   }
 }
 
+function writeRemainingAttribute(el: HTMLElement, value: string | null): void {
+  if (!el.dataset) return;
+  if (value) {
+    if (el.dataset.ttRemaining !== value) el.dataset.ttRemaining = value;
+  } else if ('ttRemaining' in el.dataset) {
+    delete el.dataset.ttRemaining;
+  }
+}
+
+function resolveRemainingAttrTarget(elapsedEl: HTMLElement): { target: HTMLElement; isMarker: boolean } {
+  const marker = elapsedEl.querySelector?.<HTMLElement>('[idomkey="marker-title"]') ?? null;
+  return marker ? { target: marker, isMarker: true } : { target: elapsedEl, isMarker: false };
+}
+
 let playerBarInfoInstalled = false;
 
 /**
- * Installs remaining-time and metadata display on the Watch player bar, updating only while visible.
+ * Installs remaining-time (`• -m:ss`) and metadata display on the Watch player bar, updating only while visible.
  */
 export function installPlayerBarInfo(): void {
   if (playerBarInfoInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -203,10 +235,24 @@ export function installPlayerBarInfo(): void {
         font-size: 1rem !important;
         line-height: 1.375 !important;
         font-weight: 500 !important;
+        font-variant-numeric: tabular-nums !important;
         letter-spacing: normal !important;
-      }
-      ytlr-progress-bar [idomkey="duration"] {
         white-space: nowrap !important;
+      }
+      ytlr-progress-bar
+        :is(
+          [idomkey="elapsedTime"],
+          [idomkey="position"],
+          [idomkey="time"],
+          [idomkey="current-time"],
+          [idomkey="elapsed"]
+        )[data-tt-remaining]::after {
+        content: ' • ' attr(data-tt-remaining);
+        color: rgb(170, 170, 170);
+      }
+      ytlr-progress-bar [idomkey="marker-title"][data-tt-remaining]::before {
+        content: attr(data-tt-remaining) ' • ';
+        color: rgb(170, 170, 170);
       }
     `);
 
@@ -214,6 +260,7 @@ export function installPlayerBarInfo(): void {
     let cachedElapsed: ClockTarget | null = null;
     let cachedDuration: ClockTarget | null = null;
     let desiredElapsed: string | null = null;
+    let desiredRemaining: string | null = null;
     let desiredDuration: string | null = null;
     let boundVideo: HTMLVideoElement | null = null;
     let videoAbort: AbortController | null = null;
@@ -263,14 +310,20 @@ export function installPlayerBarInfo(): void {
     const render = (bar: Element): boolean => {
       const video = resolveLiveVideo();
       if (!video || signal.aborted || !isPlayerBarVisible(bar)) return false;
+      const elapsedTarget = getElapsedTarget(bar);
       if (video.duration === Number.POSITIVE_INFINITY) {
         desiredElapsed = null;
+        desiredRemaining = null;
         desiredDuration = null;
+        if (elapsedTarget && !elapsedTarget.fallbackDur) {
+          const { target } = resolveRemainingAttrTarget(elapsedTarget.el);
+          writeRemainingAttribute(elapsedTarget.el, null);
+          writeRemainingAttribute(target, null);
+        }
         return false;
       }
 
       let updated = false;
-      const elapsedTarget = getElapsedTarget(bar);
       const durTarget = elapsedTarget?.fallbackDur ? null : getDurationTarget(bar);
       const durMatch = durTarget ? readTarget(durTarget).match(TRAILING_CLOCK_RE) : null;
       const durOverride = durMatch ? parseClockSeconds(durMatch[1]) : null;
@@ -278,17 +331,34 @@ export function installPlayerBarInfo(): void {
         Number.isFinite(video.duration) && video.duration > 0 ? video.duration : (durOverride ?? 0);
 
       if (elapsedTarget && effectiveDuration > 0) {
-        const nextElapsed = formatRemainingLabel(
-          readTarget(elapsedTarget),
-          effectiveDuration,
-          video.currentTime,
-          durOverride,
-          elapsedTarget.fallbackDur
-        );
-        if (nextElapsed !== null) {
-          desiredElapsed = nextElapsed;
-          writeTarget(elapsedTarget, nextElapsed);
-          updated = true;
+        if (elapsedTarget.fallbackDur) {
+          const nextElapsed = formatRemainingLabel(
+            readTarget(elapsedTarget),
+            effectiveDuration,
+            video.currentTime,
+            durOverride,
+            true
+          );
+          if (nextElapsed !== null) {
+            desiredElapsed = nextElapsed;
+            writeTarget(elapsedTarget, nextElapsed);
+            updated = true;
+          }
+        } else {
+          const nextRemaining = computeRemainingText(
+            readTarget(elapsedTarget),
+            effectiveDuration,
+            video.currentTime,
+            durOverride,
+            false
+          );
+          if (nextRemaining !== null) {
+            desiredRemaining = nextRemaining;
+            const { target, isMarker } = resolveRemainingAttrTarget(elapsedTarget.el);
+            if (isMarker) writeRemainingAttribute(elapsedTarget.el, null);
+            writeRemainingAttribute(target, nextRemaining);
+            updated = true;
+          }
         }
       }
 
@@ -350,7 +420,11 @@ export function installPlayerBarInfo(): void {
         const elapsedTarget = getElapsedTarget(bar);
         const durTarget = elapsedTarget?.fallbackDur ? null : getDurationTarget(bar);
         const elapsedReady =
-          !elapsedTarget || (desiredElapsed !== null && readTarget(elapsedTarget) === desiredElapsed);
+          !elapsedTarget ||
+          (elapsedTarget.fallbackDur
+            ? desiredElapsed !== null && readTarget(elapsedTarget) === desiredElapsed
+            : desiredRemaining !== null &&
+              resolveRemainingAttrTarget(elapsedTarget.el).target.dataset?.ttRemaining === desiredRemaining);
         const durReady = !durTarget || (desiredDuration !== null && readTarget(durTarget) === desiredDuration);
         if (elapsedReady && durReady) return;
         if (render(bar)) {

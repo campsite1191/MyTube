@@ -15,6 +15,7 @@ import {
   transformTransportControls,
 } from '../transforms/player-overlays.ts';
 import { addPreviews } from '../transforms/previews.ts';
+import { applyShortsFeedMetadata, enrichShortsPlayerOverlay } from '../transforms/shorts-metadata.ts';
 import {
   applyDeArrowBranding,
   installThumbnailErrorFallback,
@@ -53,8 +54,9 @@ function processShelfContentSync(content: unknown, shouldAddPreviews = true): vo
 function processItemsListSync(items: FeedItem[], shouldAddPreviews = true): FeedItem[] {
   if (!Array.isArray(items)) return items;
   const filtered = filterFeedItemsSync(items);
-  // Fire DeArrow branding asynchronously so feed rendering never blocks on external API latency.
+  // Fire async metadata enrichments without blocking synchronous feed rendering.
   void applyDeArrowBranding(filtered);
+  void applyShortsFeedMetadata(filtered);
   upgradeFeedThumbnails(filtered);
   addLongPress(filtered);
   addPreviews(filtered, shouldAddPreviews);
@@ -206,6 +208,7 @@ function hasRelevantInnertubeKey(r: Record<string, unknown>): boolean {
       r.messages ||
       r.title ||
       r.playerOverlays ||
+      r.overlay ||
       r.transportControls ||
       r.videoDetails ||
       r.playerResponse
@@ -240,6 +243,10 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
     }
 
     disableAutoCaptionsInPayload(r);
+
+    if (r.overlay) {
+      enrichShortsPlayerOverlay(r);
+    }
 
     if (r.endscreen) {
       r.endscreen = null;

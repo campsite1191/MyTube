@@ -228,6 +228,12 @@ describe('filterFeedItemsSync and filterShelvesInPlaceSync', () => {
     const shelves: FeedItem[] = [
       { surveyRenderer: {} },
       { shelfRenderer: { title: { simpleText: 'Keep Me' } } },
+      {
+        shelfRenderer: { headerRenderer: { shelfHeaderRenderer: { title: { simpleText: 'Top channels you watch' } } } },
+      },
+      {
+        richSectionRenderer: { content: { richShelfRenderer: { title: { runs: [{ text: 'Explore more topics' }] } } } },
+      },
       { adSlotRenderer: {} },
     ];
     const result = filterShelvesInPlaceSync(shelves);

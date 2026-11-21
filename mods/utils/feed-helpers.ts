@@ -1,6 +1,9 @@
 import type { FeedItem, WatchEndpoint } from '../types/innertube.ts';
 import { isRecord } from './type-guards.ts';
 
+/** Shared LRU capacity for per-video feed enrichment caches (DeArrow branding & Shorts metadata). */
+export const FEED_METADATA_CACHE_MAX_SIZE = 2000;
+
 /**
  * Unwraps `richItemRenderer.content` when present, or returns the plain item record itself.
  */

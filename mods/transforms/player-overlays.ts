@@ -39,6 +39,9 @@ export function installTransportControlsStyles(): void {
         background-color: transparent !important;
         background-image: none !important;
       }
+      ytlr-reel-player-header-renderer [idomkey="MV7Ztb"] yt-formatted-string {
+        white-space: pre-line !important;
+      }
     `);
 }
 
