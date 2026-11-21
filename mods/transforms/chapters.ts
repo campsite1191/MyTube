@@ -1,6 +1,6 @@
 import { t } from '../core/i18n.ts';
 import type { FormattedText } from '../types/innertube.ts';
-import { isRecord } from '../utils/type-guards.ts';
+import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 import { readFormattedText } from './feed-filter.ts';
 
 export interface ChapterTimestamp {
@@ -142,34 +142,22 @@ function createMarkerEntity(videoId: string, markers: unknown[]): ChapterMarkerE
 }
 
 function hasNativeChapters(video: Record<string, unknown>): boolean {
-  const fwUpdates = isRecord(video.frameworkUpdates) ? video.frameworkUpdates : undefined;
-  const batchUpdate = isRecord(fwUpdates?.entityBatchUpdate) ? fwUpdates.entityBatchUpdate : undefined;
+  const batchUpdate = readRecordPath(video, 'frameworkUpdates', 'entityBatchUpdate');
   const mutations = Array.isArray(batchUpdate?.mutations) ? batchUpdate.mutations : undefined;
   if (!mutations) return false;
 
   return mutations.some((mutation) => {
-    if (!isRecord(mutation)) return false;
-    const payload = isRecord(mutation.payload) ? mutation.payload : undefined;
-    const listEntity = isRecord(payload?.macroMarkersListEntity) ? payload.macroMarkersListEntity : undefined;
-    if (!listEntity) return false;
-    const markersList = isRecord(listEntity.markersList) ? listEntity.markersList : undefined;
+    const markersList = readRecordPath(mutation, 'payload', 'macroMarkersListEntity', 'markersList');
     return markersList?.markerType === 'MARKER_TYPE_CHAPTERS';
   });
 }
 
 function extractVideoMetadataRenderer(video: Record<string, unknown>): Record<string, unknown> | undefined {
-  const contents = isRecord(video.contents) ? video.contents : undefined;
-  const watchNext = isRecord(contents?.singleColumnWatchNextResults)
-    ? contents.singleColumnWatchNextResults
-    : undefined;
-  const results = isRecord(watchNext?.results) ? watchNext.results : undefined;
-  const innerResults = isRecord(results?.results) ? results.results : undefined;
+  const innerResults = readRecordPath(video, 'contents', 'singleColumnWatchNextResults', 'results', 'results');
   const sectionList = Array.isArray(innerResults?.contents) ? innerResults.contents : undefined;
-  const firstSection = isRecord(sectionList?.[0]) ? sectionList[0] : undefined;
-  const itemSection = isRecord(firstSection?.itemSectionRenderer) ? firstSection.itemSectionRenderer : undefined;
+  const itemSection = readRecordPath(sectionList?.[0], 'itemSectionRenderer');
   const sectionItems = Array.isArray(itemSection?.contents) ? itemSection.contents : undefined;
-  const firstItem = isRecord(sectionItems?.[0]) ? sectionItems[0] : undefined;
-  return isRecord(firstItem?.videoMetadataRenderer) ? firstItem.videoMetadataRenderer : undefined;
+  return readRecordPath(sectionItems?.[0], 'videoMetadataRenderer') ?? undefined;
 }
 
 function resolveVideoDurationMs(

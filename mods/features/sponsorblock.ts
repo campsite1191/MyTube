@@ -377,7 +377,7 @@ class SponsorBlockHandler {
         }
         this.syncOverlayVisibility();
       },
-      { childList: true, subtree: true },
+      { childList: true },
       this.signal
     );
     host.appendChild(overlay);

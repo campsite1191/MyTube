@@ -1,7 +1,14 @@
 import type { FeedItem, WatchEndpoint } from '../types/innertube.ts';
+import { isRecord } from './type-guards.ts';
 
-export { isSurveyItem, shouldHideFeedItem as shouldHideItem } from '../transforms/feed-filter.ts';
-export { applyThumbnailUpgrade } from '../transforms/thumbnails.ts';
+/**
+ * Unwraps `richItemRenderer.content` when present, or returns the plain item record itself.
+ */
+export function unwrapFeedItem(item: FeedItem | null | undefined): FeedItem | null {
+  if (!isRecord(item)) return null;
+  const content = item.richItemRenderer?.content;
+  return isRecord(content) ? content : item;
+}
 
 export function compactInPlace<T>(items: T[], shouldRemove: (item: T) => boolean): T[] {
   if (!Array.isArray(items)) return items;

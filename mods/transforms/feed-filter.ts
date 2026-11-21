@@ -1,5 +1,5 @@
 import type { FeedItem, FormattedText } from '../types/innertube.ts';
-import { compactInPlace } from '../utils/feed-helpers.ts';
+import { compactInPlace, unwrapFeedItem } from '../utils/feed-helpers.ts';
 import { isRecord } from '../utils/type-guards.ts';
 
 const BADGE_KEY_RE = /badge/i;
@@ -16,12 +16,6 @@ const BADGE_SKIP_KEYS = new Set([
 ]);
 const PAID_BADGE_STYLES = ['BADGE_STYLE_TYPE_YPC', 'BADGE_STYLE_TYPE_PAID', 'PAID_CONTENT'] as const;
 const PAID_BADGE_LABEL_RE = /\b(buy or rent|rent or buy|paid content)\b|^(paid|rent|buy)\b/i;
-
-function unwrapFeedItem(item: FeedItem | null | undefined): FeedItem | null {
-  if (!isRecord(item)) return null;
-  const content = item.richItemRenderer?.content;
-  return isRecord(content) ? content : item;
-}
 
 /**
  * Traverses an InnerTube command object, following nested `innertubeCommand` and

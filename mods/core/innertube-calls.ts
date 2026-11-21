@@ -1,4 +1,4 @@
-import { isRecord } from '../utils/type-guards.ts';
+import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 import resolveCommand from './resolve-command.ts';
 import { getCurrentIdentityService, getKabukiInnerTubeClient } from './yttv-bridge.ts';
 
@@ -22,67 +22,67 @@ interface NextNavParams {
 export function requestNextAndNavigateChannel(params: NextNavParams): void {
   const identityService = getCurrentIdentityService();
   const client = getKabukiInnerTubeClient();
-  if (!identityService || !client) return;
-
   const videoId = params.tileRenderer ? params.tileRenderer.contentId : params.lockupViewModel?.contentId;
+  if (!identityService || !client || !videoId) return;
+
   const paramsValue = params.tileRenderer
     ? params.tileRenderer.onSelectCommand?.watchEndpoint?.params
     : params.lockupViewModel?.rendererContext?.commandContext?.onTap?.innertubeCommand?.watchEndpoint?.params;
   const randomDelay = Math.floor(Math.random() * 2000);
 
-  void identityService.get().then((identity) => {
-    const request = {
-      identity,
-      isPrefetch: false,
-      path: '/youtubei/v1/next',
-      payload: {
-        videoId,
-        params: paramsValue,
-        racyCheckOk: true,
-        contentCheckOk: true,
-        playbackContext: {
-          lactMilliseconds: randomDelay,
-          isLyricsMode: false,
-        },
-        autonavState: 'STATE_NONE',
-        mdxContext: {
-          mdxReceiverContext: {
-            mdxConnectedDevices: [],
+  void identityService
+    .get()
+    .then((identity) => {
+      const request = {
+        identity,
+        isPrefetch: false,
+        path: '/youtubei/v1/next',
+        payload: {
+          videoId,
+          params: paramsValue,
+          racyCheckOk: true,
+          contentCheckOk: true,
+          playbackContext: {
+            lactMilliseconds: randomDelay,
+            isLyricsMode: false,
+          },
+          autonavState: 'STATE_NONE',
+          mdxContext: {
+            mdxReceiverContext: {
+              mdxConnectedDevices: [],
+            },
           },
         },
-      },
-      clickTracking: {
-        clickTrackingParams: null,
-      },
-    };
+        clickTracking: {
+          clickTrackingParams: null,
+        },
+      };
 
-    client.fetch(request).subscribe((response: unknown) => {
-      if (!isRecord(response)) return;
-      const contents = isRecord(response.contents) ? response.contents : undefined;
-      const watchNext = isRecord(contents?.singleColumnWatchNextResults)
-        ? contents.singleColumnWatchNextResults
-        : undefined;
-      const results = isRecord(watchNext?.results) ? watchNext.results : undefined;
-      const innerResults = isRecord(results?.results) ? results.results : undefined;
-      const items = Array.isArray(innerResults?.contents) ? innerResults.contents : undefined;
-      if (!items) return;
+      client.fetch(request).subscribe(
+        (response: unknown) => {
+          const innerResults = readRecordPath(
+            response,
+            'contents',
+            'singleColumnWatchNextResults',
+            'results',
+            'results'
+          );
+          const items = Array.isArray(innerResults?.contents) ? innerResults.contents : undefined;
+          if (!items) return;
 
-      const itemSection = items.find((item) => isRecord(item) && isRecord(item.itemSectionRenderer)) as
-        | Record<string, unknown>
-        | undefined;
-      const sectionRenderer = isRecord(itemSection?.itemSectionRenderer) ? itemSection.itemSectionRenderer : undefined;
-      const sectionContents = Array.isArray(sectionRenderer?.contents) ? sectionRenderer.contents : undefined;
-      const metadataEntry = sectionContents?.find((item) => isRecord(item) && isRecord(item.videoMetadataRenderer)) as
-        | Record<string, unknown>
-        | undefined;
-      const metadata = isRecord(metadataEntry?.videoMetadataRenderer) ? metadataEntry.videoMetadataRenderer : undefined;
-      const owner = isRecord(metadata?.owner) ? metadata.owner : undefined;
-      const ownerRenderer = isRecord(owner?.videoOwnerRenderer) ? owner.videoOwnerRenderer : undefined;
-      if (ownerRenderer?.navigationEndpoint) {
-        resolveCommand(ownerRenderer.navigationEndpoint);
-      }
-    });
-  });
+          const itemSection = items.find((item) => isRecord(item) && isRecord(item.itemSectionRenderer));
+          const sectionRenderer = readRecordPath(itemSection, 'itemSectionRenderer');
+          const sectionContents = Array.isArray(sectionRenderer?.contents) ? sectionRenderer.contents : undefined;
+          const metadataEntry = sectionContents?.find((item) => isRecord(item) && isRecord(item.videoMetadataRenderer));
+          const ownerRenderer = readRecordPath(metadataEntry, 'videoMetadataRenderer', 'owner', 'videoOwnerRenderer');
+          if (ownerRenderer?.navigationEndpoint) {
+            resolveCommand(ownerRenderer.navigationEndpoint);
+          }
+        },
+        (err) => console.error('[InnerTubeCalls] Failed to resolve channel navigation:', err)
+      );
+    })
+    .catch((err) => console.error('[InnerTubeCalls] Failed to read active identity:', err));
 }
 
 /**
@@ -111,13 +111,13 @@ export function getFeedbackPanelTokens(panelId: string, params: string): Promise
       payload: { panelId, params },
     })
     .subscribe((response: unknown) => {
-      const res = isRecord(response) ? response : undefined;
-      const content = isRecord(res?.content) ? res.content : undefined;
-      const panel = isRecord(content?.engagementPanelSectionListRenderer)
-        ? content.engagementPanelSectionListRenderer
-        : undefined;
-      const panelContent = isRecord(panel?.content) ? panel.content : undefined;
-      const listVm = isRecord(panelContent?.listViewModel) ? panelContent.listViewModel : undefined;
+      const listVm = readRecordPath(
+        response,
+        'content',
+        'engagementPanelSectionListRenderer',
+        'content',
+        'listViewModel'
+      );
       const listItems = listVm?.listItems;
       if (!Array.isArray(listItems)) {
         resolve([]);

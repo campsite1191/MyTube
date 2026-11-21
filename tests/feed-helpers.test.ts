@@ -3,13 +3,21 @@ import { describe, test } from 'node:test';
 
 import type { FeedItem, TileRenderer } from '../mods/types/innertube.ts';
 import {
-  applyThumbnailUpgrade,
   buildLongPressPayload,
   compactInPlace,
   formatCompactCount,
-  isSurveyItem,
-  shouldHideItem,
+  unwrapFeedItem,
 } from '../mods/utils/feed-helpers.ts';
+
+describe('unwrapFeedItem', () => {
+  test('unwraps richItemRenderer.content and handles plain or invalid items', () => {
+    const inner: FeedItem = { tileRenderer: { contentId: 'v1' } };
+    assert.equal(unwrapFeedItem({ richItemRenderer: { content: inner } }), inner);
+    assert.equal(unwrapFeedItem(inner), inner);
+    assert.equal(unwrapFeedItem(null), null);
+    assert.equal(unwrapFeedItem('invalid' as unknown as FeedItem), null);
+  });
+});
 
 describe('compactInPlace', () => {
   test('removes matching entries in place and preserves survivor order', () => {
@@ -103,61 +111,5 @@ describe('formatCompactCount', () => {
     for (const value of [-1, Number.NaN, Number.POSITIVE_INFINITY, 'not a count']) {
       assert.equal(formatCompactCount(value), '');
     }
-  });
-});
-
-describe('applyThumbnailUpgrade re-export', () => {
-  test('remains exported from feed-helpers for compatibility', () => {
-    const original = [{ url: '/low.jpg', width: 480, height: 360 }];
-    const upgraded = applyThumbnailUpgrade(original, 'video-id');
-    assert.equal(upgraded[0]?.url, 'https://i.ytimg.com/vi/video-id/hq720.jpg');
-  });
-});
-
-describe('isSurveyItem', () => {
-  test('recognizes survey renderer keys case-insensitively', () => {
-    assert.equal(isSurveyItem({ surveyRenderer: {} }), true);
-    assert.equal(isSurveyItem({ questionnaireRenderer: {} }), true);
-    assert.equal(isSurveyItem({ SURVEYRENDERER: {} }), true);
-  });
-
-  test('recognizes survey prompts in string, simpleText, and runs titles', () => {
-    assert.equal(isSurveyItem({ shelfRenderer: { title: 'HELP US IMPROVE the app' } }), true);
-    assert.equal(isSurveyItem({ title: { simpleText: 'Help us make YouTube better' } }), true);
-    assert.equal(isSurveyItem({ title: { runs: [{ text: 'Help us ' }, { text: 'improve YouTube' }] } }), true);
-  });
-
-  test('returns false for invalid and ordinary content', () => {
-    assert.equal(isSurveyItem(null), false);
-    assert.equal(isSurveyItem('survey' as unknown as FeedItem), false);
-    assert.equal(isSurveyItem({ title: 'Recommended videos' }), false);
-    assert.equal(isSurveyItem({ title: { runs: [{ text: 'Regular title' }] } }), false);
-  });
-});
-
-describe('shouldHideItem', () => {
-  test('filters ads and sign-in nudges by default', () => {
-    assert.equal(shouldHideItem({ adSlotRenderer: {} }), true);
-    assert.equal(shouldHideItem({ feedNudgeRenderer: {} }), true);
-  });
-
-  test('filters survey shelves and paid or restricted badges', () => {
-    const blockedItems: FeedItem[] = [
-      { shelfRenderer: { title: 'Help us improve YouTube' } },
-      { badge: { style: 'BADGE_STYLE_TYPE_PAID', label: 'Rent or buy' } },
-      { badgeRenderer: { badgeStyle: 'BADGE_STYLE_TYPE_SPONSORS_ONLY' } },
-      { badgeText: { text: 'Members-only' } },
-      { badgeLabel: { label: 'Paid content' } },
-    ];
-    for (const item of blockedItems) {
-      assert.equal(shouldHideItem(item), true);
-    }
-  });
-
-  test('keeps ordinary content and ignores non-blocking badges', () => {
-    assert.equal(shouldHideItem(null), false);
-    assert.equal(shouldHideItem('video' as unknown as FeedItem), false);
-    assert.equal(shouldHideItem({ tileRenderer: { contentId: 'video-id' } }), false);
-    assert.equal(shouldHideItem({ badge: { label: 'New' } }), false);
   });
 });

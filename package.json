@@ -1,6 +1,7 @@
 {
   "name": "custom-cobalt-builder",
   "private": true,
+  "type": "module",
   "description": "Custom Cobalt APK builder with TypeScript ESNext userscript targeting Chromium 138 and native Cobalt patch overlay",
   "scripts": {
     "test": "node --experimental-strip-types --test 'tests/*.test.ts'",

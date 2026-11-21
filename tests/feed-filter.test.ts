@@ -29,14 +29,22 @@ describe('ads, sign-in nudges, and surveys', () => {
     assert.equal(shouldHideFeedItem(wrappedNudge), true);
   });
 
-  test('detects survey renderers and survey prompt titles', () => {
+  test('detects survey renderers, prompt titles, and keeps ordinary items', () => {
     assert.equal(isSurveyItem({ surveyRenderer: {} }), true);
+    assert.equal(isSurveyItem({ SURVEYRENDERER: {} }), true);
     assert.equal(isSurveyItem({ richQuestionNaire: {} }), true);
+    assert.equal(isSurveyItem({ shelfRenderer: { title: 'HELP US IMPROVE the app' } }), true);
+    assert.equal(isSurveyItem({ title: { simpleText: 'Help us make YouTube better' } }), true);
+    assert.equal(isSurveyItem({ title: { runs: [{ text: 'Help us ' }, { text: 'improve YouTube' }] } }), true);
     assert.equal(
       isSurveyItem({ shelfRenderer: { headerRenderer: { shelfHeaderRenderer: { title: 'Help us improve' } } } }),
       true
     );
+    assert.equal(isSurveyItem(null), false);
+    assert.equal(isSurveyItem('survey' as unknown as FeedItem), false);
     assert.equal(isSurveyItem({ tileRenderer: { contentId: 'vid-1' } }), false);
+    assert.equal(shouldHideFeedItem(null), false);
+    assert.equal(shouldHideFeedItem({ badge: { label: 'New' } }), false);
   });
 });
 

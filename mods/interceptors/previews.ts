@@ -1,5 +1,6 @@
 import { walkCommands } from '../transforms/feed-filter.ts';
 import type { FeedItem } from '../types/innertube.ts';
+import { unwrapFeedItem } from '../utils/feed-helpers.ts';
 import { isRecord } from '../utils/type-guards.ts';
 
 const INLINE_PREVIEW_OPTIONS = {
@@ -119,8 +120,8 @@ export function addPreviews(items: FeedItem[], shouldInject = true): void {
   const allowInject = Boolean(shouldInject);
 
   for (const entry of items) {
-    const item = (entry?.richItemRenderer?.content ?? entry) as Record<string, unknown> | null;
-    if (!isRecord(item)) continue;
+    const item = unwrapFeedItem(entry) as Record<string, unknown> | null;
+    if (!item) continue;
 
     const masthead = isRecord(item.tvMastheadRenderer) ? item.tvMastheadRenderer : undefined;
     if (Array.isArray(masthead?.companionVideos)) {

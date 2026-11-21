@@ -1,6 +1,7 @@
 import pLimit from 'p-limit';
 import { createLruCache } from '../core/cache.ts';
 import type { FeedItem, FormattedText, Thumbnail } from '../types/innertube.ts';
+import { unwrapFeedItem } from '../utils/feed-helpers.ts';
 
 const HQ_THUMBNAIL_WIDTH = 1280;
 const HQ_THUMBNAIL_HEIGHT = 720;
@@ -35,11 +36,6 @@ export interface DeArrowBrandingResponse {
 interface ThumbnailListHandle {
   getThumbnails: () => Thumbnail[] | undefined;
   setThumbnails: (thumbnails: Thumbnail[]) => void;
-}
-
-function unwrapFeedItem(entry: FeedItem | null | undefined): FeedItem | null {
-  const feedItem = entry?.richItemRenderer?.content ?? entry;
-  return feedItem && typeof feedItem === 'object' ? feedItem : null;
 }
 
 function getThumbnailListHandle(feedItem: FeedItem): ThumbnailListHandle | null {

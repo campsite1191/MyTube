@@ -11,3 +11,15 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function isObjectLike(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && (typeof value === 'object' || typeof value === 'function') && !Array.isArray(value);
 }
+
+/**
+ * Traverses nested plain-record keys and returns the final object record, or `null` if any hop misses.
+ */
+export function readRecordPath(root: unknown, ...keys: string[]): Record<string, unknown> | null {
+  let current: unknown = root;
+  for (const key of keys) {
+    if (!isRecord(current)) return null;
+    current = current[key];
+  }
+  return isRecord(current) ? current : null;
+}

@@ -31,10 +31,15 @@ import {
 import type { FeedItem, InnertubeCommand, Thumbnail, WatchEndpoint } from '../types/innertube.ts';
 import { transformGuideResponse } from '../ui/custom-guide-action.ts';
 import { ButtonRenderer, longPressData, MenuServiceItemRenderer, timelyAction } from '../ui/yt-ui.ts';
-import { buildLongPressPayload } from '../utils/feed-helpers.ts';
-import { isObjectLike, isRecord } from '../utils/type-guards.ts';
+import { buildLongPressPayload, unwrapFeedItem } from '../utils/feed-helpers.ts';
+import { isObjectLike, isRecord, readRecordPath } from '../utils/type-guards.ts';
 import { findFeedbackToken } from './innertube-calls.ts';
-import resolveCommand from './resolve-command.ts';
+import resolveCommand, {
+  extractCustomAction,
+  hasReportOrFeedbackEndpointNode,
+  isReportOrFeedbackIcon,
+  isReportOrFeedbackText,
+} from './resolve-command.ts';
 import { whenYttvReady } from './yttv-bridge.ts';
 
 const ITEM_LIST_KEYS = [
@@ -68,15 +73,7 @@ function processShelfContentSync(content: unknown, shouldAddPreviews = true): vo
 }
 
 function getCustomActionName(serviceEndpoint: unknown): string {
-  if (!isRecord(serviceEndpoint)) return '';
-  const playlistEdit = isRecord(serviceEndpoint.playlistEditEndpoint)
-    ? serviceEndpoint.playlistEditEndpoint
-    : undefined;
-  const playlistAction = isRecord(playlistEdit?.customAction) ? playlistEdit.customAction : undefined;
-  if (typeof playlistAction?.action === 'string') return playlistAction.action;
-
-  const directAction = isRecord(serviceEndpoint.customAction) ? serviceEndpoint.customAction : undefined;
-  return typeof directAction?.action === 'string' ? directAction.action : '';
+  return extractCustomAction(serviceEndpoint)?.action ?? '';
 }
 
 function isLongPressVideoItem(item: FeedItem): boolean {
@@ -209,7 +206,7 @@ function restoreFeedbackMenuItems(item: FeedItem, menuItems: Record<string, unkn
 function addLongPress(items: FeedItem[]): void {
   if (!Array.isArray(items)) return;
   for (const entry of items) {
-    const item = entry?.richItemRenderer?.content ?? entry;
+    const item = unwrapFeedItem(entry);
     if (!item || !isLongPressVideoItem(item)) continue;
 
     const menuLists = getExistingMenuItemLists(item);
@@ -405,20 +402,13 @@ function isUnwantedTransportButton(btn: unknown): boolean {
   if (nav?.subscribeEndpoint || nav?.unsubscribeEndpoint || nav?.subscribeCommand || /SUBSCRIBE/i.test(iconType)) {
     return true;
   }
-  if (/(?:REPORT|FEEDBACK)/i.test(String(btn.type || '')) || /(?:REPORT|FLAG|FEEDBACK)/i.test(iconType)) {
+  if (/(?:REPORT|FEEDBACK)/i.test(String(btn.type || '')) || isReportOrFeedbackIcon(icon?.iconType)) {
     return true;
   }
-  const label = readFormattedText(br?.text);
-  if (label && /\b(?:report|feedback)\b/i.test(label)) {
+  if (isReportOrFeedbackText(readFormattedText(br?.text))) {
     return true;
   }
-  return Boolean(
-    nav?.getReportVideoFormEndpoint ||
-      nav?.getReportFormEndpoint ||
-      nav?.flagVideoEndpoint ||
-      nav?.sendFeedbackEndpoint ||
-      nav?.feedbackEndpoint
-  );
+  return Boolean(nav && hasReportOrFeedbackEndpointNode(nav));
 }
 
 function injectChapters(r: Record<string, unknown>): void {
@@ -486,14 +476,11 @@ function transformPlayerOverlays(r: Record<string, unknown>): void {
 const TRANSPORT_BUTTON_LIST_KEYS = ['promotedActions', 'actions', 'buttons', 'engagementActions'] as const;
 
 function getTransportControlsRenderer(r: Record<string, unknown>): Record<string, unknown> | undefined {
-  const overlay = isRecord(r.playerOverlays) ? r.playerOverlays : undefined;
-  const overlayRenderer = isRecord(overlay?.playerOverlayRenderer) ? overlay.playerOverlayRenderer : undefined;
-  const tcWrapper = isRecord(r.transportControls)
-    ? r.transportControls
-    : isRecord(overlayRenderer?.transportControls)
-      ? overlayRenderer.transportControls
-      : undefined;
-  return isRecord(tcWrapper?.transportControlsRenderer) ? tcWrapper.transportControlsRenderer : undefined;
+  return (
+    readRecordPath(r, 'transportControls', 'transportControlsRenderer') ??
+    readRecordPath(r, 'playerOverlays', 'playerOverlayRenderer', 'transportControls', 'transportControlsRenderer') ??
+    undefined
+  );
 }
 
 function recordTransportLikeCount(r: Record<string, unknown>): void {

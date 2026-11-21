@@ -1,4 +1,4 @@
-import { isRecord } from '../utils/type-guards.ts';
+import { readRecordPath } from '../utils/type-guards.ts';
 
 export interface SubtitleLanguageDescriptor {
   code: string;
@@ -9,15 +9,6 @@ export const ALLOWED_SUBTITLE_LANGUAGES: readonly SubtitleLanguageDescriptor[] =
   { code: 'en', name: 'English' },
   { code: 'hi', name: 'Hindi' },
 ];
-
-function readRecordPath(root: unknown, ...keys: string[]): Record<string, unknown> | null {
-  let current: unknown = root;
-  for (const key of keys) {
-    if (!isRecord(current)) return null;
-    current = current[key];
-  }
-  return isRecord(current) ? current : null;
-}
 
 function extractTranslationLanguage(item: unknown): { languageCode?: string; languageName?: string } | null {
   const exec = readRecordPath(item, 'compactLinkRenderer', 'serviceEndpoint', 'commandExecutorCommand');
