@@ -21,6 +21,7 @@ export interface YtPlayerElement extends HTMLElement {
   getPlayerStateObject?: () => YtPlayerStateObject;
   getVideoData?: () => YtVideoData;
   getVideoStats?: () => Record<string, unknown>;
+  getPlaybackQualityLabel?: () => string;
   getAvailableQualityData?: () => YtQualityData[];
   setPlaybackQualityRange?: (min: string, max: string) => void;
   getSubtitlesUserSettings?: () => Record<string, unknown>;

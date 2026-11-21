@@ -3,8 +3,8 @@ import './core/trusted-types.ts';
 import './core/innertube-interceptor.ts';
 import { installDisableWhosWatching } from './features/disable-whos-watching.ts';
 import { installHdStoryboard } from './features/hd-storyboard.ts';
+import { installPlayerBarInfo } from './features/player-bar-info.ts';
 import { installPreferredVideoQuality } from './features/preferred-video-quality.ts';
-import { installRemainingTime } from './features/remaining-time.ts';
 import { installReturnYouTubeDislike } from './features/return-youtube-dislike.ts';
 import { installRewindOnPause } from './features/rewind-on-pause.ts';
 import { installSponsorBlock } from './features/sponsorblock.ts';
@@ -23,7 +23,7 @@ void waitForDomReady().then(() => {
     initClock();
     installPreferredVideoQuality();
     installSponsorBlock();
-    installRemainingTime();
+    installPlayerBarInfo();
     installReturnYouTubeDislike();
     installRewindOnPause();
     installTransportControlsStyles();

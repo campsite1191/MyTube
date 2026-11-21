@@ -47,6 +47,8 @@ interface MockElement {
   duration?: number;
   currentTime?: number;
   playbackRate?: number;
+  videoWidth?: number;
+  videoHeight?: number;
   paused?: boolean;
   ended?: boolean;
   readyState?: number;
@@ -151,6 +153,7 @@ function createMockElement(tagName: string, docRef: { root: MockElement | null }
           return node.tagName === 'YTLR-REDUX-CONNECT-YTLR-PROGRESS-BAR';
         }
         if (sel.includes('[idomkey="elapsedTime"]')) return node.attributes.idomkey === 'elapsedTime';
+        if (sel.includes('[idomkey="duration"]')) return node.attributes.idomkey === 'duration';
         if (sel.includes('[idomkey="dislike-button"]')) return node.attributes.idomkey === 'dislike-button';
         if (sel.includes('[idomkey="like-button"]')) return node.attributes.idomkey === 'like-button';
         if (sel.startsWith('link[rel="preconnect"]')) {
@@ -784,8 +787,12 @@ describe('End-to-end userscript bundle lifecycle', () => {
     const progressBar = createMockElement('ytlr-progress-bar', docRef);
     const elapsedEl = createMockElement('span', docRef);
     elapsedEl.attributes.idomkey = 'elapsedTime';
-    elapsedEl.textContent = '0:30 / 2:00';
+    elapsedEl.textContent = '0:30';
+    const durationEl = createMockElement('span', docRef);
+    durationEl.attributes.idomkey = 'duration';
+    durationEl.textContent = '2:00';
     progressBar.appendChild(elapsedEl);
+    progressBar.appendChild(durationEl);
 
     const likeBtn = createMockElement('yt-button-container', docRef);
     likeBtn.attributes.idomkey = 'like-button';
@@ -795,7 +802,9 @@ describe('End-to-end userscript bundle lifecycle', () => {
     const videoEl = createMockElement('video', docRef);
     videoEl.duration = 120;
     videoEl.currentTime = 30;
-    videoEl.playbackRate = 1;
+    videoEl.playbackRate = 1.25;
+    videoEl.videoWidth = 1920;
+    videoEl.videoHeight = 1080;
     videoEl.paused = false;
     videoEl.ended = false;
     videoEl.readyState = 4;
@@ -827,14 +836,16 @@ describe('End-to-end userscript bundle lifecycle', () => {
 
     await waitFor(
       () =>
-        elapsedEl.textContent === '0:30 (-1:30) / 2:00' &&
+        elapsedEl.textContent === '0:30 (-1:30)' &&
+        durationEl.textContent === '1.25x • 1080p • 2:00' &&
         Boolean(clockEl.children[0]?.children[1]?.textContent.startsWith('Ends ')) &&
         likeBtn.dataset.ttCount === '5K' &&
         dislikeBtn.dataset.ttCount === '120' &&
         fetchCalls.some((c) => c.url.includes('sponsor.ajay.app/api/skipSegments'))
     );
 
-    assert.equal(elapsedEl.textContent, '0:30 (-1:30) / 2:00');
+    assert.equal(elapsedEl.textContent, '0:30 (-1:30)');
+    assert.equal(durationEl.textContent, '1.25x • 1080p • 2:00');
     assert.ok(clockEl.querySelectorAll('div').length >= 1);
     const endEl = clockEl.children[0]?.children[1];
     assert.ok(endEl?.textContent.startsWith('Ends '), `Expected Ends HH:MM, got ${endEl?.textContent}`);

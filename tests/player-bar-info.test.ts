@@ -3,12 +3,14 @@ import { describe, test } from 'node:test';
 
 import {
   formatClockTime,
+  formatDurationLabel,
   formatRemainingLabel,
-  installRemainingTime,
+  installPlayerBarInfo,
   parseClockSeconds,
-} from '../mods/features/remaining-time.ts';
+  readActiveQualityLabel,
+} from '../mods/features/player-bar-info.ts';
 
-describe('remaining-time helpers', () => {
+describe('player-bar-info helpers', () => {
   test('parseClockSeconds parses mm:ss and h:mm:ss', () => {
     assert.equal(parseClockSeconds('1:05'), 65);
     assert.equal(parseClockSeconds('1:02:03'), 3723);
@@ -26,9 +28,27 @@ describe('remaining-time helpers', () => {
     assert.equal(formatRemainingLabel('1:00 (-9:99) / 3:00', 180, 60, 180, false), '1:00 (-2:00) / 3:00');
     assert.equal(formatRemainingLabel('3:00', 180, 60, null, true), '3:00 (-2:00)');
   });
+
+  test('readActiveQualityLabel and formatDurationLabel format right-side speed, quality, and total time', () => {
+    assert.equal(readActiveQualityLabel({ getPlaybackQualityLabel: () => '1080p60' }, null), '1080p60');
+    assert.equal(readActiveQualityLabel({ getPlaybackQualityLabel: () => 'Auto (720p)' }, null), '720p');
+    assert.equal(
+      readActiveQualityLabel({ getPlaybackQualityLabel: () => 'auto' }, { videoWidth: 1920, videoHeight: 1080 }),
+      '1080p'
+    );
+    assert.equal(readActiveQualityLabel(null, { videoWidth: 720, videoHeight: 1280 }), '720p');
+    assert.equal(readActiveQualityLabel(null, null), null);
+
+    assert.equal(formatDurationLabel('25:41', 1, '720p'), '720p • 25:41');
+    assert.equal(formatDurationLabel('25:41', 1.25, '1080p60'), '1.25x • 1080p60 • 25:41');
+    assert.equal(formatDurationLabel('1.25x • 1080p60 • 25:41', 1, '1080p60'), '1080p60 • 25:41');
+    assert.equal(formatDurationLabel('25:41', 1, null), '25:41');
+    assert.equal(formatDurationLabel('25:41', 1.5, null), '1.5x • 25:41');
+    assert.equal(formatDurationLabel('LIVE', 1.25, '1080p'), null);
+  });
 });
 
-describe('installRemainingTime Watch session lifecycle', () => {
+describe('installPlayerBarInfo Watch session lifecycle', () => {
   test('binds video and player-bar observer during Watch, skips hidden bar updates, and cleans up on exit', () => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
@@ -70,15 +90,45 @@ describe('installRemainingTime Watch session lifecycle', () => {
       parentElement: null,
       closest: () => null,
     };
+    const durationEl = {
+      nodeType: 1,
+      isConnected: true,
+      textContent: '2:00',
+      childNodes: [] as Node[],
+      parentElement: null,
+      closest: () => null,
+    };
+    let qualityLabel = '720p';
+    const playerListeners = new Map<string, Set<() => void>>();
+    const playerEl = {
+      getPlaybackQualityLabel: () => qualityLabel,
+      addEventListener: (type: string, fn: () => void, opts?: { signal?: AbortSignal }) => {
+        if (opts?.signal?.aborted) return;
+        let set = playerListeners.get(type);
+        if (!set) {
+          set = new Set();
+          playerListeners.set(type, set);
+        }
+        set.add(fn);
+        opts?.signal?.addEventListener('abort', () => set.delete(fn), { once: true });
+      },
+    };
     let barFocusable = 'false';
     const progressBar = {
       isConnected: true,
       getAttribute: (name: string) => (name === 'hybridnavfocusable' ? barFocusable : null),
-      querySelectorAll: (selector: string) => (selector.includes('elapsedTime') ? [elapsedEl] : []),
+      querySelectorAll: (selector: string) => {
+        if (selector.includes('elapsedTime')) return [elapsedEl];
+        if (selector.includes('duration')) return [durationEl];
+        return [];
+      },
     };
     const videoEl = {
       duration: 120,
       currentTime: 30,
+      playbackRate: 1,
+      videoWidth: 1280,
+      videoHeight: 720,
       addEventListener: (type: string, fn: (e?: Event) => void, opts?: { signal?: AbortSignal }) => {
         if (opts?.signal?.aborted) return;
         let set = videoListeners.get(type);
@@ -110,12 +160,13 @@ describe('installRemainingTime Watch session lifecycle', () => {
       querySelector: (selector: string) => {
         if (selector === 'video') return videoEl;
         if (selector === 'ytlr-progress-bar') return progressBar;
+        if (selector === '.html5-video-player') return playerEl;
         return null;
       },
     };
 
     try {
-      installRemainingTime();
+      installPlayerBarInfo();
       assert.equal(videoListeners.get('timeupdate')?.size ?? 0, 0);
 
       fakeLocation.hash = '#/watch?v=remVid1';
@@ -125,6 +176,7 @@ describe('installRemainingTime Watch session lifecycle', () => {
       // Player bar hidden via hybridnavfocusable or zylon-hidden -> timeupdate does not touch DOM.
       for (const fn of videoListeners.get('timeupdate') ?? []) fn({ type: 'timeupdate' } as Event);
       assert.equal(elapsedEl.textContent, '0:30 / 2:00');
+      assert.equal(durationEl.textContent, '2:00');
 
       barFocusable = 'true';
       const classes = new Set(['zylon-hidden']);
@@ -134,14 +186,29 @@ describe('installRemainingTime Watch session lifecycle', () => {
       for (const cb of [...observerCbs]) cb();
       assert.equal(elapsedEl.textContent, '0:30 / 2:00');
 
-      // Player bar becomes visible -> observer refreshes elapsed text.
+      // Player bar becomes visible -> observer refreshes elapsed + right-side quality • total time.
       classes.delete('zylon-hidden');
       for (const cb of [...observerCbs]) cb();
       assert.equal(elapsedEl.textContent, '0:30 (-1:30) / 2:00');
+      assert.equal(durationEl.textContent, '720p • 2:00');
+
+      // Non-1x rate and quality changes update right-side label dynamically, omitting speed again when reset to 1x.
+      videoEl.playbackRate = 1.25;
+      for (const fn of videoListeners.get('ratechange') ?? []) fn({ type: 'ratechange' } as Event);
+      assert.equal(durationEl.textContent, '1.25x • 720p • 2:00');
+
+      qualityLabel = '1080p60';
+      for (const fn of playerListeners.get('onPlaybackQualityChange') ?? []) fn();
+      assert.equal(durationEl.textContent, '1.25x • 1080p60 • 2:00');
+
+      videoEl.playbackRate = 1;
+      for (const fn of videoListeners.get('ratechange') ?? []) fn({ type: 'ratechange' } as Event);
+      assert.equal(durationEl.textContent, '1080p60 • 2:00');
 
       fakeLocation.hash = '#/';
       for (const fn of winListeners.get('hashchange') ?? []) fn();
       assert.equal(videoListeners.get('timeupdate')?.size ?? 0, 0);
+      assert.equal(playerListeners.get('onPlaybackQualityChange')?.size ?? 0, 0);
       assert.equal(disconnectedCount >= 1, true);
     } finally {
       globals.window = prevWindow;
