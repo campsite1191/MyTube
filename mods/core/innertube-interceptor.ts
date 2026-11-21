@@ -1,4 +1,4 @@
-import { filterFeedItemsSync, filterShelvesInPlaceSync } from '../transforms/feed-filter.ts';
+import { filterFeedItemsSync, filterShelvesInPlaceSync, isHiddenShelf } from '../transforms/feed-filter.ts';
 import { transformGuideResponse } from '../transforms/guide.ts';
 import type { AudioFormatEntry, SubscriptionTab } from '../transforms/innertube-player.ts';
 import {
@@ -101,17 +101,42 @@ function processContentNodeSync(node: unknown, shouldAddPreviews = true): void {
   }
 }
 
+function isStandaloneHiddenHeader(entry: FeedItem): boolean {
+  return Boolean((entry.shelfHeaderRenderer || entry.sectionHeaderViewModel) && isHiddenShelf(entry));
+}
+
 function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void {
   if (!Array.isArray(shelves)) return;
+
+  // Drop paired untitled shelves immediately following a hidden standalone header item.
+  let skipNextShelf = false;
+  for (let i = 0; i < shelves.length; i++) {
+    const entry = shelves[i];
+    if (!isRecord(entry)) continue;
+    if (skipNextShelf && entry.shelfRenderer) {
+      skipNextShelf = false;
+      shelves[i] = { adSlotRenderer: {} };
+      continue;
+    }
+    skipNextShelf = isStandaloneHiddenHeader(entry);
+  }
+
   filterShelvesInPlaceSync(shelves);
 
   const directItems: FeedItem[] = [];
+  const emptySections = new Set<FeedItem>();
 
   for (const entry of shelves) {
     if (!isRecord(entry)) continue;
 
     if (entry.shelfRenderer || entry.itemSectionRenderer || entry.richSectionRenderer) {
+      const isr = isRecord(entry.itemSectionRenderer) ? entry.itemSectionRenderer : undefined;
+      const isrContents = Array.isArray(isr?.contents) ? isr.contents : undefined;
+      const prevLen = isrContents ? isrContents.length : 0;
       processContentNodeSync(entry, shouldAddPreviews);
+      if (isrContents && prevLen > 0 && isrContents.length === 0) {
+        emptySections.add(entry);
+      }
     } else if (entry.sectionListRenderer || entry.richGridRenderer || ITEM_LIST_KEYS.some((k) => entry[k])) {
       processContentNodeSync(entry, shouldAddPreviews);
     } else if (
@@ -124,8 +149,34 @@ function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void
     }
   }
 
+  if (emptySections.size > 0) {
+    for (let i = shelves.length - 1; i >= 0; i--) {
+      const entry = shelves[i];
+      if (entry && emptySections.has(entry)) {
+        shelves.splice(i, 1);
+      }
+    }
+  }
+
   if (directItems.length > 0) {
     processItemsListSync(directItems, shouldAddPreviews);
+  }
+}
+
+function processContinuationItemsListSync(items: FeedItem[], shouldAddPreviews = true): void {
+  processShelvesSync(items, shouldAddPreviews);
+  for (const entry of items) {
+    if (!isRecord(entry)) continue;
+    for (const key of ['sectionListContinuation', 'itemSectionContinuation', 'richGridContinuation'] as const) {
+      const cont = isRecord(entry[key]) ? entry[key] : undefined;
+      if (Array.isArray(cont?.contents)) {
+        processShelvesSync(cont.contents as FeedItem[], shouldAddPreviews);
+      }
+    }
+    const surfaceCont = isRecord(entry.tvSurfaceContentContinuation) ? entry.tvSurfaceContentContinuation : undefined;
+    if (surfaceCont?.content) {
+      processBrowseContentSync(surfaceCont.content, shouldAddPreviews);
+    }
   }
 }
 
@@ -135,11 +186,22 @@ function processBrowseActionsSync(actions: unknown, shouldAddPreviews = true): v
     if (!isRecord(action)) continue;
     const reload = isRecord(action.reloadContinuationItemsCommand) ? action.reloadContinuationItemsCommand : undefined;
     if (Array.isArray(reload?.continuationItems)) {
-      processShelvesSync(reload.continuationItems as FeedItem[], shouldAddPreviews);
+      processContinuationItemsListSync(reload.continuationItems as FeedItem[], shouldAddPreviews);
     }
     const append = isRecord(action.appendContinuationItemsAction) ? action.appendContinuationItemsAction : undefined;
     if (Array.isArray(append?.continuationItems)) {
-      processShelvesSync(append.continuationItems as FeedItem[], shouldAddPreviews);
+      processContinuationItemsListSync(append.continuationItems as FeedItem[], shouldAddPreviews);
+    }
+    const listMutation = isRecord(action.listMutationCommand) ? action.listMutationCommand : undefined;
+    const operationsWrapper = isRecord(listMutation?.operations) ? listMutation.operations : undefined;
+    if (Array.isArray(operationsWrapper?.operations)) {
+      for (const op of operationsWrapper.operations) {
+        const insertSection =
+          isRecord(op) && isRecord(op.insertItemSectionContent) ? op.insertItemSectionContent : undefined;
+        if (Array.isArray(insertSection?.contents)) {
+          processShelvesSync(insertSection.contents as FeedItem[], shouldAddPreviews);
+        }
+      }
     }
     const replaceContainer = isRecord(action.replaceEnclosingAction) ? action.replaceEnclosingAction : undefined;
     const replace = isRecord(replaceContainer?.item) ? replaceContainer.item : undefined;
@@ -180,13 +242,24 @@ function processBrowseContentSync(node: unknown, shouldAddPreviews = true): void
   if (!isRecord(node)) return;
   processContentNodeSync(node, shouldAddPreviews);
 
-  const slr = isRecord(node.sectionListRenderer) ? node.sectionListRenderer : undefined;
-  if (slr && Array.isArray(slr.contents)) {
-    processShelvesSync(slr.contents as FeedItem[], shouldAddPreviews);
+  for (const key of [
+    'sectionListRenderer',
+    'richGridRenderer',
+    'sectionListContinuation',
+    'itemSectionContinuation',
+    'richGridContinuation',
+  ] as const) {
+    const container = isRecord(node[key]) ? node[key] : undefined;
+    if (container && Array.isArray(container.contents)) {
+      processShelvesSync(container.contents as FeedItem[], shouldAddPreviews);
+    }
   }
-  const rgr = isRecord(node.richGridRenderer) ? node.richGridRenderer : undefined;
-  if (rgr && Array.isArray(rgr.contents)) {
-    processShelvesSync(rgr.contents as FeedItem[], shouldAddPreviews);
+
+  for (const surfaceKey of ['tvSurfaceContentRenderer', 'tvSurfaceRenderer'] as const) {
+    const surface = isRecord(node[surfaceKey]) ? node[surfaceKey] : undefined;
+    if (surface?.content) {
+      processBrowseContentSync(surface.content, shouldAddPreviews);
+    }
   }
 }
 
@@ -204,6 +277,10 @@ function hasRelevantInnertubeKey(r: Record<string, unknown>): boolean {
       r.tvBrowseContent ||
       r.continuationContents ||
       r.onResponseReceivedActions ||
+      r.onResponseReceivedCommands ||
+      r.onResponseReceivedEndpoints ||
+      r.onResponseReceivedCommand ||
+      r.listMutationCommand ||
       r.endscreen ||
       r.messages ||
       r.title ||
@@ -262,6 +339,9 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
 
       const tvBrowse = isRecord(contents.tvBrowseRenderer) ? contents.tvBrowseRenderer : undefined;
       const tvBrowseInner = isRecord(tvBrowse?.content) ? tvBrowse.content : undefined;
+      if (tvBrowseInner) {
+        processBrowseContentSync(tvBrowseInner, true);
+      }
       const tvSurfaceContent = isRecord(tvBrowseInner?.tvSurfaceContentRenderer)
         ? tvBrowseInner.tvSurfaceContentRenderer
         : undefined;
@@ -300,9 +380,11 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
 
     const cont = isRecord(r.continuationContents) ? r.continuationContents : undefined;
     if (cont) {
-      const sectionListCont = isRecord(cont.sectionListContinuation) ? cont.sectionListContinuation : undefined;
-      if (Array.isArray(sectionListCont?.contents)) {
-        processShelvesSync(sectionListCont.contents as FeedItem[], true);
+      for (const key of ['sectionListContinuation', 'itemSectionContinuation', 'richGridContinuation'] as const) {
+        const listCont = isRecord(cont[key]) ? cont[key] : undefined;
+        if (Array.isArray(listCont?.contents)) {
+          processShelvesSync(listCont.contents as FeedItem[], true);
+        }
       }
       const horizCont = isRecord(cont.horizontalListContinuation) ? cont.horizontalListContinuation : undefined;
       if (Array.isArray(horizCont?.items)) {
@@ -318,8 +400,20 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       }
     }
 
-    if (Array.isArray(r.onResponseReceivedActions)) {
-      processBrowseActionsSync(r.onResponseReceivedActions, true);
+    for (const actionsKey of [
+      'onResponseReceivedActions',
+      'onResponseReceivedCommands',
+      'onResponseReceivedEndpoints',
+    ] as const) {
+      if (Array.isArray(r[actionsKey])) {
+        processBrowseActionsSync(r[actionsKey], true);
+      }
+    }
+    if (isRecord(r.onResponseReceivedCommand)) {
+      processBrowseActionsSync([r.onResponseReceivedCommand], true);
+    }
+    if (isRecord(r.listMutationCommand)) {
+      processBrowseActionsSync([{ listMutationCommand: r.listMutationCommand }], true);
     }
 
     const watchNext = isRecord(contents?.singleColumnWatchNextResults)

@@ -338,4 +338,51 @@ describe('TV browse/JSON.parse transforms', () => {
     assert.match(css, /background-color:\s*#000\s*!important/);
     assert.match(css, /display:\s*none\s*!important/);
   });
+
+  test('filters Channels you watch and Explore more topics across listMutationCommand and standalone headers', () => {
+    const payload = {
+      onResponseReceivedCommands: [
+        {
+          listMutationCommand: {
+            operations: {
+              operations: [
+                {
+                  insertItemSectionContent: {
+                    contents: [
+                      { sectionHeaderViewModel: { headline: { text: { content: 'Channels you watch' } } } },
+                      { shelfRenderer: { content: { horizontalListRenderer: { items: [] } } } },
+                      {
+                        shelfRenderer: {
+                          headerRenderer: { shelfHeaderRenderer: { title: { simpleText: 'Explore more topics' } } },
+                        },
+                      },
+                      {
+                        shelfRenderer: {
+                          headerRenderer: { shelfHeaderRenderer: { title: { simpleText: 'Recommended' } } },
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+
+    transformInnertubeResponseSync(payload);
+    const contents =
+      payload.onResponseReceivedCommands[0]?.listMutationCommand.operations.operations[0]?.insertItemSectionContent
+        .contents ?? [];
+    assert.equal(contents.length, 1);
+    assert.equal(
+      (
+        contents[0] as {
+          shelfRenderer?: { headerRenderer?: { shelfHeaderRenderer?: { title?: { simpleText?: string } } } };
+        }
+      )?.shelfRenderer?.headerRenderer?.shelfHeaderRenderer?.title?.simpleText,
+      'Recommended'
+    );
+  });
 });

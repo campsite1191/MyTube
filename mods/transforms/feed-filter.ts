@@ -1,10 +1,48 @@
 import type { FeedItem } from '../types/innertube.ts';
 import { compactInPlace, unwrapFeedItem } from '../utils/feed-helpers.ts';
-import { isRecord, readRecordPath } from '../utils/type-guards.ts';
+import { isRecord } from '../utils/type-guards.ts';
 
 const BADGE_KEY_RE = /badge/i;
 const SURVEY_KEY_RE = /survey|questionnaire/i;
-const HIDDEN_SHELF_TITLES = new Set(['top channels you watch', 'explore more topics']);
+const HIDDEN_SHELF_TITLE_RE = /^(?:(?:top\s+)?channels you watch|explore more topics)\b/i;
+const SHELF_HEADER_KEYS = [
+  'shelfRenderer',
+  'richSectionRenderer',
+  'richShelfRenderer',
+  'itemSectionRenderer',
+  'gridRenderer',
+  'horizontalListRenderer',
+  'horizontalCardListRenderer',
+  'feedFilterChipBarRenderer',
+  'topicPickerRenderer',
+  'shelfHeaderRenderer',
+  'richShelfHeaderRenderer',
+  'tvShelfHeaderRenderer',
+  'tvhtml5ShelfHeaderRenderer',
+  'sectionHeaderViewModel',
+  'shelfHeaderViewModel',
+  'gridHeaderRenderer',
+  'carouselHeaderRenderer',
+  'richListHeaderRenderer',
+  'headerRenderer',
+  'header',
+] as const;
+const HEADER_CONTAINER_KEYS = new Set<string>([
+  'shelfHeaderRenderer',
+  'richShelfHeaderRenderer',
+  'tvShelfHeaderRenderer',
+  'tvhtml5ShelfHeaderRenderer',
+  'sectionHeaderViewModel',
+  'shelfHeaderViewModel',
+  'gridHeaderRenderer',
+  'carouselHeaderRenderer',
+  'richListHeaderRenderer',
+  'feedFilterChipBarRenderer',
+  'headerRenderer',
+  'header',
+]);
+const HEADER_SKIP_KEYS = new Set<string>(['items', 'contents', 'buttons', 'trackingParams', 'loggingDirectives']);
+const TITLE_FIELD_KEYS = ['title', 'headline', 'headerText', 'superlabel', 'text'] as const;
 const BADGE_SKIP_KEYS = new Set([
   'parameters',
   'trackingParams',
@@ -59,6 +97,21 @@ export function readFormattedText(node: unknown): string {
   if (typeof node.content === 'string') return node.content;
   if (Array.isArray(node.runs)) {
     return node.runs.map((run) => (isRecord(run) && typeof run.text === 'string' ? run.text : '')).join('');
+  }
+  if (isRecord(node.text)) {
+    const nested = readFormattedText(node.text);
+    if (nested) return nested;
+  }
+  if (isRecord(node.attributedString)) {
+    const attributed = readFormattedText(node.attributedString);
+    if (attributed) return attributed;
+  }
+  if (
+    isRecord(node.accessibility) &&
+    isRecord(node.accessibility.accessibilityData) &&
+    typeof node.accessibility.accessibilityData.label === 'string'
+  ) {
+    return node.accessibility.accessibilityData.label;
   }
   return '';
 }
@@ -133,23 +186,51 @@ export function getExistingMenuItemLists(item: FeedItem | null | undefined): Arr
   return Array.from(new Set(lists));
 }
 
-function getShelfTitleSources(item: Record<string, unknown>): unknown[] {
-  const sr = isRecord(item.shelfRenderer) ? item.shelfRenderer : undefined;
-  const richContent = readRecordPath(item, 'richSectionRenderer', 'content');
-  const richShelf = readRecordPath(richContent, 'richShelfRenderer');
-  const nestedShelf = readRecordPath(richContent, 'shelfRenderer');
-  const isr = isRecord(item.itemSectionRenderer) ? item.itemSectionRenderer : undefined;
+function isDirectMediaCard(node: Record<string, unknown>): boolean {
+  return Boolean(
+    (node.tileRenderer || node.lockupViewModel || node.shortsLockupViewModel) &&
+      !node.shelfRenderer &&
+      !node.richSectionRenderer &&
+      !node.itemSectionRenderer &&
+      !node.shelfHeaderRenderer &&
+      !node.sectionHeaderViewModel &&
+      !node.gridRenderer &&
+      !node.horizontalListRenderer
+  );
+}
 
-  return [
-    sr?.title,
-    readRecordPath(sr, 'headerRenderer', 'shelfHeaderRenderer')?.title,
-    richShelf?.title,
-    readRecordPath(richShelf, 'headerRenderer', 'shelfHeaderRenderer')?.title,
-    nestedShelf?.title,
-    readRecordPath(nestedShelf, 'headerRenderer', 'shelfHeaderRenderer')?.title,
-    readRecordPath(isr, 'header', 'shelfHeaderRenderer')?.title,
-    item.title,
-  ];
+function getShelfTitleSources(item: Record<string, unknown>): unknown[] {
+  const sources: unknown[] = [];
+  const visit = (node: Record<string, unknown>, depth: number, insideHeader: boolean): void => {
+    if (depth > 5) return;
+    for (const key of TITLE_FIELD_KEYS) {
+      if (node[key] !== undefined) sources.push(node[key]);
+    }
+    if (isRecord(node.richSectionRenderer) && isRecord(node.richSectionRenderer.content)) {
+      visit(node.richSectionRenderer.content, depth + 1, insideHeader);
+    }
+    if (isRecord(node.itemSectionRenderer) && Array.isArray(node.itemSectionRenderer.contents)) {
+      for (const child of node.itemSectionRenderer.contents) {
+        if (isRecord(child) && !isDirectMediaCard(child)) {
+          visit(child, depth + 1, false);
+        }
+      }
+    }
+    if (insideHeader) {
+      for (const key of Object.keys(node)) {
+        if (HEADER_SKIP_KEYS.has(key)) continue;
+        const child = node[key];
+        if (isRecord(child)) visit(child, depth + 1, true);
+      }
+      return;
+    }
+    for (const key of SHELF_HEADER_KEYS) {
+      const child = node[key];
+      if (isRecord(child)) visit(child, depth + 1, HEADER_CONTAINER_KEYS.has(key));
+    }
+  };
+  visit(item, 0, false);
+  return sources;
 }
 
 function isSurveyTitle(titleText: unknown): boolean {
@@ -174,12 +255,12 @@ export function isSurveyItem(item: FeedItem | null | undefined): boolean {
   return false;
 }
 
-function isHiddenShelf(item: FeedItem | null | undefined): boolean {
-  if (!isRecord(item)) return false;
+export function isHiddenShelf(item: FeedItem | null | undefined): boolean {
+  if (!isRecord(item) || isDirectMediaCard(item)) return false;
 
   for (const candidate of getShelfTitleSources(item)) {
-    const title = readFormattedText(candidate).trim().toLowerCase();
-    if (title && HIDDEN_SHELF_TITLES.has(title)) {
+    const title = readFormattedText(candidate).replace(/\s+/g, ' ').trim();
+    if (title && HIDDEN_SHELF_TITLE_RE.test(title)) {
       return true;
     }
   }

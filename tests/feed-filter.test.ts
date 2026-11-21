@@ -229,16 +229,37 @@ describe('filterFeedItemsSync and filterShelvesInPlaceSync', () => {
       { surveyRenderer: {} },
       { shelfRenderer: { title: { simpleText: 'Keep Me' } } },
       {
+        shelfRenderer: { headerRenderer: { shelfHeaderRenderer: { title: { simpleText: 'Channels you watch' } } } },
+      },
+      {
         shelfRenderer: { headerRenderer: { shelfHeaderRenderer: { title: { simpleText: 'Top channels you watch' } } } },
       },
       {
-        richSectionRenderer: { content: { richShelfRenderer: { title: { runs: [{ text: 'Explore more topics' }] } } } },
+        richSectionRenderer: {
+          content: {
+            richShelfRenderer: {
+              header: { richShelfHeaderRenderer: { title: { runs: [{ text: 'Explore more topics' }] } } },
+            },
+          },
+        },
       },
+      {
+        shelfRenderer: {
+          header: { sectionHeaderViewModel: { headline: { text: { content: 'Explore more topics' } } } },
+        },
+      },
+      {
+        itemSectionRenderer: {
+          contents: [{ shelfRenderer: { title: { simpleText: 'Channels you watch' } } }],
+        },
+      },
+      { tileRenderer: { title: { simpleText: 'Channels you watch' } } },
       { adSlotRenderer: {} },
     ];
     const result = filterShelvesInPlaceSync(shelves);
     assert.equal(result, shelves);
-    assert.equal(shelves.length, 1);
+    assert.equal(shelves.length, 2);
     assert.equal(readFormattedText(shelves[0]?.shelfRenderer?.title), 'Keep Me');
+    assert.equal(readFormattedText(shelves[1]?.tileRenderer?.title), 'Channels you watch');
   });
 });
