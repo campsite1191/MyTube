@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { describe, test } from 'node:test';
 import { configWrite } from '../mods/core/config.ts';
 import { applyWhosWatchingPolicy, installDisableWhosWatching } from '../mods/features/disable-whos-watching.ts';
+
+const requireFromMods = createRequire(new URL('../mods/package.json', import.meta.url));
+const { IDBFactory } = requireFromMods('fake-indexeddb') as { IDBFactory: typeof globalThis.IDBFactory };
 
 function installMockLocalStorage(initial: Record<string, string> = {}): {
   map: Map<string, string>;
@@ -71,8 +75,10 @@ describe('applyWhosWatchingPolicy', () => {
   test('installDisableWhosWatching applies synchronously at startup without waiting for _yttv and reacts to config', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
+    const prevIndexedDb = globals.indexedDB;
     const storage = installMockLocalStorage();
     globals.window = {};
+    globals.indexedDB = new IDBFactory();
 
     t.after(async () => {
       await configWrite('permanentlyEnableWhoIsWatchingMenu', false);
@@ -80,6 +86,8 @@ describe('applyWhosWatchingPolicy', () => {
       storage.restore();
       if (prevWindow === undefined) delete globals.window;
       else globals.window = prevWindow;
+      if (prevIndexedDb === undefined) delete globals.indexedDB;
+      else globals.indexedDB = prevIndexedDb;
     });
 
     installDisableWhosWatching();

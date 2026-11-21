@@ -224,9 +224,10 @@ class SponsorBlockHandler {
   private muteState: MuteState = { activeMuteUuid: null, priorVideoMuted: false };
   private scheduledSegmentUuid: string | null = null;
   private scheduledSkipAtMs = 0;
+  private isModernUi = false;
 
   private readonly playbackEventHandler = (event?: Event): void => {
-    if (event?.type !== 'timeupdate') this.syncOldUiOverlayTop();
+    if (event?.type !== 'timeupdate' && event?.type !== 'ratechange') this.syncOldUiOverlayTop();
     this.syncMuteState();
     this.scheduleSkip();
   };
@@ -281,14 +282,18 @@ class SponsorBlockHandler {
 
   private bindVideo(video: HTMLVideoElement): void {
     this.video = video;
-    for (const evt of ['play', 'pause', 'timeupdate', 'seeked'] as const) {
+    for (const evt of ['play', 'pause', 'timeupdate', 'seeked', 'ratechange'] as const) {
       video.addEventListener(evt, this.playbackEventHandler, { signal: this.signal });
     }
     video.addEventListener('durationchange', this.durationChangeHandler, { signal: this.signal });
   }
 
   private syncOldUiOverlayTop(): void {
-    if (!this.segmentsOverlay || document.querySelector('div[idomkey="Metadata-Section"]')) return;
+    if (!this.segmentsOverlay || this.isModernUi) return;
+    if (document.querySelector('div[idomkey="Metadata-Section"]')) {
+      this.isModernUi = true;
+      return;
+    }
     const sliderRect = document.querySelector('div[idomkey="slider"]')?.getBoundingClientRect();
     if (sliderRect) this.segmentsOverlay.style.setProperty('top', `${sliderRect.top}px`, 'important');
   }
