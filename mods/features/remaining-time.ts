@@ -70,6 +70,7 @@ export function formatRemainingLabel(
 }
 
 let video: HTMLVideoElement | null = null;
+let videoAbort: AbortController | null = null;
 let desiredText: string | null = null;
 let lastAppliedSec = -1;
 let attachRetryTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -172,13 +173,16 @@ function computeDesiredText(target: ElapsedTarget): string | null {
 }
 
 function listen(el: HTMLVideoElement | null): void {
+  unlisten();
   if (!el) return;
-  for (const name of VIDEO_EVENTS) el.addEventListener(name, apply);
+  videoAbort = new AbortController();
+  const { signal } = videoAbort;
+  for (const name of VIDEO_EVENTS) el.addEventListener(name, apply, { signal });
 }
 
-function unlisten(el: HTMLVideoElement | null): void {
-  if (!el) return;
-  for (const name of VIDEO_EVENTS) el.removeEventListener(name, apply);
+function unlisten(): void {
+  videoAbort?.abort();
+  videoAbort = null;
 }
 
 function liveVideo(): HTMLVideoElement | null {
@@ -193,7 +197,7 @@ function liveVideo(): HTMLVideoElement | null {
   }
   const found = pickVideo();
   if (found && found !== video) {
-    unlisten(video);
+    unlisten();
     video = found;
     listen(video);
     desiredText = null;
@@ -241,7 +245,7 @@ function detach(): void {
   observedContainer = null;
   desiredText = null;
   lastAppliedSec = -1;
-  unlisten(video);
+  unlisten();
   video = null;
 }
 

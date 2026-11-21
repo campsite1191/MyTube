@@ -5,7 +5,7 @@
   "main": "index.ts",
   "type": "module",
   "scripts": {
-    "build": "esbuild ui/ui.css --minify --outfile=ui/ui.min.css && esbuild index.ts --bundle --format=iife --target=es2022 --minify --charset=ascii --loader:.css=text --outfile=dist/userscript.js",
+    "build": "esbuild ui/ui.css --minify --outfile=ui/ui.min.css && esbuild index.ts --bundle --format=iife --target=chrome138 --minify --charset=ascii --loader:.css=text --outfile=dist/userscript.js",
     "typecheck": "tsc -p ../tsconfig.json --noEmit"
   },
   "keywords": [],

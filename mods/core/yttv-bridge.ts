@@ -69,6 +69,7 @@ export function whenYttvReady(callback: () => void): void {
   const maxAttempts = 150;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let observer: MutationObserver | null = null;
+  const listenerAbort = new AbortController();
 
   const cleanup = (): void => {
     if (pollTimer !== null) {
@@ -77,8 +78,7 @@ export function whenYttvReady(callback: () => void): void {
     }
     observer?.disconnect();
     observer = null;
-    window.removeEventListener('load', check);
-    document.removeEventListener('DOMContentLoaded', check);
+    listenerAbort.abort();
   };
 
   const flush = (): void => {
@@ -122,8 +122,8 @@ export function whenYttvReady(callback: () => void): void {
     });
     observer.observe(target, { childList: true, subtree: true });
   }
-  window.addEventListener('load', check, { once: true });
-  document.addEventListener('DOMContentLoaded', check, { once: true });
+  window.addEventListener('load', check, { once: true, signal: listenerAbort.signal });
+  document.addEventListener('DOMContentLoaded', check, { once: true, signal: listenerAbort.signal });
   pollTimer = setTimeout(check, 50);
 }
 

@@ -1,6 +1,5 @@
-import { createLruCache } from '../core/cache.ts';
-import type { ConfigChangeListener, ConfigKey } from '../core/config.ts';
-import { configChangeEmitter, configRead, whenConfigReady } from '../core/config.ts';
+import type { ConfigKey } from '../core/config.ts';
+import { configRead, whenConfigReady } from '../core/config.ts';
 import { t } from '../core/i18n.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { showToast } from '../core/yttv-bridge.ts';
@@ -16,6 +15,8 @@ export type SponsorBlockCategory =
   | 'music_offtopic'
   | 'poi_highlight';
 
+type SponsorBlockActionType = 'skip' | 'poi' | 'mute';
+
 export interface SponsorBlockBarType {
   color: string;
   opacity: string;
@@ -25,45 +26,21 @@ export interface SponsorBlockBarType {
 export interface SponsorBlockSegment {
   UUID: string;
   category: SponsorBlockCategory | string;
+  actionType?: SponsorBlockActionType | string;
   segment: [number, number];
 }
 
-interface SkipSegmentsVideoEntry {
-  videoID: string;
-  segments?: SponsorBlockSegment[];
-}
-
-interface SkippedCategoryState {
-  count: number;
-  firstSkipped: number;
-  lastSkipped: number;
-  hasShownToast: boolean;
-}
-
-export interface SegmentBarGeometry {
-  leftPercent: number;
-  widthPercent: number;
-  color: string;
-  opacity: string;
+export interface MuteState {
+  activeMuteUuid: string | null;
+  priorVideoMuted: boolean;
 }
 
 const SPONSORBLOCK_API_URL = 'https://sponsor.ajay.app/api';
+const SPONSORBLOCK_ACTION_TYPES = ['skip', 'poi', 'mute'] as const;
 const REPEAT_SKIP_WINDOW_MS = 1000;
 const SCHEDULE_LOOKBACK_SECONDS = 0.3;
 
-const SPONSORBLOCK_CATEGORIES: readonly SponsorBlockCategory[] = [
-  'sponsor',
-  'intro',
-  'outro',
-  'interaction',
-  'selfpromo',
-  'preview',
-  'filler',
-  'music_offtopic',
-  'poi_highlight',
-] as const;
-
-const CATEGORY_CONFIG_KEYS: ReadonlyArray<readonly [SponsorBlockCategory, ConfigKey]> = [
+const CATEGORY_CONFIG_KEYS = [
   ['sponsor', 'enableSponsorBlockSponsor'],
   ['intro', 'enableSponsorBlockIntro'],
   ['outro', 'enableSponsorBlockOutro'],
@@ -72,116 +49,118 @@ const CATEGORY_CONFIG_KEYS: ReadonlyArray<readonly [SponsorBlockCategory, Config
   ['preview', 'enableSponsorBlockPreview'],
   ['filler', 'enableSponsorBlockFiller'],
   ['music_offtopic', 'enableSponsorBlockMusicOfftopic'],
-];
+] as const satisfies ReadonlyArray<readonly [SponsorBlockCategory, ConfigKey]>;
 
-const SPONSORBLOCK_CONFIG_KEYS = new Set<ConfigKey>([
-  'enableSponsorBlock',
-  'sponsorBlockManualSkips',
-  ...CATEGORY_CONFIG_KEYS.map(([, configKey]) => configKey),
-]);
-
-// Segment colors & opacities matching SponsorBlock upstream conventions.
-export const BAR_TYPES: Readonly<Record<string, SponsorBlockBarType>> = {
-  sponsor: {
-    color: '#00d400',
-    opacity: '0.7',
-    name: t('sponsorblock.segments.sponsor'),
-  },
-  intro: {
-    color: '#00ffff',
-    opacity: '0.7',
-    name: t('sponsorblock.segments.intro'),
-  },
-  outro: {
-    color: '#0202ed',
-    opacity: '0.7',
-    name: t('sponsorblock.segments.outro'),
-  },
-  interaction: {
-    color: '#cc00ff',
-    opacity: '0.7',
-    name: t('sponsorblock.segments.interaction'),
-  },
-  selfpromo: {
-    color: '#ffff00',
-    opacity: '0.7',
-    name: t('sponsorblock.segments.selfpromo'),
-  },
-  preview: {
-    color: '#008fd6',
-    opacity: '0.7',
-    name: t('sponsorblock.segments.preview'),
-  },
-  filler: {
-    color: '#7300FF',
-    opacity: '0.9',
-    name: t('sponsorblock.segments.filler'),
-  },
-  music_offtopic: {
-    color: '#ff9900',
-    opacity: '0.7',
-    name: t('sponsorblock.segments.music_offtopic'),
-  },
-  poi_highlight: {
-    color: '#9b044c',
-    opacity: '0.7',
-    name: t('sponsorblock.segments.poi_highlight'),
-  },
+const BAR_COLORS: Readonly<Record<SponsorBlockCategory, readonly [color: string, opacity?: string]>> = {
+  sponsor: ['#00d400'],
+  intro: ['#00ffff'],
+  outro: ['#0202ed'],
+  interaction: ['#cc00ff'],
+  selfpromo: ['#ffff00'],
+  preview: ['#008fd6'],
+  filler: ['#7300FF', '0.9'],
+  music_offtopic: ['#ff9900'],
+  poi_highlight: ['#ff1684'],
 };
 
-export async function computeSha256HexPrefix(input: string, prefixLength = 4): Promise<string> {
-  const encoded = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest('SHA-256', encoded);
-  const bytes = new Uint8Array(digest);
-  let hex = '';
-  for (const byte of bytes) {
-    hex += byte.toString(16).padStart(2, '0');
-    if (hex.length >= prefixLength) break;
-  }
-  return hex.slice(0, prefixLength);
+// Segment colors & opacities matching upstream ajayyy/SponsorBlock (`src/config.ts`).
+export const BAR_TYPES: Readonly<Record<string, SponsorBlockBarType>> = Object.fromEntries(
+  (Object.entries(BAR_COLORS) as Array<[SponsorBlockCategory, readonly [string, string?]]>).map(
+    ([category, [color, opacity = '0.7']]) => [
+      category,
+      { color, opacity, name: t(`sponsorblock.segments.${category}`) },
+    ]
+  )
+);
+
+export function resolveSegmentActionType(segment: Pick<SponsorBlockSegment, 'actionType' | 'category'>): string {
+  return segment.actionType ?? (segment.category === 'poi_highlight' ? 'poi' : 'skip');
 }
 
-export function extractWatchVideoId(locationHash: string, baseHref = 'https://www.youtube.com/'): string | null {
-  if (!locationHash) return null;
-  const relative = locationHash.startsWith('#') ? locationHash.slice(1) : locationHash;
-  try {
-    const parsed = new URL(relative, baseHref);
-    const videoId = parsed.searchParams.get('v')?.trim();
-    return videoId || null;
-  } catch {
-    return null;
-  }
+export async function computeSha256HexPrefix(input: string, prefixLength = 4): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  const bytes = new Uint8Array(digest, 0, Math.ceil(prefixLength / 2));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, prefixLength);
+}
+
+export function extractWatchVideoId(locationHash: string): string | null {
+  const query = locationHash.split('?')[1];
+  return query ? new URLSearchParams(query).get('v')?.trim() || null : null;
 }
 
 export function getEnabledSkipCategories(
   readConfig: <K extends ConfigKey>(key: K) => boolean = (key) => Boolean(configRead(key))
 ): SponsorBlockCategory[] {
-  const enabled: SponsorBlockCategory[] = [];
-  for (const [category, configKey] of CATEGORY_CONFIG_KEYS) {
-    if (readConfig(configKey)) {
-      enabled.push(category);
-    }
-  }
-  return enabled;
+  return CATEGORY_CONFIG_KEYS.filter(([, key]) => readConfig(key)).map(([category]) => category);
+}
+
+/** Returns only SponsorBlock categories currently enabled in settings for fetching. */
+export function getRequestedCategories(
+  readConfig: <K extends ConfigKey>(key: K) => boolean = (key) => Boolean(configRead(key))
+): SponsorBlockCategory[] {
+  const categories = getEnabledSkipCategories(readConfig);
+  if (readConfig('enableSponsorBlockHighlight')) categories.push('poi_highlight');
+  return categories;
 }
 
 export function findNextSegment(
   segments: readonly SponsorBlockSegment[],
   currentTime: number
 ): SponsorBlockSegment | null {
-  let earliest: SponsorBlockSegment | null = null;
   const threshold = currentTime - SCHEDULE_LOOKBACK_SECONDS;
-
-  for (const seg of segments) {
-    const [start, end] = seg.segment;
-    if (start > threshold && end > threshold) {
-      if (!earliest || start < earliest.segment[0]) {
-        earliest = seg;
-      }
+  return segments.reduce<SponsorBlockSegment | null>((earliest, seg) => {
+    if (resolveSegmentActionType(seg) !== 'skip' || seg.segment[0] <= threshold || seg.segment[1] <= threshold) {
+      return earliest;
     }
-  }
+    return !earliest || seg.segment[0] < earliest.segment[0] ? seg : earliest;
+  }, null);
+}
 
-  return earliest;
+/** Returns the active auto-mute segment covering `currentTime`, excluding manual-skip categories. */
+export function findActiveMuteSegment(
+  segments: readonly SponsorBlockSegment[],
+  currentTime: number,
+  manualCategories: ReadonlySet<string>
+): SponsorBlockSegment | null {
+  return (
+    segments.find(
+      (seg) =>
+        resolveSegmentActionType(seg) === 'mute' &&
+        !manualCategories.has(seg.category) &&
+        currentTime >= seg.segment[0] &&
+        currentTime < seg.segment[1]
+    ) ?? null
+  );
+}
+
+/** Computes the next mute state and desired `video.muted` update (or `null` if unchanged). */
+export function computeMuteTransition(
+  state: MuteState,
+  activeSegment: SponsorBlockSegment | null,
+  currentMuted: boolean
+): { state: MuteState; nextMuted: boolean | null; toastSegment: SponsorBlockSegment | null } {
+  if (!activeSegment) {
+    return state.activeMuteUuid === null
+      ? { state, nextMuted: null, toastSegment: null }
+      : {
+          state: { activeMuteUuid: null, priorVideoMuted: false },
+          nextMuted: state.priorVideoMuted,
+          toastSegment: null,
+        };
+  }
+  if (state.activeMuteUuid === activeSegment.UUID) {
+    return { state, nextMuted: null, toastSegment: null };
+  }
+  return {
+    state: {
+      activeMuteUuid: activeSegment.UUID,
+      priorVideoMuted: state.activeMuteUuid === null ? currentMuted : state.priorVideoMuted,
+    },
+    nextMuted: true,
+    toastSegment: activeSegment,
+  };
 }
 
 export function computeSkipDelayMs(segmentStart: number, currentTime: number): number {
@@ -189,85 +168,60 @@ export function computeSkipDelayMs(segmentStart: number, currentTime: number): n
 }
 
 export function computeTargetTimeAfterSkip(segmentEnd: number, videoDuration: number): number {
-  if (Number.isFinite(videoDuration) && videoDuration > 0 && videoDuration - segmentEnd < 1) {
-    return Math.max(0, segmentEnd - 1);
-  }
-  return Math.max(0, segmentEnd);
+  const target =
+    Number.isFinite(videoDuration) && videoDuration > 0 && videoDuration - segmentEnd < 1 ? segmentEnd - 1 : segmentEnd;
+  return Math.max(0, target);
 }
 
-export function computeSegmentBarGeometry(segment: SponsorBlockSegment, videoDuration: number): SegmentBarGeometry {
+export function computeSegmentBarGeometry(segment: SponsorBlockSegment, videoDuration: number) {
   const [start, end] = segment.segment;
-  const barType = BAR_TYPES[segment.category] ?? { color: 'blue', opacity: '0.7', name: segment.category };
-  const leftPercent = videoDuration > 0 ? (100 * start) / videoDuration : 0;
-  const widthPercent =
-    segment.category === 'poi_highlight' ? 1 : videoDuration > 0 ? (100 * (end - start)) / videoDuration : 0;
-
+  const { color, opacity } = BAR_TYPES[segment.category] ?? { color: 'blue', opacity: '0.7' };
+  const isPoi = resolveSegmentActionType(segment) === 'poi' || segment.category === 'poi_highlight';
   return {
-    leftPercent,
-    widthPercent,
-    color: barType.color,
-    opacity: barType.opacity,
+    leftPercent: videoDuration > 0 ? (100 * start) / videoDuration : 0,
+    widthPercent: isPoi ? 1 : videoDuration > 0 ? (100 * (end - start)) / videoDuration : 0,
+    color,
+    opacity,
   };
 }
 
 export function getSuppressionDecision(
-  state: SkippedCategoryState,
+  state: { count: number; firstSkipped: number; lastSkipped: number; hasShownToast: boolean },
   now: number,
   windowMs = REPEAT_SKIP_WINDOW_MS
-): { suppress: boolean; showToast: boolean; newState: SkippedCategoryState } {
-  const newState = {
-    ...state,
-    count: state.count + 1,
-    lastSkipped: now,
+) {
+  const newState = { ...state, count: state.count + 1, lastSkipped: now };
+  if (now - state.firstSkipped >= windowMs) return { suppress: false, showToast: false, newState };
+  return {
+    suppress: true,
+    showToast: !state.hasShownToast,
+    newState: state.hasShownToast ? newState : { ...newState, hasShownToast: true },
   };
-
-  if (now - state.firstSkipped < windowMs) {
-    if (!state.hasShownToast) {
-      return { suppress: true, showToast: true, newState: { ...newState, hasShownToast: true } };
-    }
-    return { suppress: true, showToast: false, newState };
-  }
-
-  return { suppress: false, showToast: false, newState };
 }
 
-const sponsorBlockCache = createLruCache<SponsorBlockSegment[]>();
-
-/** Clears cached SponsorBlock segment lookups under memory pressure. */
-export function clearSponsorBlockCache(): void {
-  sponsorBlockCache.clear();
-}
-
-/** Fetches sorted SponsorBlock segments for `videoId`, caching hits and 404/empty misses in LRU memory. */
-export async function fetchSponsorBlockSegments(videoId: string, signal?: AbortSignal): Promise<SponsorBlockSegment[]> {
-  const cached = sponsorBlockCache.get(videoId);
-  if (cached !== undefined) return cached;
+/** Fetches sorted SponsorBlock segments (`skip`, `poi`, `mute`) for enabled categories. */
+export async function fetchSponsorBlockSegments(
+  videoId: string,
+  signal?: AbortSignal,
+  categories: readonly SponsorBlockCategory[] = getRequestedCategories()
+): Promise<SponsorBlockSegment[]> {
+  if (categories.length === 0) return [];
 
   const videoHash = await computeSha256HexPrefix(videoId, 4);
   if (signal?.aborted) return [];
 
-  const categoriesParam = encodeURIComponent(JSON.stringify(SPONSORBLOCK_CATEGORIES));
-  const resp = await fetch(`${SPONSORBLOCK_API_URL}/skipSegments/${videoHash}?categories=${categoriesParam}`, {
-    signal,
+  const query = new URLSearchParams({
+    categories: JSON.stringify(categories),
+    actionTypes: JSON.stringify(SPONSORBLOCK_ACTION_TYPES),
   });
-  if (resp.status === 404) {
-    sponsorBlockCache.set(videoId, []);
-    return [];
-  }
+  const resp = await fetch(`${SPONSORBLOCK_API_URL}/skipSegments/${videoHash}?${query}`, { signal });
   if (!resp.ok) return [];
 
-  const results = (await resp.json()) as SkipSegmentsVideoEntry[];
-  if (!Array.isArray(results)) return [];
-
-  const entry = results.find((v) => v.videoID === videoId);
-  if (!entry?.segments?.length) {
-    sponsorBlockCache.set(videoId, []);
-    return [];
-  }
-
-  const sortedSegments = [...entry.segments].sort((a, b) => a.segment[0] - b.segment[0]);
-  sponsorBlockCache.set(videoId, sortedSegments);
-  return sortedSegments;
+  const results = (await resp.json()) as Array<{ videoID: string; segments?: SponsorBlockSegment[] }>;
+  const entry = Array.isArray(results) ? results.find((v) => v.videoID === videoId) : undefined;
+  return (entry?.segments ?? [])
+    .map((seg) => ({ ...seg, actionType: resolveSegmentActionType(seg) }))
+    .toSorted((a, b) => a.segment[0] - b.segment[0]);
 }
 
 class SponsorBlockHandler {
@@ -279,28 +233,20 @@ class SponsorBlockHandler {
   private overlayObserver: MutationObserver | null = null;
   private sliderWaitObserver: MutationObserver | null = null;
   private segmentsOverlay: HTMLDivElement | null = null;
-  private sliderHost: Element | null = null;
   private segments: SponsorBlockSegment[] = [];
   private skippableCategories = new Set<SponsorBlockCategory>();
   private manualSkippableCategories = new Set<string>();
-  private skippedCategories = new Map<string, SkippedCategoryState>();
+  private skippedCategories = new Map<
+    string,
+    { count: number; firstSkipped: number; lastSkipped: number; hasShownToast: boolean }
+  >();
+  private muteState: MuteState = { activeMuteUuid: null, priorVideoMuted: false };
   private scheduledSegmentUuid: string | null = null;
   private scheduledSkipAtMs = 0;
 
-  private syncOldUiOverlayTop(): void {
-    if (!this.segmentsOverlay) return;
-    const isOldUI = !document.querySelector('div[idomkey="Metadata-Section"]');
-    if (!isOldUI) return;
-    const sliderRect = document.querySelector('div[idomkey="slider"]')?.getBoundingClientRect();
-    if (sliderRect) {
-      this.segmentsOverlay.style.setProperty('top', `${sliderRect.top}px`, 'important');
-    }
-  }
-
-  private readonly scheduleSkipHandler = (event?: Event): void => {
-    if (event?.type !== 'timeupdate') {
-      this.syncOldUiOverlayTop();
-    }
+  private readonly playbackEventHandler = (event?: Event): void => {
+    if (event?.type !== 'timeupdate') this.syncOldUiOverlayTop();
+    this.syncMuteState();
     this.scheduleSkip();
   };
 
@@ -317,30 +263,24 @@ class SponsorBlockHandler {
     try {
       const segments = await fetchSponsorBlockSegments(this.videoId, this.abortController.signal);
       if (!this.active || segments.length === 0) return;
-      this.applyLoadedSegments(segments);
+
+      this.segments = segments;
+      const manual = configRead('sponsorBlockManualSkips');
+      this.manualSkippableCategories = new Set(Array.isArray(manual) ? manual : []);
+      this.skippableCategories = new Set(getEnabledSkipCategories());
+
+      onVideo((video) => {
+        if (!this.active) return;
+        this.bindVideo(video);
+        this.buildOverlay();
+        this.syncOldUiOverlayTop();
+        this.syncMuteState();
+        this.scheduleSkip(true);
+      });
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       console.warn('[SponsorBlock] Failed to load segments:', error);
     }
-  }
-
-  private applyLoadedSegments(segments: SponsorBlockSegment[]): void {
-    this.segments = segments;
-    this.refreshCategoryPreferences();
-
-    onVideo((video) => {
-      if (!this.active) return;
-      this.bindVideo(video);
-      this.buildOverlay();
-      this.syncOldUiOverlayTop();
-    });
-  }
-
-  refreshCategoryPreferences(): void {
-    const manual = configRead('sponsorBlockManualSkips');
-    this.manualSkippableCategories = new Set(Array.isArray(manual) ? manual : []);
-    this.skippableCategories = new Set(getEnabledSkipCategories());
-    this.scheduleSkip(true);
   }
 
   getSegments(): readonly SponsorBlockSegment[] {
@@ -349,118 +289,105 @@ class SponsorBlockHandler {
 
   private bindVideo(video: HTMLVideoElement): void {
     this.video = video;
-    video.addEventListener('play', this.scheduleSkipHandler);
-    video.addEventListener('pause', this.scheduleSkipHandler);
-    video.addEventListener('timeupdate', this.scheduleSkipHandler);
-    video.addEventListener('durationchange', this.durationChangeHandler);
+    const { signal } = this.abortController;
+    for (const evt of ['play', 'pause', 'timeupdate', 'seeked'] as const) {
+      video.addEventListener(evt, this.playbackEventHandler, { signal });
+    }
+    video.addEventListener('durationchange', this.durationChangeHandler, { signal });
   }
 
-  private createOverlayElement(slider: Element, videoDuration: number): HTMLDivElement {
+  private syncOldUiOverlayTop(): void {
+    if (!this.segmentsOverlay || document.querySelector('div[idomkey="Metadata-Section"]')) return;
+    const sliderRect = document.querySelector('div[idomkey="slider"]')?.getBoundingClientRect();
+    if (sliderRect) this.segmentsOverlay.style.setProperty('top', `${sliderRect.top}px`, 'important');
+  }
+
+  private syncMuteState(): void {
+    if (!this.active || !this.video) return;
+    const activeMute = findActiveMuteSegment(this.segments, this.video.currentTime, this.manualSkippableCategories);
+    const transition = computeMuteTransition(this.muteState, activeMute, this.video.muted);
+    this.muteState = transition.state;
+    if (transition.nextMuted !== null) this.video.muted = transition.nextMuted;
+    if (transition.toastSegment && configRead('enableSponsorBlockToasts')) {
+      const name = BAR_TYPES[transition.toastSegment.category]?.name || transition.toastSegment.category;
+      showToast('SponsorBlock', t('sponsorblock.toasts.muting', { segment: name }));
+    }
+  }
+
+  private mountOverlay(slider: Element, host: Element, duration: number): void {
     const overlay = document.createElement('div');
     overlay.classList.add('ytLrProgressBarSlider', 'ytLrProgressBarSliderRectangularProgressBar');
     overlay.style.cssText =
       'z-index: 10 !important; background-color: rgba(0, 0, 0, 0) !important; width: 72rem !important; left: 4rem !important;';
 
-    const sliderRect = slider.getBoundingClientRect();
     if (!slider.classList.contains('ytLrProgressBarSlider')) {
-      for (const cls of slider.classList) {
-        overlay.classList.add(cls);
-      }
-      overlay.style.setProperty('height', `${sliderRect.height}px`, 'important');
-      overlay.style.setProperty('bottom', `${sliderRect.bottom - sliderRect.top}px`, 'important');
+      const rect = slider.getBoundingClientRect();
+      overlay.classList.add(...slider.classList);
+      overlay.style.setProperty('height', `${rect.height}px`, 'important');
+      overlay.style.setProperty('bottom', `${rect.bottom - rect.top}px`, 'important');
     }
 
-    const fragment = document.createDocumentFragment();
-    for (const segment of this.segments) {
-      const geometry = computeSegmentBarGeometry(segment, videoDuration);
+    const bars = this.segments.map((segment) => {
+      const { color, opacity, widthPercent, leftPercent } = computeSegmentBarGeometry(segment, duration);
       const elm = document.createElement('div');
-      elm.style.cssText = `background-color: ${geometry.color} !important; opacity: ${geometry.opacity} !important; height: 100% !important; width: ${geometry.widthPercent}% !important; left: ${geometry.leftPercent}% !important; position: absolute !important;`;
-      fragment.appendChild(elm);
-    }
-    overlay.appendChild(fragment);
+      elm.style.cssText = `background-color: ${color} !important; opacity: ${opacity} !important; height: 100% !important; width: ${widthPercent}% !important; left: ${leftPercent}% !important; position: absolute !important;`;
+      return elm;
+    });
+    overlay.append(...bars);
 
-    return overlay;
-  }
-
-  private attachOverlayToHost(sliderHost: Element, overlay: HTMLDivElement): void {
-    this.sliderHost = sliderHost;
+    this.segmentsOverlay = overlay;
     this.overlayObserver = new MutationObserver((mutations) => {
-      if (!this.active || !this.segmentsOverlay || !this.sliderHost) return;
-
-      for (const mutation of mutations) {
-        for (const node of mutation.removedNodes) {
-          if (node === this.segmentsOverlay) {
-            this.sliderHost.appendChild(this.segmentsOverlay);
-            break;
-          }
-        }
+      if (!this.active || !this.segmentsOverlay) return;
+      if (mutations.some((m) => Array.from(m.removedNodes).includes(this.segmentsOverlay as Node))) {
+        host.appendChild(this.segmentsOverlay);
       }
-
-      const progressBar = document.querySelector('ytlr-progress-bar');
-      if (!progressBar) return;
-      const nextDisplay = progressBar.getAttribute('hybridnavfocusable') === 'false' ? 'none' : 'block';
+      const focusable = document.querySelector('ytlr-progress-bar')?.getAttribute('hybridnavfocusable');
+      const nextDisplay = focusable === 'false' ? 'none' : 'block';
       if (this.segmentsOverlay.style.display !== nextDisplay) {
         this.segmentsOverlay.style.setProperty('display', nextDisplay, 'important');
       }
     });
-
-    this.overlayObserver.observe(sliderHost, { childList: true, subtree: true });
-    sliderHost.appendChild(overlay);
+    this.overlayObserver.observe(host, { childList: true, subtree: true });
+    host.appendChild(overlay);
   }
 
   private buildOverlay(): void {
-    if (!this.active || this.segmentsOverlay || !this.video || !this.video.duration) {
-      return;
-    }
+    if (!this.active || this.segmentsOverlay || !this.video?.duration) return;
 
-    const slider = document.querySelector('div[idomkey="slider"]');
-    const sliderHost = document.querySelector('ytlr-redux-connect-ytlr-progress-bar');
+    const tryMount = (): boolean => {
+      const slider = document.querySelector('div[idomkey="slider"]');
+      const host = document.querySelector('ytlr-redux-connect-ytlr-progress-bar');
+      if (!slider || !host || !this.video?.duration) return false;
+      this.mountOverlay(slider, host, this.video.duration);
+      this.syncOldUiOverlayTop();
+      return true;
+    };
 
-    if (slider && sliderHost) {
-      this.segmentsOverlay = this.createOverlayElement(slider, this.video.duration);
-      this.attachOverlayToHost(sliderHost, this.segmentsOverlay);
-      return;
-    }
-
-    if (this.sliderWaitObserver) return;
-    const root = document.documentElement ?? document;
+    if (tryMount() || this.sliderWaitObserver) return;
     this.sliderWaitObserver = new MutationObserver(() => {
-      if (!this.active || !this.video?.duration || this.segmentsOverlay) {
+      if (!this.active || !this.video?.duration || this.segmentsOverlay || tryMount()) {
         this.sliderWaitObserver?.disconnect();
         this.sliderWaitObserver = null;
-        return;
-      }
-
-      const readySlider = document.querySelector('div[idomkey="slider"]');
-      const readyHost = document.querySelector('ytlr-redux-connect-ytlr-progress-bar');
-      if (readySlider && readyHost) {
-        this.sliderWaitObserver?.disconnect();
-        this.sliderWaitObserver = null;
-        this.segmentsOverlay = this.createOverlayElement(readySlider, this.video.duration);
-        this.attachOverlayToHost(readyHost, this.segmentsOverlay);
-        this.syncOldUiOverlayTop();
       }
     });
-    this.sliderWaitObserver.observe(root, { childList: true, subtree: true });
+    this.sliderWaitObserver.observe(document.documentElement ?? document, { childList: true, subtree: true });
+  }
+
+  private clearSkipTimer(): void {
+    if (this.nextSkipTimeout !== null) clearTimeout(this.nextSkipTimeout);
+    this.nextSkipTimeout = null;
+    this.scheduledSegmentUuid = null;
   }
 
   scheduleSkip(force = false): void {
     if (!this.active || !this.video || this.video.paused || this.segments.length === 0) {
-      if (this.nextSkipTimeout !== null) {
-        clearTimeout(this.nextSkipTimeout);
-        this.nextSkipTimeout = null;
-      }
-      this.scheduledSegmentUuid = null;
+      this.clearSkipTimer();
       return;
     }
 
     const segment = findNextSegment(this.segments, this.video.currentTime);
     if (!segment) {
-      if (this.nextSkipTimeout !== null) {
-        clearTimeout(this.nextSkipTimeout);
-        this.nextSkipTimeout = null;
-      }
-      this.scheduledSegmentUuid = null;
+      this.clearSkipTimer();
       return;
     }
 
@@ -478,11 +405,7 @@ class SponsorBlockHandler {
       return;
     }
 
-    if (this.nextSkipTimeout !== null) {
-      clearTimeout(this.nextSkipTimeout);
-      this.nextSkipTimeout = null;
-    }
-
+    this.clearSkipTimer();
     this.scheduledSegmentUuid = segment.UUID;
     this.scheduledSkipAtMs = targetSkipAtMs;
     this.nextSkipTimeout = setTimeout(() => {
@@ -493,9 +416,10 @@ class SponsorBlockHandler {
       if (this.manualSkippableCategories.has(segment.category)) return;
 
       const skipName = BAR_TYPES[segment.category]?.name || segment.category;
+      const now = Date.now();
       const existingSkip = this.skippedCategories.get(segment.UUID);
       if (existingSkip) {
-        const decision = getSuppressionDecision(existingSkip, Date.now());
+        const decision = getSuppressionDecision(existingSkip, now);
         this.skippedCategories.set(segment.UUID, decision.newState);
         if (decision.suppress) {
           if (decision.showToast && configRead('enableSponsorBlockToasts')) {
@@ -507,7 +431,6 @@ class SponsorBlockHandler {
           return;
         }
       } else {
-        const now = Date.now();
         this.skippedCategories.set(segment.UUID, {
           count: 1,
           firstSkipped: now,
@@ -527,28 +450,18 @@ class SponsorBlockHandler {
   destroy(): void {
     this.active = false;
     this.abortController.abort();
-
-    if (this.nextSkipTimeout !== null) {
-      clearTimeout(this.nextSkipTimeout);
-      this.nextSkipTimeout = null;
-    }
-    this.scheduledSegmentUuid = null;
-
+    this.clearSkipTimer();
     this.sliderWaitObserver?.disconnect();
     this.sliderWaitObserver = null;
-
     this.overlayObserver?.disconnect();
     this.overlayObserver = null;
-
     this.segmentsOverlay?.remove();
     this.segmentsOverlay = null;
-    this.sliderHost = null;
 
     if (this.video) {
-      this.video.removeEventListener('play', this.scheduleSkipHandler);
-      this.video.removeEventListener('pause', this.scheduleSkipHandler);
-      this.video.removeEventListener('timeupdate', this.scheduleSkipHandler);
-      this.video.removeEventListener('durationchange', this.durationChangeHandler);
+      const transition = computeMuteTransition(this.muteState, null, this.video.muted);
+      this.muteState = transition.state;
+      if (transition.nextMuted !== null) this.video.muted = transition.nextMuted;
       this.video = null;
     }
 
@@ -573,13 +486,13 @@ function destroyActiveHandler(): void {
 }
 
 function handleHashChange(): void {
-  const videoId = extractWatchVideoId(location.hash, location.href);
+  const videoId = extractWatchVideoId(location.hash);
   if (!videoId) {
     destroyActiveHandler();
     return;
   }
 
-  if (activeHandler && activeHandler.videoId === videoId) return;
+  if (activeHandler?.videoId === videoId) return;
   destroyActiveHandler();
 
   if (configRead('enableSponsorBlock')) {
@@ -588,24 +501,7 @@ function handleHashChange(): void {
   }
 }
 
-const handleConfigChange: ConfigChangeListener = (event) => {
-  if (!SPONSORBLOCK_CONFIG_KEYS.has(event.detail?.key)) return;
-
-  if (event.detail.key === 'enableSponsorBlock') {
-    if (!event.detail.value && activeHandler) {
-      activeHandler.destroy();
-      activeHandler = null;
-    } else if (event.detail.value) {
-      handleHashChange();
-    }
-    return;
-  }
-
-  activeHandler?.refreshCategoryPreferences();
-};
-
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('hashchange', handleHashChange, false);
-  configChangeEmitter.addEventListener('configChange', handleConfigChange);
   void whenConfigReady().then(handleHashChange);
 }

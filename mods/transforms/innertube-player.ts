@@ -161,15 +161,13 @@ export function dedupeAndSortSubscriptionTabs(
     return true;
   });
 
-  if (sortAlphabetically) {
-    deduped.sort((a, b) => {
-      if (a.tabRenderer?.selected && !b.tabRenderer?.selected) return -1;
-      if (!a.tabRenderer?.selected && b.tabRenderer?.selected) return 1;
-      return (a.tabRenderer?.title || '').localeCompare(b.tabRenderer?.title || '');
-    });
-  }
+  if (!sortAlphabetically) return deduped;
 
-  return deduped;
+  return deduped.toSorted((a, b) => {
+    if (a.tabRenderer?.selected && !b.tabRenderer?.selected) return -1;
+    if (!a.tabRenderer?.selected && b.tabRenderer?.selected) return 1;
+    return (a.tabRenderer?.title || '').localeCompare(b.tabRenderer?.title || '');
+  });
 }
 
 export function extractBrowseIdFromResponse(payload: Record<string, unknown>): string | null {

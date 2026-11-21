@@ -1,6 +1,6 @@
 import { t } from '../core/i18n.ts';
 import { processRydResponse } from '../features/return-youtube-dislike.ts';
-import { getActiveSponsorBlockSegments } from '../features/sponsorblock.ts';
+import { getActiveSponsorBlockSegments, resolveSegmentActionType } from '../features/sponsorblock.ts';
 import { addPreviews } from '../interceptors/previews.ts';
 import { buildChaptersMarkerEntity } from '../transforms/chapters.ts';
 import {
@@ -490,7 +490,7 @@ function transformPlayerOverlays(r: Record<string, unknown>): void {
 
   const target = overlayRenderer.timelyActionRenderers as unknown[];
   for (const segment of activeSegments) {
-    if (!manualSkipped.includes(segment.category)) continue;
+    if (resolveSegmentActionType(segment) !== 'skip' || !manualSkipped.includes(segment.category)) continue;
     target.push(
       timelyAction(
         t('sponsorblock.toasts.skip', { segment: t(`sponsorblock.segments.${segment.category}`) }),
@@ -526,7 +526,7 @@ function transformTransportControls(r: Record<string, unknown>): void {
   }
   if (!Array.isArray(tcRenderer.promotedActions) || !configRead('enableSponsorBlockHighlight')) return;
 
-  const highlight = getActiveSponsorBlockSegments().find((seg) => seg.category === 'poi_highlight');
+  const highlight = getActiveSponsorBlockSegments().find((seg) => resolveSegmentActionType(seg) === 'poi');
   if (!highlight) return;
 
   tcRenderer.promotedActions.push({

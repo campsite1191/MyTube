@@ -41,7 +41,11 @@ interface MockElement {
   href?: string;
   crossOrigin?: string;
   isConnected: boolean;
-  addEventListener: (type: string, fn: (ev?: unknown) => void) => void;
+  addEventListener: (
+    type: string,
+    fn: (ev?: unknown) => void,
+    options?: boolean | { once?: boolean; signal?: AbortSignal }
+  ) => void;
   removeEventListener: (type: string, fn: (ev?: unknown) => void) => void;
   dispatchEvent: (ev: { type: string; target?: unknown }) => boolean;
   appendChild: (child: MockElement) => MockElement;
@@ -61,9 +65,45 @@ interface MockElement {
   src?: string;
 }
 
+function createEventRegistry(getTarget?: () => unknown) {
+  const listeners = new Map<string, Set<(ev?: unknown) => void>>();
+  return {
+    addEventListener(
+      type: string,
+      fn: (ev?: unknown) => void,
+      options?: boolean | { once?: boolean; signal?: AbortSignal }
+    ): void {
+      const opts = typeof options === 'object' ? options : undefined;
+      if (opts?.signal?.aborted) return;
+      let set = listeners.get(type);
+      if (!set) {
+        set = new Set();
+        listeners.set(type, set);
+      }
+      const wrapped = opts?.once
+        ? (ev?: unknown) => {
+            set?.delete(wrapped);
+            fn(ev);
+          }
+        : fn;
+      set.add(wrapped);
+      opts?.signal?.addEventListener('abort', () => set.delete(wrapped), { once: true });
+    },
+    removeEventListener(type: string, fn: (ev?: unknown) => void): void {
+      listeners.get(type)?.delete(fn);
+    },
+    dispatchEvent(ev: { type: string; target?: unknown }): boolean {
+      const target = getTarget?.();
+      const payload = target !== undefined ? { ...ev, target: ev.target ?? target } : ev;
+      for (const fn of [...(listeners.get(ev.type) ?? [])]) fn(payload);
+      return true;
+    },
+  };
+}
+
 function createMockElement(tagName: string, docRef: { root: MockElement | null }): MockElement {
   const classes = new Set<string>();
-  const listeners = new Map<string, Set<(ev?: unknown) => void>>();
+  const events = createEventRegistry(() => el);
   const attrs: Record<string, string> = {};
   const styleObj: Record<string, unknown> = {
     setProperty: (k: string, v: string) => {
@@ -98,21 +138,9 @@ function createMockElement(tagName: string, docRef: { root: MockElement | null }
     parentElement: null,
     textContent: '',
     isConnected: true,
-    addEventListener: (type: string, fn: (ev?: unknown) => void) => {
-      let set = listeners.get(type);
-      if (!set) {
-        set = new Set();
-        listeners.set(type, set);
-      }
-      set.add(fn);
-    },
-    removeEventListener: (type: string, fn: (ev?: unknown) => void) => {
-      listeners.get(type)?.delete(fn);
-    },
-    dispatchEvent: (ev: { type: string; target?: unknown }) => {
-      for (const fn of listeners.get(ev.type) ?? []) fn({ ...ev, target: ev.target ?? el });
-      return true;
-    },
+    addEventListener: events.addEventListener,
+    removeEventListener: events.removeEventListener,
+    dispatchEvent: events.dispatchEvent,
     appendChild: (child: MockElement) => {
       child.parentElement = el;
       child.isConnected = el.isConnected;
@@ -186,8 +214,8 @@ describe('End-to-end userscript bundle lifecycle', () => {
     });
     const bundleSource = fs.readFileSync(BUNDLE_PATH, 'utf8');
 
-    const windowListeners = new Map<string, Set<(ev?: unknown) => void>>();
-    const docListeners = new Map<string, Set<(ev?: unknown) => void>>();
+    const windowEvents = createEventRegistry();
+    const docEvents = createEventRegistry();
     const observers: Array<{ target: unknown; cb: () => void }> = [];
     const fetchCalls: Array<{ url: string; body?: string }> = [];
     const xhrCalls: Array<{ body: unknown }> = [];
@@ -248,21 +276,9 @@ describe('End-to-end userscript bundle lifecycle', () => {
         };
         return walk(docRef.root);
       },
-      addEventListener: (type: string, fn: (ev?: unknown) => void) => {
-        let set = docListeners.get(type);
-        if (!set) {
-          set = new Set();
-          docListeners.set(type, set);
-        }
-        set.add(fn);
-      },
-      removeEventListener: (type: string, fn: (ev?: unknown) => void) => {
-        docListeners.get(type)?.delete(fn);
-      },
-      dispatchEvent: (ev: { type: string; target?: unknown }) => {
-        for (const fn of [...(docListeners.get(ev.type) ?? [])]) fn(ev);
-        return true;
-      },
+      addEventListener: docEvents.addEventListener,
+      removeEventListener: docEvents.removeEventListener,
+      dispatchEvent: docEvents.dispatchEvent,
     };
 
     class MockResponse {
@@ -374,21 +390,9 @@ describe('End-to-end userscript bundle lifecycle', () => {
         cb();
         return 1;
       },
-      addEventListener: (type: string, fn: (ev?: unknown) => void) => {
-        let set = windowListeners.get(type);
-        if (!set) {
-          set = new Set();
-          windowListeners.set(type, set);
-        }
-        set.add(fn);
-      },
-      removeEventListener: (type: string, fn: (ev?: unknown) => void) => {
-        windowListeners.get(type)?.delete(fn);
-      },
-      dispatchEvent: (ev: { type: string }) => {
-        for (const fn of [...(windowListeners.get(ev.type) ?? [])]) fn(ev);
-        return true;
-      },
+      addEventListener: windowEvents.addEventListener,
+      removeEventListener: windowEvents.removeEventListener,
+      dispatchEvent: windowEvents.dispatchEvent,
       h5vcc: {
         system: {
           onMemoryPressure: {

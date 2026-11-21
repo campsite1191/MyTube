@@ -99,21 +99,14 @@ export function requestNextAndNavigateChannel(params: NextNavParams): void {
 
 export async function getGuide(): Promise<unknown> {
   const client = getKabukiInnerTubeClient();
-  if (!client) return Promise.resolve(null);
+  if (!client) return null;
 
   if (guideCache) return guideCache;
 
-  const response = await new Promise((resolve) => {
-    client.fetch({ path: '/youtubei/v1/guide', signal: getAbortSignal() }).subscribe(
-      (res: unknown) => {
-        resolve(res);
-      },
-      () => {
-        resolve(null);
-      }
-    );
-  });
+  const { promise, resolve } = Promise.withResolvers<unknown>();
+  client.fetch({ path: '/youtubei/v1/guide', signal: getAbortSignal() }).subscribe(resolve, () => resolve(null));
 
+  const response = await promise;
   if (response !== null) guideCache = response;
   return response;
 }
@@ -141,48 +134,46 @@ export function getFeedbackPanelTokens(panelId: string, params: string): Promise
   const client = getKabukiInnerTubeClient();
   if (!client) return Promise.resolve([]);
 
-  return new Promise((resolve, reject) => {
-    client
-      .fetch({
-        path: '/youtubei/v1/get_panel',
-        payload: { panelId, params },
-      })
-      .subscribe((response: unknown) => {
-        const res = isRecord(response) ? response : undefined;
-        const content = isRecord(res?.content) ? res.content : undefined;
-        const panel = isRecord(content?.engagementPanelSectionListRenderer)
-          ? content.engagementPanelSectionListRenderer
-          : undefined;
-        const panelContent = isRecord(panel?.content) ? panel.content : undefined;
-        const listVm = isRecord(panelContent?.listViewModel) ? panelContent.listViewModel : undefined;
-        const listItems = listVm?.listItems;
-        if (!Array.isArray(listItems)) {
-          resolve([]);
-          return;
-        }
-        const tokens: string[] = [];
-        for (const item of listItems) {
-          if (!isRecord(item)) continue;
-          const token = findFeedbackToken(item.listItemViewModel);
-          if (token) tokens.push(token);
-        }
-        resolve(tokens);
-      }, reject);
-  });
+  const { promise, resolve, reject } = Promise.withResolvers<string[]>();
+  client
+    .fetch({
+      path: '/youtubei/v1/get_panel',
+      payload: { panelId, params },
+    })
+    .subscribe((response: unknown) => {
+      const res = isRecord(response) ? response : undefined;
+      const content = isRecord(res?.content) ? res.content : undefined;
+      const panel = isRecord(content?.engagementPanelSectionListRenderer)
+        ? content.engagementPanelSectionListRenderer
+        : undefined;
+      const panelContent = isRecord(panel?.content) ? panel.content : undefined;
+      const listVm = isRecord(panelContent?.listViewModel) ? panelContent.listViewModel : undefined;
+      const listItems = listVm?.listItems;
+      if (!Array.isArray(listItems)) {
+        resolve([]);
+        return;
+      }
+      const tokens: string[] = [];
+      for (const item of listItems) {
+        if (!isRecord(item)) continue;
+        const token = findFeedbackToken(item.listItemViewModel);
+        if (token) tokens.push(token);
+      }
+      resolve(tokens);
+    }, reject);
+  return promise;
 }
 
 export function sendFeedbackToken(feedbackToken: string): Promise<unknown> {
   const client = getKabukiInnerTubeClient();
   if (!client) return Promise.resolve(null);
 
-  return new Promise((resolve, reject) => {
-    client
-      .fetch({
-        path: '/youtubei/v1/feedback',
-        payload: { feedbackTokens: [feedbackToken] },
-      })
-      .subscribe((response: unknown) => {
-        resolve(response);
-      }, reject);
-  });
+  const { promise, resolve, reject } = Promise.withResolvers<unknown>();
+  client
+    .fetch({
+      path: '/youtubei/v1/feedback',
+      payload: { feedbackTokens: [feedbackToken] },
+    })
+    .subscribe(resolve, reject);
+  return promise;
 }

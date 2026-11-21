@@ -1,28 +1,28 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { SponsorBlockSegment } from '../mods/features/sponsorblock.ts';
+import type { MuteState, SponsorBlockSegment } from '../mods/features/sponsorblock.ts';
 import {
   BAR_TYPES,
-  clearSponsorBlockCache,
+  computeMuteTransition,
   computeSegmentBarGeometry,
   computeSha256HexPrefix,
   computeSkipDelayMs,
   computeTargetTimeAfterSkip,
   extractWatchVideoId,
   fetchSponsorBlockSegments,
+  findActiveMuteSegment,
   findNextSegment,
   getEnabledSkipCategories,
+  getRequestedCategories,
   getSuppressionDecision,
 } from '../mods/features/sponsorblock.ts';
 
 describe('computeSha256HexPrefix', () => {
   test('computes native WebCrypto SHA-256 hex prefixes for SponsorBlock API lookup', async () => {
-    // SHA-256("dQw4w9WgXcQ") starts with "8f1c..."
     const prefix = await computeSha256HexPrefix('dQw4w9WgXcQ', 4);
     assert.equal(prefix.length, 4);
     assert.match(prefix, /^[0-9a-f]{4}$/);
 
-    // Verify full 8-char prefix determinism
     const longer = await computeSha256HexPrefix('dQw4w9WgXcQ', 8);
     assert.equal(longer.slice(0, 4), prefix);
   });
@@ -39,31 +39,78 @@ describe('extractWatchVideoId', () => {
   });
 });
 
-describe('getEnabledSkipCategories', () => {
-  test('returns only categories whose config toggles are enabled', () => {
-    const enabledSet = new Set(['enableSponsorBlockSponsor', 'enableSponsorBlockOutro', 'enableSponsorBlockFiller']);
-    const categories = getEnabledSkipCategories((key) => enabledSet.has(key));
-    assert.deepEqual(categories, ['sponsor', 'outro', 'filler']);
+describe('category selection helpers', () => {
+  test('returns only enabled skip categories and includes poi_highlight when highlight is enabled', () => {
+    const enabledSet = new Set([
+      'enableSponsorBlockSponsor',
+      'enableSponsorBlockOutro',
+      'enableSponsorBlockFiller',
+      'enableSponsorBlockHighlight',
+    ]);
     assert.deepEqual(
-      getEnabledSkipCategories(() => false),
+      getEnabledSkipCategories((key) => enabledSet.has(key)),
+      ['sponsor', 'outro', 'filler']
+    );
+    assert.deepEqual(
+      getRequestedCategories((key) => enabledSet.has(key)),
+      ['sponsor', 'outro', 'filler', 'poi_highlight']
+    );
+    assert.deepEqual(
+      getRequestedCategories(() => false),
       []
     );
   });
 });
 
-describe('findNextSegment and timing calculations', () => {
+describe('findNextSegment, mute state, and timing calculations', () => {
   const segments: SponsorBlockSegment[] = [
-    { UUID: 'seg-2', category: 'outro', segment: [90, 100] },
-    { UUID: 'seg-1', category: 'sponsor', segment: [10, 25] },
+    { UUID: 'poi-1', category: 'poi_highlight', actionType: 'poi', segment: [5, 5] },
+    { UUID: 'mute-1', category: 'sponsor', actionType: 'mute', segment: [6, 9] },
+    { UUID: 'seg-2', category: 'outro', actionType: 'skip', segment: [90, 100] },
+    { UUID: 'seg-1', category: 'sponsor', actionType: 'skip', segment: [10, 25] },
     { UUID: 'seg-past', category: 'intro', segment: [0, 5] },
   ];
 
-  test('picks earliest upcoming segment within the lookback window', () => {
+  test('picks earliest upcoming skip segment while ignoring poi and mute segments', () => {
     assert.equal(findNextSegment(segments, 0)?.UUID, 'seg-past');
+    // Lookback window (currentTime - 0.3): at 0.2s, seg-past (start 0 > -0.1) is still eligible; at 4.9s, poi-1 & mute-1 are ignored in favor of seg-1.
+    assert.equal(findNextSegment(segments, 0.2)?.UUID, 'seg-past');
+    assert.equal(findNextSegment(segments, 4.9)?.UUID, 'seg-1');
     assert.equal(findNextSegment(segments, 6)?.UUID, 'seg-1');
     assert.equal(findNextSegment(segments, 10.2)?.UUID, 'seg-1');
     assert.equal(findNextSegment(segments, 26)?.UUID, 'seg-2');
     assert.equal(findNextSegment(segments, 101), null);
+  });
+
+  test('finds active mute segments and restores prior mute state cleanly', () => {
+    const manualNone = new Set<string>();
+    const manualSponsor = new Set<string>(['sponsor']);
+
+    assert.equal(findActiveMuteSegment(segments, 5.9, manualNone), null);
+    assert.equal(findActiveMuteSegment(segments, 6, manualNone)?.UUID, 'mute-1');
+    assert.equal(findActiveMuteSegment(segments, 8.9, manualNone)?.UUID, 'mute-1');
+    assert.equal(findActiveMuteSegment(segments, 9, manualNone), null);
+    assert.equal(findActiveMuteSegment(segments, 7, manualSponsor), null);
+
+    // Entering mute from unmuted video mutes audio, then restores unmuted on exit
+    const initial: MuteState = { activeMuteUuid: null, priorVideoMuted: false };
+    const enter = computeMuteTransition(initial, segments[1] ?? null, false);
+    assert.equal(enter.nextMuted, true);
+    assert.equal(enter.toastSegment?.UUID, 'mute-1');
+
+    const stay = computeMuteTransition(enter.state, segments[1] ?? null, true);
+    assert.equal(stay.nextMuted, null);
+    assert.equal(stay.toastSegment, null);
+
+    const exit = computeMuteTransition(stay.state, null, true);
+    assert.equal(exit.nextMuted, false);
+    assert.deepEqual(exit.state, initial);
+
+    // Entering mute when user already muted preserves true on exit
+    const preMutedEnter = computeMuteTransition(initial, segments[1] ?? null, true);
+    assert.equal(preMutedEnter.nextMuted, true);
+    const preMutedExit = computeMuteTransition(preMutedEnter.state, null, true);
+    assert.equal(preMutedExit.nextMuted, true);
   });
 
   test('computes non-negative skip delay and clamps end time near video end', () => {
@@ -76,7 +123,7 @@ describe('findNextSegment and timing calculations', () => {
 });
 
 describe('computeSegmentBarGeometry', () => {
-  test('calculates bar percentages and special poi_highlight width', () => {
+  test('calculates bar percentages and official poi_highlight marker color and width', () => {
     const sponsor: SponsorBlockSegment = { UUID: 's', category: 'sponsor', segment: [30, 60] };
     assert.deepEqual(computeSegmentBarGeometry(sponsor, 120), {
       leftPercent: 25,
@@ -85,9 +132,18 @@ describe('computeSegmentBarGeometry', () => {
       opacity: '0.7',
     });
 
-    const highlight: SponsorBlockSegment = { UUID: 'h', category: 'poi_highlight', segment: [60, 61] };
-    assert.equal(computeSegmentBarGeometry(highlight, 120).widthPercent, 1);
-    assert.equal(computeSegmentBarGeometry(highlight, 120).leftPercent, 50);
+    const highlight: SponsorBlockSegment = {
+      UUID: 'h',
+      category: 'poi_highlight',
+      actionType: 'poi',
+      segment: [60, 60],
+    };
+    assert.deepEqual(computeSegmentBarGeometry(highlight, 120), {
+      leftPercent: 50,
+      widthPercent: 1,
+      color: '#ff1684',
+      opacity: '0.7',
+    });
   });
 });
 
@@ -110,30 +166,28 @@ describe('getSuppressionDecision', () => {
   });
 });
 
-describe('fetchSponsorBlockSegments caching', () => {
-  test('caches sorted hits and 404 misses, retries transient 500s, and resets via clearSponsorBlockCache', async (t) => {
+describe('fetchSponsorBlockSegments', () => {
+  test('requests actionTypes=["skip","poi","mute"] for enabled categories and skips fetch when empty', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevFetch = globals.fetch;
-    let fetchCount = 0;
-    let serverStatus = 500;
+    const requestedUrls: string[] = [];
+    let status = 200;
 
     t.after(() => {
       globals.fetch = prevFetch;
-      clearSponsorBlockCache();
     });
 
-    clearSponsorBlockCache();
-    globals.fetch = (async (): Promise<Response> => {
-      fetchCount++;
-      if (serverStatus === 404) return new Response(null, { status: 404 });
-      if (serverStatus !== 200) return new Response(null, { status: serverStatus });
+    globals.fetch = (async (input: unknown): Promise<Response> => {
+      requestedUrls.push(String(input));
+      if (status !== 200) return new Response(null, { status });
       return new Response(
         JSON.stringify([
           {
-            videoID: 'sbCacheVid',
+            videoID: 'sbVid1',
             segments: [
-              { UUID: 's2', category: 'outro', segment: [90, 100] },
-              { UUID: 's1', category: 'sponsor', segment: [5, 15] },
+              { UUID: 's2', category: 'outro', actionType: 'skip', segment: [90, 100] },
+              { UUID: 'm1', category: 'sponsor', actionType: 'mute', segment: [15, 20] },
+              { UUID: 'p1', category: 'poi_highlight', segment: [5, 5] },
             ],
           },
         ]),
@@ -141,33 +195,25 @@ describe('fetchSponsorBlockSegments caching', () => {
       );
     }) as typeof fetch;
 
-    // 500 is transient and must not be cached.
-    assert.deepEqual(await fetchSponsorBlockSegments('sbCacheVid'), []);
-    assert.equal(fetchCount, 1);
+    // Empty categories skips network fetch completely.
+    assert.deepEqual(await fetchSponsorBlockSegments('sbVid1', undefined, []), []);
+    assert.equal(requestedUrls.length, 0);
 
-    // Next attempt returns 200 -> sorted & cached.
-    serverStatus = 200;
-    const loaded = await fetchSponsorBlockSegments('sbCacheVid');
+    const loaded = await fetchSponsorBlockSegments('sbVid1', undefined, ['sponsor', 'poi_highlight']);
+    assert.equal(requestedUrls.length, 1);
+    const parsedUrl = new URL(requestedUrls[0] ?? '');
+    assert.deepEqual(JSON.parse(parsedUrl.searchParams.get('categories') ?? '[]'), ['sponsor', 'poi_highlight']);
+    assert.deepEqual(JSON.parse(parsedUrl.searchParams.get('actionTypes') ?? '[]'), ['skip', 'poi', 'mute']);
     assert.deepEqual(
-      loaded.map((s) => s.UUID),
-      ['s1', 's2']
+      loaded.map((s) => [s.UUID, s.actionType]),
+      [
+        ['p1', 'poi'],
+        ['m1', 'mute'],
+        ['s2', 'skip'],
+      ]
     );
-    assert.equal(fetchCount, 2);
 
-    // Repeat call hits LRU cache without fetch.
-    const cachedHit = await fetchSponsorBlockSegments('sbCacheVid');
-    assert.equal(cachedHit.length, 2);
-    assert.equal(fetchCount, 2);
-
-    // 404 negative miss is cached too until clearSponsorBlockCache.
-    serverStatus = 404;
-    assert.deepEqual(await fetchSponsorBlockSegments('sb404Vid'), []);
-    assert.equal(fetchCount, 3);
-    assert.deepEqual(await fetchSponsorBlockSegments('sb404Vid'), []);
-    assert.equal(fetchCount, 3);
-
-    clearSponsorBlockCache();
-    await fetchSponsorBlockSegments('sb404Vid');
-    assert.equal(fetchCount, 4);
+    status = 404;
+    assert.deepEqual(await fetchSponsorBlockSegments('sb404', undefined, ['sponsor']), []);
   });
 });

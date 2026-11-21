@@ -12,6 +12,8 @@ let stylesInstalled = false;
 let cachedWatchDefault: Element | null = null;
 let cachedVideo: HTMLVideoElement | null = null;
 let listenedVideo: HTMLVideoElement | null = null;
+let videoListenersAbort: AbortController | null = null;
+let clockListenersAbort: AbortController | null = null;
 let updateHandler: (() => void) | null = null;
 
 /**
@@ -140,13 +142,13 @@ const VIDEO_SYNC_EVENTS = [
 
 function syncVideoListeners(video: HTMLVideoElement | null, onUpdate: () => void): void {
   if (listenedVideo === video) return;
-  if (listenedVideo) {
-    for (const evt of VIDEO_SYNC_EVENTS) listenedVideo.removeEventListener(evt, onUpdate);
-  }
+  videoListenersAbort?.abort();
+  videoListenersAbort = null;
   listenedVideo = video;
-  if (listenedVideo) {
-    for (const evt of VIDEO_SYNC_EVENTS) listenedVideo.addEventListener(evt, onUpdate);
-  }
+  if (!video) return;
+  videoListenersAbort = new AbortController();
+  const { signal } = videoListenersAbort;
+  for (const evt of VIDEO_SYNC_EVENTS) video.addEventListener(evt, onUpdate, { signal });
 }
 
 function syncWatchAttrObserver(watchEl: Element | null, onUpdate: () => void): void {
@@ -170,14 +172,11 @@ function cleanupClockListeners(): void {
   watchAttrObserver?.disconnect();
   watchAttrObserver = null;
   observedWatchDefault = null;
-  if (listenedVideo && updateHandler) {
-    for (const evt of VIDEO_SYNC_EVENTS) listenedVideo.removeEventListener(evt, updateHandler);
-  }
+  videoListenersAbort?.abort();
+  videoListenersAbort = null;
   listenedVideo = null;
-  if (updateHandler && typeof window !== 'undefined' && typeof document !== 'undefined') {
-    window.removeEventListener('hashchange', updateHandler);
-    document.removeEventListener('visibilitychange', updateHandler);
-  }
+  clockListenersAbort?.abort();
+  clockListenersAbort = null;
   updateHandler = null;
 }
 
@@ -260,8 +259,10 @@ function toggleClock(enabled: boolean): void {
   };
 
   updateHandler = renderAndSchedule;
-  window.addEventListener('hashchange', renderAndSchedule);
-  document.addEventListener('visibilitychange', renderAndSchedule);
+  clockListenersAbort = new AbortController();
+  const { signal } = clockListenersAbort;
+  window.addEventListener('hashchange', renderAndSchedule, { signal });
+  document.addEventListener('visibilitychange', renderAndSchedule, { signal });
   onVideo((videoEl) => {
     syncVideoListeners(videoEl, renderAndSchedule);
     renderAndSchedule();

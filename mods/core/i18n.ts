@@ -119,6 +119,7 @@ export const EN_TRANSLATIONS = {
   'sponsorblock.segments.preview': 'Recap or Preview',
   'sponsorblock.segments.selfpromo': 'Self-Promotion',
   'sponsorblock.segments.sponsor': 'Sponsored Segment',
+  'sponsorblock.toasts.muting': 'Muting {{segment}}',
   'sponsorblock.toasts.notSkipping': 'Not skipping {{segment}} (was skipped {{count}} times)',
   'sponsorblock.toasts.skip': 'Skip {{segment}}',
   'sponsorblock.toasts.skipToHighlight': 'Skip to Highlight',
