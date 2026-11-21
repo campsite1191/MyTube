@@ -4,16 +4,23 @@ import { t } from '../core/i18n.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { showToast } from '../core/yttv-bridge.ts';
 
-export type SponsorBlockCategory =
-  | 'sponsor'
-  | 'intro'
-  | 'outro'
-  | 'interaction'
-  | 'selfpromo'
-  | 'preview'
-  | 'filler'
-  | 'music_offtopic'
-  | 'poi_highlight';
+// Segment metadata, config keys, colors, and opacities matching upstream ajayyy/SponsorBlock (`src/config.ts`).
+const CATEGORY_SPECS = {
+  sponsor: { configKey: 'enableSponsorBlockSponsor', color: '#00d400' },
+  intro: { configKey: 'enableSponsorBlockIntro', color: '#00ffff' },
+  outro: { configKey: 'enableSponsorBlockOutro', color: '#0202ed' },
+  interaction: { configKey: 'enableSponsorBlockInteraction', color: '#cc00ff' },
+  selfpromo: { configKey: 'enableSponsorBlockSelfPromo', color: '#ffff00' },
+  preview: { configKey: 'enableSponsorBlockPreview', color: '#008fd6' },
+  filler: { configKey: 'enableSponsorBlockFiller', color: '#7300FF', opacity: '0.9' },
+  music_offtopic: { configKey: 'enableSponsorBlockMusicOfftopic', color: '#ff9900' },
+  poi_highlight: { configKey: 'enableSponsorBlockHighlight', color: '#ff1684' },
+} as const satisfies Record<string, { configKey: ConfigKey; color: string; opacity?: string }>;
+
+export type SponsorBlockCategory = keyof typeof CATEGORY_SPECS;
+
+type CategorySpec = { configKey: ConfigKey; color: string; opacity?: string };
+const CATEGORY_ENTRIES = Object.entries(CATEGORY_SPECS) as Array<[SponsorBlockCategory, CategorySpec]>;
 
 type SponsorBlockActionType = 'skip' | 'poi' | 'mute';
 
@@ -40,37 +47,11 @@ const SPONSORBLOCK_ACTION_TYPES = ['skip', 'poi', 'mute'] as const;
 const REPEAT_SKIP_WINDOW_MS = 1000;
 const SCHEDULE_LOOKBACK_SECONDS = 0.3;
 
-const CATEGORY_CONFIG_KEYS = [
-  ['sponsor', 'enableSponsorBlockSponsor'],
-  ['intro', 'enableSponsorBlockIntro'],
-  ['outro', 'enableSponsorBlockOutro'],
-  ['interaction', 'enableSponsorBlockInteraction'],
-  ['selfpromo', 'enableSponsorBlockSelfPromo'],
-  ['preview', 'enableSponsorBlockPreview'],
-  ['filler', 'enableSponsorBlockFiller'],
-  ['music_offtopic', 'enableSponsorBlockMusicOfftopic'],
-] as const satisfies ReadonlyArray<readonly [SponsorBlockCategory, ConfigKey]>;
-
-const BAR_COLORS: Readonly<Record<SponsorBlockCategory, readonly [color: string, opacity?: string]>> = {
-  sponsor: ['#00d400'],
-  intro: ['#00ffff'],
-  outro: ['#0202ed'],
-  interaction: ['#cc00ff'],
-  selfpromo: ['#ffff00'],
-  preview: ['#008fd6'],
-  filler: ['#7300FF', '0.9'],
-  music_offtopic: ['#ff9900'],
-  poi_highlight: ['#ff1684'],
-};
-
-// Segment colors & opacities matching upstream ajayyy/SponsorBlock (`src/config.ts`).
 export const BAR_TYPES: Readonly<Record<string, SponsorBlockBarType>> = Object.fromEntries(
-  (Object.entries(BAR_COLORS) as Array<[SponsorBlockCategory, readonly [string, string?]]>).map(
-    ([category, [color, opacity = '0.7']]) => [
-      category,
-      { color, opacity, name: t(`sponsorblock.segments.${category}`) },
-    ]
-  )
+  CATEGORY_ENTRIES.map(([category, { color, opacity = '0.7' }]) => [
+    category,
+    { color, opacity, name: t(`sponsorblock.segments.${category}`) },
+  ])
 );
 
 export function resolveSegmentActionType(segment: Pick<SponsorBlockSegment, 'actionType' | 'category'>): string {
@@ -90,19 +71,17 @@ export function extractWatchVideoId(locationHash: string): string | null {
   return query ? new URLSearchParams(query).get('v')?.trim() || null : null;
 }
 
-export function getEnabledSkipCategories(
-  readConfig: <K extends ConfigKey>(key: K) => boolean = (key) => Boolean(configRead(key))
-): SponsorBlockCategory[] {
-  return CATEGORY_CONFIG_KEYS.filter(([, key]) => readConfig(key)).map(([category]) => category);
-}
-
 /** Returns only SponsorBlock categories currently enabled in settings for fetching. */
 export function getRequestedCategories(
   readConfig: <K extends ConfigKey>(key: K) => boolean = (key) => Boolean(configRead(key))
 ): SponsorBlockCategory[] {
-  const categories = getEnabledSkipCategories(readConfig);
-  if (readConfig('enableSponsorBlockHighlight')) categories.push('poi_highlight');
-  return categories;
+  return CATEGORY_ENTRIES.filter(([, { configKey }]) => readConfig(configKey)).map(([category]) => category);
+}
+
+export function getEnabledSkipCategories(
+  readConfig: <K extends ConfigKey>(key: K) => boolean = (key) => Boolean(configRead(key))
+): SponsorBlockCategory[] {
+  return getRequestedCategories(readConfig).filter((category) => category !== 'poi_highlight');
 }
 
 export function findNextSegment(
