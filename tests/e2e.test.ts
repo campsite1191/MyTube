@@ -807,12 +807,26 @@ describe('End-to-end userscript bundle lifecycle', () => {
     fakeLocation.hash = '#/watch?v=e2eVid123';
     fakeLocation.href = 'https://www.youtube.com/tv#/watch?v=e2eVid123';
     (fakeWindow.dispatchEvent as (e: { type: string }) => void)({ type: 'hashchange' });
+    vm.runInContext(
+      `JSON.parse(${JSON.stringify(
+        JSON.stringify({
+          currentVideoEndpoint: { watchEndpoint: { videoId: 'e2eVid123' } },
+          transportControls: {
+            transportControlsRenderer: {
+              actions: [{ button: { likeButtonRenderer: { likeCountText: { simpleText: '5K' } } } }],
+            },
+          },
+        })
+      )});`,
+      context
+    );
     for (const obs of [...observers]) obs.cb();
 
     await waitFor(
       () =>
         elapsedEl.textContent === '0:30 (-1:30) / 2:00' &&
         Boolean(clockEl.children[0]?.children[1]?.textContent.startsWith('Ends ')) &&
+        likeBtn.dataset.ttCount === '5K' &&
         dislikeBtn.dataset.ttCount === '120' &&
         fetchCalls.some((c) => c.url.includes('sponsor.ajay.app/api/skipSegments'))
     );
@@ -821,7 +835,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
     assert.ok(clockEl.querySelectorAll('div').length >= 1);
     const endEl = clockEl.children[0]?.children[1];
     assert.ok(endEl?.textContent.startsWith('Ends '), `Expected Ends HH:MM, got ${endEl?.textContent}`);
-    assert.equal(likeBtn.dataset.ttCount, undefined);
+    assert.equal(likeBtn.dataset.ttCount, '5K');
     assert.equal(dislikeBtn.dataset.ttCount, '120');
 
     // Verify SponsorBlock fetched segments for e2eVid123

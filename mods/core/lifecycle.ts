@@ -45,7 +45,7 @@ export function extractWatchVideoId(route: string | null | undefined): string | 
   return query ? new URLSearchParams(query).get('v')?.trim() || null : null;
 }
 
-function getActiveWatchVideoId(): string | null {
+export function getActiveWatchVideoId(): string | null {
   if (typeof window === 'undefined') return null;
   return extractWatchVideoId(window.location?.hash) ?? extractWatchVideoId(window.location?.search);
 }

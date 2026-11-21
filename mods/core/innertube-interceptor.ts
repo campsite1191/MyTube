@@ -1,4 +1,6 @@
 import { t } from '../core/i18n.ts';
+import { getActiveWatchVideoId } from '../core/lifecycle.ts';
+import { setWatchLikeCount } from '../features/return-youtube-dislike.ts';
 import { getActiveSponsorBlockSegments, resolveSegmentActionType } from '../features/sponsorblock.ts';
 import { addPreviews } from '../interceptors/previews.ts';
 import { buildChaptersMarkerEntity } from '../transforms/chapters.ts';
@@ -510,6 +512,54 @@ function transformPlayerOverlays(r: Record<string, unknown>): void {
   }
 }
 
+function recordTransportLikeCount(r: Record<string, unknown>): void {
+  const overlay = isRecord(r.playerOverlays) ? r.playerOverlays : undefined;
+  const overlayRenderer = isRecord(overlay?.playerOverlayRenderer) ? overlay.playerOverlayRenderer : undefined;
+  const tcWrapper = isRecord(r.transportControls)
+    ? r.transportControls
+    : isRecord(overlayRenderer?.transportControls)
+      ? overlayRenderer.transportControls
+      : undefined;
+  const tc = isRecord(tcWrapper?.transportControlsRenderer) ? tcWrapper.transportControlsRenderer : undefined;
+  if (!tc) return;
+
+  const currentEp = isRecord(r.currentVideoEndpoint) ? r.currentVideoEndpoint : undefined;
+  const watchEp = isRecord(currentEp?.watchEndpoint) ? currentEp.watchEndpoint : undefined;
+  const details = isRecord(r.videoDetails) ? r.videoDetails : undefined;
+  const playerResp = isRecord(r.playerResponse) ? r.playerResponse : undefined;
+  const playerDetails = isRecord(playerResp?.videoDetails) ? playerResp.videoDetails : undefined;
+  const videoId =
+    (typeof watchEp?.videoId === 'string' && watchEp.videoId) ||
+    (typeof details?.videoId === 'string' && details.videoId) ||
+    (typeof playerDetails?.videoId === 'string' && playerDetails.videoId) ||
+    getActiveWatchVideoId();
+  if (!videoId) return;
+
+  for (const key of ['promotedActions', 'actions', 'buttons', 'engagementActions'] as const) {
+    const list = tc[key];
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!isRecord(item)) continue;
+      const btn = isRecord(item.button) ? item.button : undefined;
+      const lr = isRecord(btn?.likeButtonRenderer)
+        ? btn.likeButtonRenderer
+        : isRecord(item.likeButtonRenderer)
+          ? item.likeButtonRenderer
+          : undefined;
+      if (!lr) continue;
+      const text = readFormattedText(
+        (lr.likeCountText ?? lr.likeCountWithLikeText ?? lr.likeCountWithUnlikeText) as Parameters<
+          typeof readFormattedText
+        >[0]
+      );
+      if (text) {
+        setWatchLikeCount(videoId, text);
+        return;
+      }
+    }
+  }
+}
+
 function transformTransportControls(r: Record<string, unknown>): void {
   const transportControls = isRecord(r.transportControls) ? r.transportControls : undefined;
   const tcRenderer = isRecord(transportControls?.transportControlsRenderer)
@@ -775,6 +825,7 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
 
     injectChapters(r);
     transformPlayerOverlays(r);
+    recordTransportLikeCount(r);
     transformTransportControls(r);
     transformChannelHeaderButtons(r, tvSurface);
   } catch (error) {

@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { fetchDislikeCount, installReturnYouTubeDislike } from '../mods/features/return-youtube-dislike.ts';
+import {
+  fetchDislikeCount,
+  installReturnYouTubeDislike,
+  setWatchLikeCount,
+} from '../mods/features/return-youtube-dislike.ts';
 
 describe('return-youtube-dislike', () => {
-  test('fetchDislikeCount fetches formatted dislikes and handles aborted/non-OK responses', async (t) => {
+  test('fetchDislikeCount formats dislikes and handles aborted/non-OK responses', async (t) => {
     const origFetch = globalThis.fetch;
     t.after(() => {
       globalThis.fetch = origFetch;
@@ -24,7 +28,7 @@ describe('return-youtube-dislike', () => {
     assert.equal(await fetchDislikeCount('vidAborted', abort.signal), null);
   });
 
-  test('installReturnYouTubeDislike renders display-only dislike label during Watch session and cleans up on exit', async (t) => {
+  test('installReturnYouTubeDislike renders live likeCountText alongside RYD dislikes as non-interactive labels', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
@@ -47,16 +51,22 @@ describe('return-youtube-dislike', () => {
       else globals.CSSStyleSheet = prevCssStyleSheet;
     });
 
-    const attrs: Record<string, string> = { hybridnavfocusable: 'true' };
-    const dislikeButton = {
-      dataset: {} as Record<string, string>,
-      inert: false,
-      getAttribute: (name: string) => attrs[name] ?? null,
-      setAttribute: (name: string, value: string) => {
-        attrs[name] = value;
-      },
-      querySelectorAll: () => [],
+    const makeButton = () => {
+      const attrs: Record<string, string> = { hybridnavfocusable: 'true' };
+      return {
+        dataset: {} as Record<string, string>,
+        inert: false,
+        getAttribute: (name: string) => attrs[name] ?? null,
+        setAttribute: (name: string, value: string) => {
+          attrs[name] = value;
+        },
+        querySelectorAll: () => [],
+        attrs,
+      };
     };
+
+    const likeButton = makeButton();
+    const dislikeButton = makeButton();
     const watchHost = { nodeName: 'YTLR-WATCH-DEFAULT' };
     const observerCbs: Array<() => void> = [];
     let controlsMounted = false;
@@ -76,7 +86,7 @@ describe('return-youtube-dislike', () => {
     let fetchSettled: Promise<void> | undefined;
     globals.fetch = (() => {
       const respPromise = Promise.resolve(
-        new Response(JSON.stringify({ likes: 12500, dislikes: 420 }), {
+        new Response(JSON.stringify({ likes: 999999, dislikes: 420 }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })
@@ -114,23 +124,29 @@ describe('return-youtube-dislike', () => {
       querySelector: (selector: string) => {
         if (selector === 'video') return {};
         if (selector === 'ytlr-watch-default') return watchHost;
-        if (controlsMounted && selector.includes('dislike-button')) return dislikeButton;
+        if (!controlsMounted) return null;
+        if (selector.includes('dislike-button')) return dislikeButton;
+        if (selector.includes('like-button')) return likeButton;
         return null;
       },
     };
     globals.document = fakeDoc;
 
+    // Live YouTube likeCountText takes precedence and never falls back to RYD likes (999999).
+    setWatchLikeCount('testVid123', '12.5 K');
     installReturnYouTubeDislike();
     await fetchSettled;
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    // Simulate lazy OSD mount after RYD API response already resolved.
     controlsMounted = true;
     for (const cb of [...observerCbs]) cb();
 
+    assert.equal(likeButton.dataset.ttCount, '12.5K');
     assert.equal(dislikeButton.dataset.ttCount, '420');
+    assert.equal(likeButton.inert, true);
     assert.equal(dislikeButton.inert, true);
-    assert.equal(attrs.hybridnavfocusable, 'false');
+    assert.equal(likeButton.attrs.hybridnavfocusable, 'false');
+    assert.equal(dislikeButton.attrs.hybridnavfocusable, 'false');
 
     const injectedCss = fakeDoc.adoptedStyleSheets.map((s) => s.cssText).join('\n');
     assert.match(injectedCss, /pointer-events:\s*none\s*!important/);
