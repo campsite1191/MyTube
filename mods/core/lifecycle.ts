@@ -76,6 +76,79 @@ function syncWatchSession(): void {
   }
 }
 
+export const PLAYER_BAR_SELECTOR = 'ytlr-progress-bar';
+
+export function isPlayerBarVisible(bar: Element | null | undefined): boolean {
+  return Boolean(bar && bar.getAttribute?.('hybridnavfocusable') !== 'false');
+}
+
+/**
+ * Observes the Watch player bar (`ytlr-progress-bar`) for the lifetime of `signal`,
+ * temporarily waiting on the document root only until it mounts.
+ */
+export function observePlayerBar(
+  signal: AbortSignal,
+  onBar: (bar: Element) => void,
+  options: MutationObserverInit = {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['hybridnavfocusable'],
+  }
+): () => Element | null {
+  let observedBar: Element | null = null;
+  let barAbort: AbortController | null = null;
+  let waitAbort: AbortController | null = null;
+
+  onAbort(signal, () => {
+    barAbort?.abort();
+    barAbort = null;
+    waitAbort?.abort();
+    waitAbort = null;
+  });
+
+  const bind = (): Element | null => {
+    if (signal.aborted || typeof document === 'undefined') return null;
+    if (observedBar?.isConnected) return observedBar;
+
+    const bar = document.querySelector(PLAYER_BAR_SELECTOR);
+    if (!bar) {
+      barAbort?.abort();
+      barAbort = null;
+      observedBar = null;
+      if (!waitAbort) {
+        waitAbort = new AbortController();
+        observeDom(
+          document.body ?? document.documentElement,
+          () => {
+            if (document.querySelector(PLAYER_BAR_SELECTOR)) {
+              bind();
+            }
+          },
+          { childList: true, subtree: true },
+          waitAbort.signal
+        );
+      }
+      return null;
+    }
+
+    waitAbort?.abort();
+    waitAbort = null;
+    barAbort?.abort();
+    observedBar = bar;
+    barAbort = new AbortController();
+    observeDom(bar, () => onBar(bar), options, barAbort.signal);
+    onBar(bar);
+    return bar;
+  };
+
+  bind();
+  return () => {
+    if (observedBar?.isConnected) return observedBar;
+    return bind();
+  };
+}
+
 /**
  * Registers a callback invoked whenever a Watch video session becomes active.
  * Its `AbortSignal` aborts automatically on navigating away or switching videos.

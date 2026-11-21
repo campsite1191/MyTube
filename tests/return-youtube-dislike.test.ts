@@ -28,7 +28,7 @@ describe('return-youtube-dislike', () => {
     assert.equal(await fetchDislikeCount('vidAborted', abort.signal), null);
   });
 
-  test('installReturnYouTubeDislike renders live likeCountText alongside RYD dislikes as non-interactive labels', async (t) => {
+  test('installReturnYouTubeDislike scopes to ytlr-progress-bar and skips updates while bar is hidden', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
@@ -67,9 +67,20 @@ describe('return-youtube-dislike', () => {
 
     const likeButton = makeButton();
     const dislikeButton = makeButton();
-    const watchHost = { nodeName: 'YTLR-WATCH-DEFAULT' };
-    const observerCbs: Array<() => void> = [];
     let controlsMounted = false;
+    let barFocusable = 'false';
+    const progressBar = {
+      nodeName: 'YTLR-PROGRESS-BAR',
+      isConnected: true,
+      getAttribute: (name: string) => (name === 'hybridnavfocusable' ? barFocusable : null),
+      querySelector: (selector: string) => {
+        if (!controlsMounted) return null;
+        if (selector.includes('dislike-button')) return dislikeButton;
+        if (selector.includes('like-button')) return likeButton;
+        return null;
+      },
+    };
+    const observerCbs: Array<() => void> = [];
     let disconnected = false;
     const winListeners = new Map<string, Set<() => void>>();
 
@@ -123,10 +134,7 @@ describe('return-youtube-dislike', () => {
       addEventListener: () => {},
       querySelector: (selector: string) => {
         if (selector === 'video') return {};
-        if (selector === 'ytlr-watch-default') return watchHost;
-        if (!controlsMounted) return null;
-        if (selector.includes('dislike-button')) return dislikeButton;
-        if (selector.includes('like-button')) return likeButton;
+        if (selector === 'ytlr-progress-bar') return progressBar;
         return null;
       },
     };
@@ -138,9 +146,15 @@ describe('return-youtube-dislike', () => {
     await fetchSettled;
     await new Promise((resolve) => setTimeout(resolve, 10));
 
+    // While player bar is hidden (hybridnavfocusable="false"), controls are skipped cleanly.
     controlsMounted = true;
     for (const cb of [...observerCbs]) cb();
+    assert.equal(likeButton.dataset.ttCount, undefined);
+    assert.equal(dislikeButton.dataset.ttCount, undefined);
 
+    // Once player bar opens (hybridnavfocusable="true"), labels and inert attributes apply.
+    barFocusable = 'true';
+    for (const cb of [...observerCbs]) cb();
     assert.equal(likeButton.dataset.ttCount, '12.5K');
     assert.equal(dislikeButton.dataset.ttCount, '420');
     assert.equal(likeButton.inert, true);
@@ -149,6 +163,7 @@ describe('return-youtube-dislike', () => {
     assert.equal(dislikeButton.attrs.hybridnavfocusable, 'false');
 
     const injectedCss = fakeDoc.adoptedStyleSheets.map((s) => s.cssText).join('\n');
+    assert.match(injectedCss, /ytlr-progress-bar/);
     assert.match(injectedCss, /pointer-events:\s*none\s*!important/);
 
     fakeLocation.hash = '#/';

@@ -798,9 +798,9 @@ describe('End-to-end userscript bundle lifecycle', () => {
     videoEl.readyState = 4;
     videoEl.currentSrc = 'blob:e2eVid123';
 
+    progressBar.appendChild(likeBtn);
+    progressBar.appendChild(dislikeBtn);
     watchDefault.appendChild(progressBar);
-    watchDefault.appendChild(likeBtn);
-    watchDefault.appendChild(dislikeBtn);
     bodyEl.appendChild(watchDefault);
     bodyEl.appendChild(videoEl);
 
