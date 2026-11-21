@@ -30,9 +30,11 @@ export function installTransportControlsStyles(): void {
         display: none !important;
       }
       body.WEB_PAGE_TYPE_SHORTS,
-      body.WEB_PAGE_TYPE_SHORTS > div,
-      body.WEB_PAGE_TYPE_SHORTS :is(ytlr-app, ytlr-app-background-container, ytlr-player-container, ytlr-shorts-page) {
+      body.WEB_PAGE_TYPE_SHORTS #container {
         background-color: #000 !important;
+        background-image: none !important;
+      }
+      body.WEB_PAGE_TYPE_SHORTS ytlr-app-background-container {
         background-image: none !important;
       }
     `);
