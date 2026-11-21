@@ -6,11 +6,7 @@ import resolveCommand, {
   isReportOrFeedbackText,
 } from '../core/resolve-command.ts';
 import { setWatchLikeCount } from '../features/return-youtube-dislike.ts';
-import {
-  getActiveSponsorBlockSegments,
-  MANUAL_SKIP_CATEGORIES,
-  resolveSegmentActionType,
-} from '../features/sponsorblock.ts';
+import { getActiveSponsorBlockSegments, resolveSegmentActionType } from '../features/sponsorblock.ts';
 import { ButtonRenderer, timelyAction } from '../ui/yt-ui.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 import { buildChaptersMarkerEntity } from './chapters.ts';
@@ -96,7 +92,7 @@ export function transformPlayerOverlays(r: Record<string, unknown>): void {
 
   const target = overlayRenderer.timelyActionRenderers as unknown[];
   for (const segment of activeSegments) {
-    if (resolveSegmentActionType(segment) !== 'skip' || !MANUAL_SKIP_CATEGORIES.includes(segment.category)) continue;
+    if (resolveSegmentActionType(segment) !== 'skip') continue;
     target.push(
       timelyAction(
         t('sponsorblock.toasts.skip', { segment: t(`sponsorblock.segments.${segment.category}`) }),

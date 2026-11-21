@@ -119,6 +119,8 @@ describe('clock helpers', () => {
     const css = fakeDoc.adoptedStyleSheets.map((s) => s.cssText).join('\n');
     assert.match(css, /color:\s*#f1f1f1/);
     assert.match(css, /font-family:\s*'YTSans'/);
+    assert.doesNotMatch(css, /\.tt-clock-end\s*\{[^}]*(?:color|opacity)\s*:/);
+    assert.doesNotMatch(css, /#aaaaaa/i);
 
     const endEl = fakeBody.children[0]?.children[0]?.children[1];
     assert.equal(endEl?.textContent, '');

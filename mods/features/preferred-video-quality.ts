@@ -3,7 +3,7 @@ import { onPlayer, onVideo } from '../core/player-observer.ts';
 import type { YtPlayerStateObject, YtQualityData } from '../types/yttv.ts';
 
 const PLAYER_STATE_CHANGE_EVENT = 'onStateChange';
-const PREFERRED_VIDEO_QUALITY = '2160p';
+const TARGET_VIDEO_HEIGHT = 2160;
 const HIGHRES_QUALITY_ID = 'highres';
 
 export interface QualityControllablePlayer {
@@ -44,15 +44,7 @@ export function parseResolutionHeight(label: string | null | undefined): number 
   return Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : 0;
 }
 
-export function selectPlaybackQuality(
-  availableQualities: readonly YtQualityData[] | null | undefined,
-  preferredQuality: string | null | undefined
-): string | null {
-  if (!preferredQuality || preferredQuality === 'auto') return null;
-
-  const targetHeight = parseResolutionHeight(preferredQuality);
-  if (targetHeight <= 0) return null;
-
+export function selectPlaybackQuality(availableQualities: readonly YtQualityData[] | null | undefined): string {
   if (!availableQualities || availableQualities.length === 0) return HIGHRES_QUALITY_ID;
 
   const candidates: ResolutionCandidate[] = [];
@@ -66,14 +58,14 @@ export function selectPlaybackQuality(
 
   if (candidates.length === 0) return HIGHRES_QUALITY_ID;
 
-  const exactMatch = candidates.find((candidate) => candidate.height === targetHeight);
+  const exactMatch = candidates.find((candidate) => candidate.height === TARGET_VIDEO_HEIGHT);
   if (exactMatch) return exactMatch.quality;
 
   let highestBelowTarget: ResolutionCandidate | null = null;
   let lowestAboveTarget: ResolutionCandidate | null = null;
 
   for (const candidate of candidates) {
-    if (candidate.height <= targetHeight) {
+    if (candidate.height <= TARGET_VIDEO_HEIGHT) {
       if (!highestBelowTarget || candidate.height > highestBelowTarget.height) {
         highestBelowTarget = candidate;
       }
@@ -85,17 +77,11 @@ export function selectPlaybackQuality(
   return highestBelowTarget?.quality ?? lowestAboveTarget?.quality ?? HIGHRES_QUALITY_ID;
 }
 
-export function applyPreferredQualityToPlayer(
-  player: QualityControllablePlayer,
-  preferredQuality: string = PREFERRED_VIDEO_QUALITY
-): boolean {
+export function applyPreferredQualityToPlayer(player: QualityControllablePlayer): boolean {
   if (!player.setPlaybackQualityRange) return false;
 
   try {
-    const availableQualities = player.getAvailableQualityData?.();
-    const targetQuality = selectPlaybackQuality(availableQualities, preferredQuality);
-    if (!targetQuality) return false;
-
+    const targetQuality = selectPlaybackQuality(player.getAvailableQualityData?.());
     player.setPlaybackQualityRange(targetQuality, targetQuality);
     return true;
   } catch (error) {
@@ -106,7 +92,6 @@ export function applyPreferredQualityToPlayer(
 
 export function attachPreferredQualityController(
   player: QualityControllablePlayer,
-  getPreferredQuality: () => string = () => PREFERRED_VIDEO_QUALITY,
   video?: QualityVideoTarget | null,
   signal?: AbortSignal
 ): PreferredQualityController {
@@ -121,7 +106,7 @@ export function attachPreferredQualityController(
 
   const applyQuality = (): boolean => {
     if (controllerAbort.signal.aborted) return false;
-    return applyPreferredQualityToPlayer(player, getPreferredQuality());
+    return applyPreferredQualityToPlayer(player);
   };
 
   const handleStateChange = (): void => {
@@ -173,7 +158,7 @@ export function installPreferredVideoQuality(): void {
   preferredQualityInstalled = true;
   onPlayer((player) => {
     onVideo((video) => {
-      attachPreferredQualityController(player, () => PREFERRED_VIDEO_QUALITY, video);
+      attachPreferredQualityController(player, video);
     });
   });
 }

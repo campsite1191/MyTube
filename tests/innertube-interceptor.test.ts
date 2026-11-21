@@ -26,7 +26,7 @@ describe('getAudioTier and filterStreamingFormats', () => {
     assert.equal(getAudioTier(drc), 5);
   });
 
-  test('filters to preferred video codec and arranges all audio tracks in recommended order with best selected initially', () => {
+  test('preserves all video/audio formats and ranks Original > Surround > Voice Boost > Stereo > DRC', () => {
     const formats: AudioFormatEntry[] = [
       { itag: 137, mimeType: 'video/mp4; codecs="avc1.640028"' },
       { itag: 248, mimeType: 'video/webm; codecs="vp9"' },
@@ -65,53 +65,16 @@ describe('getAudioTier and filterStreamingFormats', () => {
       },
     ];
 
-    const filtered = filterStreamingFormats(formats, 'vp9');
+    const filtered = filterStreamingFormats(formats);
     assert.deepEqual(
       filtered.map((f) => f.itag),
-      [248, 258, 140, 143, 141, 142]
+      [137, 248, 258, 140, 143, 141, 142]
     );
-    assert.equal(filtered[1]?.audioTrack?.audioIsDefault, true);
     assert.equal(filtered[2]?.audioTrack?.audioIsDefault, true);
-    assert.equal(filtered[3]?.audioTrack?.audioIsDefault, false);
+    assert.equal(filtered[3]?.audioTrack?.audioIsDefault, true);
     assert.equal(filtered[4]?.audioTrack?.audioIsDefault, false);
     assert.equal(filtered[5]?.audioTrack?.audioIsDefault, false);
-  });
-
-  test('keeps all video formats when preferred codec is absent', () => {
-    const formats: AudioFormatEntry[] = [
-      { itag: 137, mimeType: 'video/mp4; codecs="avc1.640028"' },
-      { itag: 140, mimeType: 'audio/mp4', audioChannels: 2 },
-    ];
-    const filtered = filterStreamingFormats(formats, 'av01');
-    assert.deepEqual(
-      filtered.map((f) => f.itag),
-      [137, 140]
-    );
-  });
-
-  test('arranges DRC ahead of Voice Boost / Stereo when preferDrcAudio is enabled while keeping surround first', () => {
-    const drc: AudioFormatEntry = { itag: 140, mimeType: 'audio/mp4', xtags: 'drc=1', audioChannels: 2 };
-    const stereo: AudioFormatEntry = { itag: 251, mimeType: 'audio/webm', audioChannels: 2 };
-    const voiceBoost: AudioFormatEntry = { itag: 250, mimeType: 'audio/webm', xtags: 'vb=1', audioChannels: 2 };
-    const surround51: AudioFormatEntry = { itag: 258, mimeType: 'audio/mp4; codecs="ec-3"', audioChannels: 6 };
-
-    assert.equal(getAudioTier(surround51, true), 2);
-    assert.equal(getAudioTier(drc, true), 3);
-    assert.equal(getAudioTier(voiceBoost, true), 4);
-    assert.equal(getAudioTier(stereo, true), 5);
-
-    const video: AudioFormatEntry = { itag: 248, mimeType: 'video/webm; codecs="vp9"' };
-    const orderedStereoDrc = filterStreamingFormats([video, stereo, voiceBoost, drc], 'any', true);
-    assert.deepEqual(
-      orderedStereoDrc.map((f) => f.itag),
-      [248, 140, 250, 251]
-    );
-
-    const orderedWithSurround = filterStreamingFormats([video, stereo, drc, surround51], 'any', true);
-    assert.deepEqual(
-      orderedWithSurround.map((f) => f.itag),
-      [248, 258, 140, 251]
-    );
+    assert.equal(filtered[6]?.audioTrack?.audioIsDefault, false);
   });
 });
 
@@ -145,7 +108,7 @@ describe('dedupeAndSortSubscriptionTabs', () => {
       { tabRenderer: { selected: true, title: 'Selected', endpoint: { browseEndpoint: { browseId: 'UCs' } } } },
     ];
 
-    const result = dedupeAndSortSubscriptionTabs(tabs, new Set<string>(), true);
+    const result = dedupeAndSortSubscriptionTabs(tabs, new Set<string>());
     assert.deepEqual(
       result.map((t) => t.tabRenderer?.title),
       ['Selected', 'Alpha', 'Zeta']

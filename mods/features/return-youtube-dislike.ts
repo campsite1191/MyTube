@@ -4,33 +4,49 @@ import { injectCss } from '../core/styles.ts';
 import { formatCompactCount } from '../utils/feed-helpers.ts';
 
 const LIKE_BUTTON_SELECTOR =
-  'ytlr-watch-default yt-button-container[idomkey="like-button"], ytlr-watch-default [idomkey="like-button"]';
+  'ytlr-watch-default ytlr-like-button-renderer, ytlr-watch-default yt-button-container[idomkey="like-button"], ytlr-watch-default [idomkey="like-button"], ytlr-watch-default [idomkey="like"]';
 const DISLIKE_BUTTON_SELECTOR =
-  'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
+  'ytlr-watch-default ytlr-dislike-button-renderer, ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike"]';
+const BUTTON_WRAPPER_SELECTOR =
+  'ytlr-like-button-renderer, ytlr-dislike-button-renderer, ytlr-toggle-button-renderer, yt-button-container';
+const FOCUSABLE_CHILD_SELECTOR =
+  '[hybridnavfocusable]:not([hybridnavfocusable="false"]), [tabindex]:not([tabindex="-1"])';
 
 let currentLike: { videoId: string; count: string } | null = null;
 let currentDislike: { videoId: string; count: string } | null = null;
 let stylesInstalled = false;
 let rydInstalled = false;
 
+const VOTE_TARGET =
+  ':is(ytlr-like-button-renderer, ytlr-dislike-button-renderer, [idomkey="like-button"], [idomkey="dislike-button"], [idomkey="like"], [idomkey="dislike"])';
+
 function installVoteLabelStyles(): void {
   if (stylesInstalled || typeof document === 'undefined') return;
   stylesInstalled = true;
   injectCss(`
-      ytlr-watch-default :is([idomkey="like-button"], [idomkey="dislike-button"]) {
+      ytlr-watch-default ${VOTE_TARGET} {
         pointer-events: none !important;
       }
-      ytlr-watch-default :is([idomkey="like-button"], [idomkey="dislike-button"])[data-tt-count] {
-        position: relative !important;
+      ytlr-watch-default ${VOTE_TARGET}:has([data-tt-count]) {
+        width: auto !important;
+        min-width: fit-content !important;
+        max-width: none !important;
         overflow: visible !important;
       }
-      ytlr-watch-default :is([idomkey="like-button"], [idomkey="dislike-button"])[data-tt-count]::after {
+      ytlr-watch-default ${VOTE_TARGET}[data-tt-count] {
+        display: inline-flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        width: auto !important;
+        min-width: fit-content !important;
+        max-width: none !important;
+        gap: 0.375rem;
+        overflow: visible !important;
+      }
+      ytlr-watch-default ${VOTE_TARGET}[data-tt-count]::after {
         content: attr(data-tt-count);
-        position: absolute;
-        top: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        margin-top: 0.5rem;
+        flex-shrink: 0;
+        padding-right: 0.25rem;
         font-family: inherit;
         font-size: 1rem;
         font-weight: 500;
@@ -44,27 +60,76 @@ function installVoteLabelStyles(): void {
     `);
 }
 
+function queryButtonElements(selector: string): HTMLElement[] {
+  if (typeof document === 'undefined') return [];
+  if (typeof document.querySelectorAll === 'function') {
+    const matches = Array.from(document.querySelectorAll<HTMLElement>(selector));
+    if (matches.length > 0) return matches;
+  }
+  const single = document.querySelector?.<HTMLElement>(selector);
+  return single ? [single] : [];
+}
+
+function disableFocus(node: HTMLElement): void {
+  if (!node.inert) node.inert = true;
+  if (node.getAttribute?.('hybridnavfocusable') !== 'false') {
+    node.setAttribute?.('hybridnavfocusable', 'false');
+  }
+  if (node.getAttribute?.('tabindex') !== '-1') {
+    node.setAttribute?.('tabindex', '-1');
+  }
+  for (const child of node.querySelectorAll?.(FOCUSABLE_CHILD_SELECTOR) ?? []) {
+    if (child.hasAttribute?.('hybridnavfocusable') && child.getAttribute('hybridnavfocusable') !== 'false') {
+      child.setAttribute('hybridnavfocusable', 'false');
+    }
+    if (child.hasAttribute?.('tabindex') && child.getAttribute('tabindex') !== '-1') {
+      child.setAttribute('tabindex', '-1');
+    }
+  }
+}
+
 function applyButtonLabel(selector: string, count: string | null): void {
-  const el = document.querySelector<HTMLElement>(selector);
-  if (!el) return;
+  const matches = queryButtonElements(selector);
+  for (const el of matches) {
+    // Treat like/dislike strictly as display-only count labels so D-pad skips them cleanly without tooltip overlap.
+    disableFocus(el);
+    const wrapper = el.closest?.<HTMLElement>(BUTTON_WRAPPER_SELECTOR);
+    if (wrapper && wrapper !== el) disableFocus(wrapper);
 
-  // Treat like/dislike strictly as display-only count labels so D-pad skips them cleanly without tooltip overlap.
-  el.inert = true;
-  if (el.getAttribute?.('hybridnavfocusable') !== 'false') {
-    el.setAttribute?.('hybridnavfocusable', 'false');
+    const hasInnerMatch = matches.some((other) => other !== el && el.contains?.(other));
+    if (!hasInnerMatch && count) {
+      if (el.dataset.ttCount !== count) el.dataset.ttCount = count;
+    } else if ('ttCount' in el.dataset) {
+      delete el.dataset.ttCount;
+    }
   }
-  if (el.getAttribute?.('tabindex') !== '-1') {
-    el.setAttribute?.('tabindex', '-1');
-  }
-  for (const child of el.querySelectorAll?.('[hybridnavfocusable]:not([hybridnavfocusable="false"])') ?? []) {
-    child.setAttribute?.('hybridnavfocusable', 'false');
-  }
+}
 
-  if (count) {
-    if (el.dataset.ttCount !== count) el.dataset.ttCount = count;
-  } else if ('ttCount' in el.dataset) {
-    delete el.dataset.ttCount;
+function findObserverTarget(
+  likeEls: HTMLElement[],
+  dislikeEls: HTMLElement[],
+  watchHost: Element | null
+): Element | null {
+  const firstLike = likeEls[0];
+  const firstDislike = dislikeEls[0];
+  if (firstLike && firstDislike) {
+    let ancestor: Element | null = firstLike.parentElement;
+    while (ancestor) {
+      const sharesAncestor =
+        typeof ancestor.contains === 'function'
+          ? ancestor.contains(firstDislike)
+          : ancestor === firstDislike.parentElement;
+      if (sharesAncestor) return ancestor;
+      if (ancestor === watchHost) break;
+      ancestor = ancestor.parentElement;
+    }
   }
+  return (
+    document.querySelector?.('ytlr-watch-default ytlr-transport-controls-renderer') ??
+    watchHost ??
+    document.body ??
+    document.documentElement
+  );
 }
 
 /**
@@ -136,12 +201,12 @@ export function installReturnYouTubeDislike(): void {
       const syncTargetObserverAndLabels = (): void => {
         applyForSession();
         if (signal.aborted) return;
-        const likeEl = document.querySelector<HTMLElement>(LIKE_BUTTON_SELECTOR);
-        const dislikeEl = document.querySelector<HTMLElement>(DISLIKE_BUTTON_SELECTOR);
         const watchHost = document.querySelector('ytlr-watch-default');
-        // Like/dislike controls mount under ytlr-watch-default (outside ytlr-progress-bar); narrow to their strip once present.
-        const desiredTarget =
-          likeEl?.parentElement ?? dislikeEl?.parentElement ?? watchHost ?? document.body ?? document.documentElement;
+        const desiredTarget = findObserverTarget(
+          queryButtonElements(LIKE_BUTTON_SELECTOR),
+          queryButtonElements(DISLIKE_BUTTON_SELECTOR),
+          watchHost
+        );
         if (!desiredTarget || (desiredTarget === observedTarget && observedTarget.isConnected !== false)) return;
 
         hostAbort?.abort();
@@ -150,7 +215,12 @@ export function installReturnYouTubeDislike(): void {
         observeDom(
           desiredTarget,
           syncTargetObserverAndLabels,
-          { childList: true, subtree: true, attributes: true, attributeFilter: ['hybridnavfocusable'] },
+          {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['hybridnavfocusable', 'tabindex', 'inert'],
+          },
           hostAbort.signal
         );
       };

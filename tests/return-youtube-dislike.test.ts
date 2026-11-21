@@ -51,26 +51,48 @@ describe('return-youtube-dislike', () => {
       else globals.CSSStyleSheet = prevCssStyleSheet;
     });
 
-    const controlsStrip = { nodeName: 'DIV', isConnected: true };
-    const makeButton = () => {
-      const attrs: Record<string, string> = { hybridnavfocusable: 'true' };
+    const controlsStrip = {
+      nodeName: 'DIV',
+      isConnected: true,
+      parentElement: null as unknown,
+      contains: (node: unknown) => node === likeWrapper || node === likeButton || node === dislikeButton,
+    };
+    const makeButton = (parentElement: unknown = controlsStrip, children: Array<Record<string, unknown>> = []) => {
+      const attrs: Record<string, string> = { hybridnavfocusable: 'true', tabindex: '0' };
       return {
         dataset: {} as Record<string, string>,
         inert: false,
-        parentElement: controlsStrip,
+        parentElement,
+        children,
         getAttribute: (name: string) => attrs[name] ?? null,
+        hasAttribute: (name: string) => Object.hasOwn(attrs, name),
         setAttribute: (name: string, value: string) => {
           attrs[name] = value;
         },
-        querySelectorAll: () => [],
+        contains: (other: unknown) => children.includes(other as Record<string, unknown>),
+        closest: () => null as unknown,
+        querySelectorAll: () => children,
         attrs,
       };
     };
 
-    const likeButton = makeButton();
-    const dislikeButton = makeButton();
-    const watchHost = { nodeName: 'YTLR-WATCH-DEFAULT', isConnected: true };
+    const nestedLikeChildAttrs: Record<string, string> = { hybridnavfocusable: 'true', tabindex: '0' };
+    const nestedLikeChild = {
+      getAttribute: (name: string) => nestedLikeChildAttrs[name] ?? null,
+      hasAttribute: (name: string) => Object.hasOwn(nestedLikeChildAttrs, name),
+      setAttribute: (name: string, value: string) => {
+        nestedLikeChildAttrs[name] = value;
+      },
+      attrs: nestedLikeChildAttrs,
+    };
+    const likeWrapper = makeButton(controlsStrip);
+    const likeButton = makeButton(likeWrapper, [nestedLikeChild]);
+    likeWrapper.children.push(likeButton);
+    likeButton.closest = () => likeWrapper;
+    const dislikeButton = makeButton(controlsStrip);
+    const watchHost = { nodeName: 'YTLR-WATCH-DEFAULT', isConnected: true, parentElement: null };
     const observerCbs: Array<() => void> = [];
+    const observedTargets: unknown[] = [];
     let controlsMounted = false;
     let disconnected = false;
     const winListeners = new Map<string, Set<() => void>>();
@@ -79,7 +101,9 @@ describe('return-youtube-dislike', () => {
       constructor(cb: () => void) {
         observerCbs.push(cb);
       }
-      observe(): void {}
+      observe(target: unknown): void {
+        observedTargets.push(target);
+      }
       disconnect(): void {
         disconnected = true;
       }
@@ -123,6 +147,12 @@ describe('return-youtube-dislike', () => {
       documentElement: { isConnected: true },
       adoptedStyleSheets: [] as Array<{ cssText: string }>,
       addEventListener: () => {},
+      querySelectorAll: (selector: string) => {
+        if (!controlsMounted) return [];
+        if (selector.includes('dislike-button')) return [dislikeButton];
+        if (selector.includes('like-button')) return [likeWrapper, likeButton];
+        return [];
+      },
       querySelector: (selector: string) => {
         if (selector === 'video') return {};
         if (selector === 'ytlr-watch-default') return watchHost;
@@ -144,15 +174,27 @@ describe('return-youtube-dislike', () => {
     for (const cb of [...observerCbs]) cb();
 
     assert.equal(likeButton.dataset.ttCount, '12.5K');
+    assert.equal(likeWrapper.dataset.ttCount, undefined);
     assert.equal(dislikeButton.dataset.ttCount, '420');
+    assert.equal(likeWrapper.inert, true);
     assert.equal(likeButton.inert, true);
     assert.equal(dislikeButton.inert, true);
+    assert.equal(likeWrapper.attrs.hybridnavfocusable, 'false');
+    assert.equal(likeWrapper.attrs.tabindex, '-1');
     assert.equal(likeButton.attrs.hybridnavfocusable, 'false');
+    assert.equal(likeButton.attrs.tabindex, '-1');
+    assert.equal(nestedLikeChildAttrs.hybridnavfocusable, 'false');
+    assert.equal(nestedLikeChildAttrs.tabindex, '-1');
     assert.equal(dislikeButton.attrs.hybridnavfocusable, 'false');
+    assert.equal(dislikeButton.attrs.tabindex, '-1');
+    assert.equal(observedTargets.at(-1), controlsStrip);
 
     const injectedCss = fakeDoc.adoptedStyleSheets.map((s) => s.cssText).join('\n');
     assert.match(injectedCss, /ytlr-watch-default/);
     assert.match(injectedCss, /pointer-events:\s*none\s*!important/);
+    assert.match(injectedCss, /display:\s*inline-flex\s*!important/);
+    assert.match(injectedCss, /flex-direction:\s*row\s*!important/);
+    assert.doesNotMatch(injectedCss, /top:\s*100%/);
 
     fakeLocation.hash = '#/';
     for (const fn of winListeners.get('hashchange') ?? []) fn();

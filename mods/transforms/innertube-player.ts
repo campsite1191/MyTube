@@ -9,24 +9,18 @@ export interface AudioFormatEntry extends AdaptiveFormat {
   isVoiceBoost?: boolean;
 }
 
-export function getAudioTier(fmt: AudioFormatEntry, preferDrcAudio = false): number {
+export function getAudioTier(fmt: AudioFormatEntry): number {
   const channels = typeof fmt.audioChannels === 'number' ? fmt.audioChannels : 0;
   if (channels > 6) return 1;
   if (channels > 2 || /ec-3|ac-3/i.test(fmt.mimeType || '')) return 2;
 
   const xtags = String(fmt.xtags || '');
   const isDrc = Boolean(fmt.isDrc || /drc=1/i.test(xtags));
-  if (preferDrcAudio && isDrc) {
-    return 3;
-  }
   if (
     !isDrc &&
     (fmt.isVoiceBoost || /vb=|voice[_-]?boost/i.test(xtags) || /voice\s*boost/i.test(fmt.audioTrack?.displayName || ''))
   ) {
-    return preferDrcAudio ? 4 : 3;
-  }
-  if (preferDrcAudio) {
-    return 5;
+    return 3;
   }
   return isDrc ? 5 : 4;
 }
@@ -50,31 +44,17 @@ function compareTrackSummaries(a: TrackSummary, b: TrackSummary): number {
 }
 
 /**
- * Filters `adaptiveFormats` by preferred video codec (when set), preserves all audio tracks,
- * arranges audio formats in recommended order (best/original track first, then highest tier
- * `7.1 -> 5.1 Surround -> Voice Boost -> Original Stereo -> DRC` and bitrate descending),
- * and marks the best track as initially selected (`audioIsDefault: true`).
+ * Preserves video formats and all audio tracks, ordering audio formats in recommended order
+ * (best/original track first, then highest tier `7.1 -> 5.1 Surround -> Voice Boost -> Original Stereo -> DRC`
+ * and bitrate descending) and marking the best track as initially selected (`audioIsDefault: true`).
  */
-export function filterStreamingFormats(
-  formats: AudioFormatEntry[],
-  preferredCodec = 'any',
-  preferDrcAudio = false
-): AudioFormatEntry[] {
-  let result = formats;
-
-  if (preferredCodec && preferredCodec !== 'any') {
-    const hasPreferred = result.some((fmt) => fmt.mimeType?.includes(preferredCodec));
-    if (hasPreferred) {
-      result = result.filter((fmt) => fmt.mimeType?.startsWith('audio/') || fmt.mimeType?.includes(preferredCodec));
-    }
-  }
-
+export function filterStreamingFormats(formats: AudioFormatEntry[]): AudioFormatEntry[] {
   const nonAudio: AudioFormatEntry[] = [];
   const audio: AudioFormatEntry[] = [];
   const tracks = new Map<string, TrackSummary>();
 
-  for (let i = 0; i < result.length; i++) {
-    const fmt = result[i];
+  for (let i = 0; i < formats.length; i++) {
+    const fmt = formats[i];
     if (!fmt) continue;
     if (!fmt.mimeType?.startsWith('audio/')) {
       nonAudio.push(fmt);
@@ -84,7 +64,7 @@ export function filterStreamingFormats(
     audio.push(fmt);
     const id = fmt.audioTrack?.id ?? '';
     const displayName = fmt.audioTrack?.displayName ?? '';
-    const tier = getAudioTier(fmt, preferDrcAudio);
+    const tier = getAudioTier(fmt);
     const channels = typeof fmt.audioChannels === 'number' ? fmt.audioChannels : 0;
     const isOriginal = Boolean(id && (/\boriginal\b/i.test(displayName) || id.endsWith('.4')));
     const existing = tracks.get(id);
@@ -110,7 +90,7 @@ export function filterStreamingFormats(
     }
   }
 
-  if (audio.length === 0) return result;
+  if (audio.length === 0) return formats;
 
   const rankedTracks = Array.from(tracks.values()).toSorted(compareTrackSummaries);
   const bestTrackId = rankedTracks[0]?.id ?? '';
@@ -133,7 +113,7 @@ export function filterStreamingFormats(
       }
     }
 
-    const tierDiff = getAudioTier(a, preferDrcAudio) - getAudioTier(b, preferDrcAudio);
+    const tierDiff = getAudioTier(a) - getAudioTier(b);
     if (tierDiff !== 0) return tierDiff;
 
     const aChannels = typeof a.audioChannels === 'number' ? a.audioChannels : 0;
@@ -203,29 +183,23 @@ export interface SubscriptionTab {
   };
 }
 
-export function dedupeAndSortSubscriptionTabs(
-  tabs: SubscriptionTab[],
-  seenTabs: Set<string>,
-  sortAlphabetically: boolean
-): SubscriptionTab[] {
-  const deduped = tabs.filter((tab) => {
-    const tr = tab.tabRenderer;
-    if (!tr) return true;
-    const ep = tr.endpoint?.browseEndpoint;
-    const key = ep?.browseId ? `${ep.browseId}:${ep.params || tr.title || ''}` : tr.tabIdentifier || tr.title;
-    if (!key) return true;
-    if (seenTabs.has(key)) return false;
-    seenTabs.add(key);
-    return true;
-  });
-
-  if (!sortAlphabetically) return deduped;
-
-  return deduped.toSorted((a, b) => {
-    if (a.tabRenderer?.selected && !b.tabRenderer?.selected) return -1;
-    if (!a.tabRenderer?.selected && b.tabRenderer?.selected) return 1;
-    return (a.tabRenderer?.title || '').localeCompare(b.tabRenderer?.title || '');
-  });
+export function dedupeAndSortSubscriptionTabs(tabs: SubscriptionTab[], seenTabs: Set<string>): SubscriptionTab[] {
+  return tabs
+    .filter((tab) => {
+      const tr = tab.tabRenderer;
+      if (!tr) return true;
+      const ep = tr.endpoint?.browseEndpoint;
+      const key = ep?.browseId ? `${ep.browseId}:${ep.params || tr.title || ''}` : tr.tabIdentifier || tr.title;
+      if (!key) return true;
+      if (seenTabs.has(key)) return false;
+      seenTabs.add(key);
+      return true;
+    })
+    .toSorted((a, b) => {
+      if (a.tabRenderer?.selected && !b.tabRenderer?.selected) return -1;
+      if (!a.tabRenderer?.selected && b.tabRenderer?.selected) return 1;
+      return (a.tabRenderer?.title || '').localeCompare(b.tabRenderer?.title || '');
+    });
 }
 
 /**

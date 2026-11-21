@@ -166,7 +166,7 @@ function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefin
       : undefined;
     if (!section || !Array.isArray(section.tabs)) continue;
 
-    section.tabs = dedupeAndSortSubscriptionTabs(section.tabs as SubscriptionTab[], seenTabs, true);
+    section.tabs = dedupeAndSortSubscriptionTabs(section.tabs as SubscriptionTab[], seenTabs);
     for (const tab of section.tabs as SubscriptionTab[]) {
       const content = tab.tabRenderer?.content?.tvSurfaceContentRenderer?.content;
       if (content) processBrowseContentSync(content, true);

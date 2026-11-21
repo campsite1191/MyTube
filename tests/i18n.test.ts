@@ -10,20 +10,13 @@ describe('typed English i18n lookup', () => {
     assert.equal(t('videoMenu.dontRecommendChannel'), "Don't Recommend Channel");
   });
 
-  test('interpolates single, multiple, and zero numeric variables', () => {
-    assert.equal(t('sponsorblock.toasts.skipping', { segment: 'Intro' }), 'Skipping Intro');
-    assert.equal(
-      t('sponsorblock.toasts.notSkipping', { segment: 'Outro', count: 3 }),
-      'Not skipping Outro (was skipped 3 times)'
-    );
-    assert.equal(
-      t('sponsorblock.toasts.notSkipping', { segment: 'Intro', count: 0 }),
-      'Not skipping Intro (was skipped 0 times)'
-    );
+  test('interpolates single and empty variable objects', () => {
+    assert.equal(t('sponsorblock.toasts.skip', { segment: 'Intro' }), 'Skip Intro');
+    assert.equal(t('sponsorblock.toasts.skip', { segment: 0 }), 'Skip 0');
   });
 
   test('preserves unmatched placeholders, ignores prototype keys, and returns unknown keys unchanged', () => {
-    assert.equal(t('sponsorblock.toasts.skipping', {}), 'Skipping {{segment}}');
+    assert.equal(t('sponsorblock.toasts.skip', {}), 'Skip {{segment}}');
     assert.equal(t('sponsorblock.toasts.skip', { other: 'value' }), 'Skip {{segment}}');
     assert.equal(t('nonexistent.translation.key'), 'nonexistent.translation.key');
     assert.equal(t('toString'), 'toString');

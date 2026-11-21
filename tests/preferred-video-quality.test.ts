@@ -117,59 +117,56 @@ describe('selectPlaybackQuality', () => {
     { quality: 'large', qualityLabel: '480p' },
   ];
 
-  test('returns null for auto or invalid preferences', () => {
-    assert.equal(selectPlaybackQuality(standardQualities, 'auto'), null);
-    assert.equal(selectPlaybackQuality(standardQualities, ''), null);
-    assert.equal(selectPlaybackQuality(standardQualities, null), null);
-    assert.equal(selectPlaybackQuality(standardQualities, 'invalid'), null);
-  });
-
   test('falls back to highres when available qualities are missing or unlabeled', () => {
-    assert.equal(selectPlaybackQuality([], '1080p'), 'highres');
-    assert.equal(selectPlaybackQuality(null, '1080p'), 'highres');
-    assert.equal(selectPlaybackQuality([{ quality: 'auto', qualityLabel: 'Auto' }], '1080p'), 'highres');
+    assert.equal(selectPlaybackQuality([]), 'highres');
+    assert.equal(selectPlaybackQuality(null), 'highres');
+    assert.equal(selectPlaybackQuality([{ quality: 'auto', qualityLabel: 'Auto' }]), 'highres');
   });
 
-  test('selects exact match when present', () => {
-    assert.equal(selectPlaybackQuality(standardQualities, '1080p'), 'hd1080');
-    assert.equal(selectPlaybackQuality(standardQualities, '2160p'), 'hd2160');
+  test('selects exact 2160p match when present', () => {
+    assert.equal(selectPlaybackQuality(standardQualities), 'hd2160');
   });
 
-  test('falls back to highest available tier at or below target instead of overshooting to highres', () => {
-    assert.equal(selectPlaybackQuality(standardQualities, '1440p'), 'hd1080');
-    assert.equal(selectPlaybackQuality(standardQualities, '900p'), 'hd720');
+  test('falls back to highest available tier below 2160p without overshooting to 4320p', () => {
+    const mixedQualities: YtQualityData[] = [
+      { quality: 'highres', qualityLabel: '4320p' },
+      { quality: 'hd1080', qualityLabel: '1080p' },
+      { quality: 'hd720', qualityLabel: '720p' },
+    ];
+    assert.equal(selectPlaybackQuality(mixedQualities), 'hd1080');
   });
 
-  test('falls back to lowest available tier when all tiers exceed target', () => {
-    assert.equal(selectPlaybackQuality(standardQualities, '240p'), 'large');
+  test('falls back to lowest available tier when all tiers exceed 2160p', () => {
+    const ultraQualities: YtQualityData[] = [
+      { quality: 'hd2880', qualityLabel: '2880p' },
+      { quality: 'highres', qualityLabel: '4320p' },
+    ];
+    assert.equal(selectPlaybackQuality(ultraQualities), 'hd2880');
   });
 });
 
 describe('applyPreferredQualityToPlayer', () => {
   test('applies selected quality range and catches player exceptions cleanly', () => {
     const { player, appliedRanges } = createMockMedia();
-    assert.equal(applyPreferredQualityToPlayer(player, '1080p'), true);
-    assert.deepEqual(appliedRanges, [['hd1080', 'hd1080']]);
-
-    assert.equal(applyPreferredQualityToPlayer(player, 'auto'), false);
-    assert.deepEqual(appliedRanges, [['hd1080', 'hd1080']]);
+    assert.equal(applyPreferredQualityToPlayer(player), true);
+    assert.deepEqual(appliedRanges, [['hd2160', 'hd2160']]);
 
     const throwingMock = createMockMedia({ throwOnSet: true });
-    assert.equal(applyPreferredQualityToPlayer(throwingMock.player, '1080p'), false);
+    assert.equal(applyPreferredQualityToPlayer(throwingMock.player), false);
   });
 });
 
 describe('attachPreferredQualityController', () => {
   test('locks quality once on first play, detaches onStateChange, and re-arms on next loadstart (Watch/Shorts/Previews)', () => {
     const mock = createMockMedia({ playerState: { isPlaying: false } });
-    const controller = attachPreferredQualityController(mock.player, () => '1080p', mock.video);
+    const controller = attachPreferredQualityController(mock.player, mock.video);
 
     assert.equal(mock.videoListenerCount(), 1);
     assert.equal(mock.playerListenerCount(), 1);
 
     // First play locks quality and detaches onStateChange immediately.
     mock.setState({ isPlaying: true });
-    assert.deepEqual(mock.appliedRanges, [['hd1080', 'hd1080']]);
+    assert.deepEqual(mock.appliedRanges, [['hd2160', 'hd2160']]);
     assert.equal(mock.playerListenerCount(), 0);
 
     // Pausing/playing later in same video fires zero callbacks.

@@ -68,8 +68,6 @@ function installClockStyles(): void {
       #${CLOCK_ID} .tt-clock-end {
         font-size: 0.875rem;
         line-height: 1.25rem;
-        font-weight: 500;
-        color: #aaaaaa;
         display: none;
       }
     `);
