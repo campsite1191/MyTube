@@ -1,16 +1,6 @@
 import { t } from '../core/i18n.ts';
-import resolveCommand from '../core/resolve-command.ts';
+import { dispatchYttvCommand } from '../core/yttv-bridge.ts';
 import type { Thumbnail, WatchEndpoint } from '../types/innertube.ts';
-
-interface ButtonItemTitle {
-  title: string;
-  subtitle?: string;
-}
-
-interface ButtonItemIcon {
-  icon: string;
-  secondaryIcon?: string;
-}
 
 interface LongPressDataInput {
   videoId: string;
@@ -21,69 +11,44 @@ interface LongPressDataInput {
   item: unknown;
 }
 
-export function showToast(title: string, subtitle: string, thumbnails?: Thumbnail[]): void {
-  const overlayToastRenderer: Record<string, unknown> = {
-    title: { simpleText: title },
-    subtitle: { simpleText: subtitle },
-  };
-  if (thumbnails) {
-    overlayToastRenderer.image = { thumbnails };
-  }
-  resolveCommand({
+export function showModal(title: string, content: unknown, id: string): void {
+  dispatchYttvCommand({
     openPopupAction: {
-      popupType: 'TOAST',
-      popup: { overlayToastRenderer },
-    },
-  });
-}
-
-function Modal(header: string, content: unknown, id: string, update?: boolean): Record<string, unknown> {
-  const overlayPanelHeaderRenderer: Record<string, unknown> = {
-    title: { simpleText: header },
-  };
-
-  const openPopupAction: Record<string, unknown> = {
-    popupType: 'MODAL',
-    popup: {
-      overlaySectionRenderer: {
-        overlay: {
-          overlayTwoPanelRenderer: {
-            actionPanel: {
-              overlayPanelRenderer: {
-                header: { overlayPanelHeaderRenderer },
-                content,
-              },
-            },
-            backButton: {
-              buttonRenderer: {
-                accessibilityData: {
-                  accessibilityData: { label: t('common.back') },
+      popupType: 'MODAL',
+      popup: {
+        overlaySectionRenderer: {
+          overlay: {
+            overlayTwoPanelRenderer: {
+              actionPanel: {
+                overlayPanelRenderer: {
+                  header: {
+                    overlayPanelHeaderRenderer: {
+                      title: { simpleText: title },
+                    },
+                  },
+                  content,
                 },
-                command: {
-                  signalAction: { signal: 'POPUP_BACK' },
+              },
+              backButton: {
+                buttonRenderer: {
+                  accessibilityData: {
+                    accessibilityData: { label: t('common.back') },
+                  },
+                  command: {
+                    signalAction: { signal: 'POPUP_BACK' },
+                  },
                 },
               },
             },
           },
-        },
-        dismissalCommand: {
-          signalAction: { signal: 'POPUP_BACK' },
+          dismissalCommand: {
+            signalAction: { signal: 'POPUP_BACK' },
+          },
         },
       },
+      uniqueId: id,
     },
-    uniqueId: id,
-  };
-
-  if (update) {
-    openPopupAction.shouldMatchUniqueId = true;
-    openPopupAction.updateAction = true;
-  }
-
-  return { openPopupAction };
-}
-
-export function showModal(header: string, content: unknown, id: string, update?: boolean): void {
-  resolveCommand(Modal(header, content, id, update));
+  });
 }
 
 export function overlayPanelItemListRenderer(items: unknown[], selectedIndex = 0) {
@@ -95,28 +60,15 @@ export function overlayPanelItemListRenderer(items: unknown[], selectedIndex = 0
   };
 }
 
-export function buttonItem(title: ButtonItemTitle | null, icon: ButtonItemIcon | null, commands: unknown[]) {
-  const compactLinkRenderer: Record<string, unknown> = {
-    serviceEndpoint: {
-      commandExecutorCommand: { commands },
+export function buttonItem(title: string, commands: unknown[]) {
+  return {
+    compactLinkRenderer: {
+      title: { simpleText: title },
+      serviceEndpoint: {
+        commandExecutorCommand: { commands },
+      },
     },
   };
-
-  if (title) {
-    compactLinkRenderer.title = { simpleText: title.title };
-    if (title.subtitle) {
-      compactLinkRenderer.subtitle = { simpleText: title.subtitle };
-    }
-  }
-
-  if (icon) {
-    compactLinkRenderer.icon = { iconType: icon.icon };
-    if (icon.secondaryIcon) {
-      compactLinkRenderer.secondaryIcon = { iconType: icon.secondaryIcon };
-    }
-  }
-
-  return { compactLinkRenderer };
 }
 
 export function timelyAction(text: string, icon: string, command: unknown, triggerTimeMs: number, timeoutMs: number) {
@@ -222,9 +174,9 @@ function MenuNavigationItemRenderer(text: string, navigateEndpoint: unknown) {
   };
 }
 
-export function ButtonRenderer(disabled: boolean, text: string, iconType: string, command: unknown) {
+export function ButtonRenderer(text: string, iconType: string, command: unknown) {
   return {
-    isDisabled: disabled,
+    isDisabled: false,
     text: { runs: [{ text }] },
     icon: { iconType },
     command,

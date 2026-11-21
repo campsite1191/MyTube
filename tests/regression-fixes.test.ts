@@ -8,16 +8,26 @@ import { applyDeArrowBranding, clearDeArrowCache } from '../mods/transforms/thum
 import { transformGuideResponse } from '../mods/ui/custom-guide-action.ts';
 
 describe('regression fixes', () => {
-  test('transformGuideResponse orders and filters sections synchronously even when sidebar order grows', () => {
+  test('transformGuideResponse keeps only Search, Home, Subscriptions, Library, News, Settings in exact order', () => {
     const payload = {
       items: [
         {
           guideSectionRenderer: {
             items: [
               { guideEntryRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'FEtopics_music' } } } },
-              { guideEntryRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'FEnew_custom' } } } },
+              { guideEntryRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'FEtopics_news' } } } },
+              { guideEntryRenderer: { navigationEndpoint: { reelWatchEndpoint: {} } } },
+              { guideEntryRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'FElibrary' } } } },
+              { guideEntryRenderer: { navigationEndpoint: { applicationSettingsEndpoint: {} } } },
+              { guideEntryRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'FEsubscriptions' } } } },
               { guideEntryRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'FEtopics' } } } },
               { guideEntryRenderer: { navigationEndpoint: { searchEndpoint: {} } } },
+              {
+                guideEntryRenderer: {
+                  thumbnail: { thumbnails: [{ url: 'https://example.com/avatar.jpg' }] },
+                  navigationEndpoint: { browseEndpoint: { browseId: 'UCchannel123' } },
+                },
+              },
             ],
           },
         },
@@ -27,13 +37,18 @@ describe('regression fixes', () => {
     const result = transformGuideResponse(payload) as typeof payload;
     const sectionItems = result.items[0]?.guideSectionRenderer.items ?? [];
     const ids = sectionItems.map((entry) => {
-      const ep = entry.guideEntryRenderer?.navigationEndpoint;
+      const ep = entry.guideEntryRenderer?.navigationEndpoint as
+        | {
+            browseEndpoint?: { browseId?: string };
+            searchEndpoint?: unknown;
+            applicationSettingsEndpoint?: unknown;
+          }
+        | undefined;
+      if (ep?.applicationSettingsEndpoint) return 'SETTINGS';
       return ep?.browseEndpoint?.browseId ?? (ep?.searchEndpoint ? 'search' : '');
     });
 
-    // 'FEtopics_music' is disabled by default; 'search' precedes 'FEtopics' and new item 'FEnew_custom' is retained.
-    assert.equal(ids.includes('FEtopics_music'), false);
-    assert.deepEqual(ids, ['search', 'FEtopics', 'FEnew_custom']);
+    assert.deepEqual(ids, ['search', 'FEtopics', 'FEsubscriptions', 'FElibrary', 'FEtopics_news', 'SETTINGS']);
   });
 
   test('injectCss adopts CSSStyleSheet and falls back to nonce-tagged style elements', () => {

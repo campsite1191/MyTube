@@ -2,12 +2,12 @@ import { patchAutoTranslateCommand } from '../features/more-subtitles.ts';
 import { readFormattedText, walkCommands } from '../transforms/feed-filter.ts';
 import type { FormattedText, InnertubeCommand } from '../types/innertube.ts';
 import { setPlaybackSpeed, speedSettings } from '../ui/speed-ui.ts';
-import { buttonItem, overlayPanelItemListRenderer, showModal, showToast } from '../ui/yt-ui.ts';
+import { buttonItem, overlayPanelItemListRenderer, showModal } from '../ui/yt-ui.ts';
 import { compactInPlace } from '../utils/feed-helpers.ts';
 import { isObjectLike, isRecord } from '../utils/type-guards.ts';
 import { t } from './i18n.ts';
 import { getFeedbackPanelTokens, requestNextAndNavigateChannel, sendFeedbackToken } from './innertube-calls.ts';
-import { findResolveCommandHost } from './yttv-bridge.ts';
+import { findResolveCommandHost, registerCommandDispatcher, showToast } from './yttv-bridge.ts';
 
 type ResolveInstance = { resolveCommand: (cmd: InnertubeCommand, arg?: unknown) => unknown };
 
@@ -27,6 +27,8 @@ export default async function resolveCommand(cmd: unknown, arg?: unknown): Promi
     : findResolveCommandHost()?.instance;
   return target ? target.resolveCommand(cmd as InnertubeCommand, arg) : undefined;
 }
+
+registerCommandDispatcher(resolveCommand);
 
 function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
   const settingDatas = Array.isArray(endpoint.settingDatas) ? endpoint.settingDatas : [];
@@ -304,7 +306,7 @@ async function markFeedback(
     const buttons = reasons
       .filter((reason): reason is Record<string, unknown> => isRecord(reason))
       .map((reason) =>
-        buttonItem({ title: readFormattedText(reason.title as FormattedText | string | undefined) }, null, [
+        buttonItem(readFormattedText(reason.title as FormattedText | string | undefined), [
           { signalAction: { signal: 'POPUP_BACK' } },
           { customAction: { action: 'FEEDBACK_REASON', parameters: { token: reason.token } } },
         ])

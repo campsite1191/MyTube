@@ -555,7 +555,7 @@ function transformTransportControls(r: Record<string, unknown>): void {
   tcRenderer.promotedActions.push({
     type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPONSORBLOCK_HIGHLIGHT',
     button: {
-      buttonRenderer: ButtonRenderer(false, t('sponsorblock.toasts.skipToHighlight'), 'SKIP_NEXT', {
+      buttonRenderer: ButtonRenderer(t('sponsorblock.toasts.skipToHighlight'), 'SKIP_NEXT', {
         clickTrackingParams: null,
         customAction: {
           action: 'SKIP',

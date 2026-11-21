@@ -1,25 +1,12 @@
-import { waitForDomReady } from '../core/idle-scheduler.ts';
 import { onVideo } from '../core/player-observer.ts';
 import resolveCommand, { patchResolveCommand } from '../core/resolve-command.ts';
-import { injectCss } from '../core/styles.ts';
 import { getCommandExecutor, whenYttvReady } from '../core/yttv-bridge.ts';
-import css from './ui.min.css';
 
 const STARTUP_COMMAND = { browseEndpoint: { browseId: 'FEtopics' } } as const;
 
-let stylesInstalled = false;
 let uiInitialized = false;
 
-function installGlobalStyles(): void {
-  if (stylesInstalled || typeof document === 'undefined') return;
-  const targetRoot = document.head ?? document.documentElement;
-  if (!targetRoot) return;
-  stylesInstalled = true;
-  injectCss(css, true);
-}
-
 function initUi(): void {
-  installGlobalStyles();
   if (uiInitialized) return;
   uiInitialized = true;
 
@@ -47,7 +34,6 @@ function ensureResolveHooksOnActionKey(event: KeyboardEvent): void {
 }
 
 if (typeof document !== 'undefined') {
-  void waitForDomReady().then(installGlobalStyles);
   whenYttvReady(() => {
     patchResolveCommand();
     initUi();

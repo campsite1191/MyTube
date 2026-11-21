@@ -10,13 +10,13 @@ import { installReturnYouTubeDislike } from './features/return-youtube-dislike.t
 import { installRewindOnPause } from './features/rewind-on-pause.ts';
 import { installSponsorBlock } from './features/sponsorblock.ts';
 import { initClock } from './ui/clock.ts';
+import { installSpeedControls } from './ui/speed-ui.ts';
 
 setupMemoryPressureListener();
 installDisableWhosWatching();
 installHdStoryboard();
 
 import './ui/ui.ts';
-import './ui/speed-ui.ts';
 import './ui/custom-guide-action.ts';
 
 void waitForDomReady().then(() => {
@@ -24,6 +24,7 @@ void waitForDomReady().then(() => {
     preconnectOrigins(['https://sponsor.ajay.app', 'https://returnyoutubedislikeapi.com']);
     initClock();
     installPreferredVideoQuality();
+    installSpeedControls();
     installSponsorBlock();
     installRemainingTime();
     installReturnYouTubeDislike();

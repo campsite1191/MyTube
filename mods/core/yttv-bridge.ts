@@ -191,10 +191,29 @@ export function getCommandExecutor(): YttvCommandExecutor | null {
   };
 }
 
-export function showToast(title: string, subtitle: string): boolean {
+let commandDispatcher: ((command: unknown) => unknown) | null = null;
+
+/**
+ * Registers the primary command dispatcher so bridge helpers respect active instances and patching
+ * without introducing circular imports back into `resolve-command.ts`.
+ */
+export function registerCommandDispatcher(dispatcher: (command: unknown) => unknown): void {
+  commandDispatcher = dispatcher;
+}
+
+export function dispatchYttvCommand(command: unknown): boolean {
+  if (commandDispatcher) {
+    void commandDispatcher(command);
+    return true;
+  }
   const host = findResolveCommandHost();
   if (!host) return false;
-  host.instance.resolveCommand({
+  host.instance.resolveCommand(command as Record<string, unknown>);
+  return true;
+}
+
+export function showToast(title: string, subtitle: string): boolean {
+  return dispatchYttvCommand({
     openPopupAction: {
       popupType: 'TOAST',
       popup: {
@@ -205,5 +224,4 @@ export function showToast(title: string, subtitle: string): boolean {
       },
     },
   });
-  return true;
 }

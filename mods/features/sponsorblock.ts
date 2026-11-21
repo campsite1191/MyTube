@@ -9,6 +9,7 @@ import {
   scheduleAbortableTimeout,
 } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
+import { injectCss } from '../core/styles.ts';
 import { showToast } from '../core/yttv-bridge.ts';
 
 // Segment metadata, config keys, colors, and opacities matching upstream ajayyy/SponsorBlock (`src/config.ts`).
@@ -340,7 +341,7 @@ class SponsorBlockHandler {
     const overlay = document.createElement('div');
     overlay.classList.add('ytLrProgressBarSlider', 'ytLrProgressBarSliderRectangularProgressBar');
     overlay.style.cssText =
-      'z-index: 10 !important; background-color: rgba(0, 0, 0, 0) !important; width: 72rem !important; left: 4rem !important;';
+      'z-index: 1 !important; pointer-events: none !important; background-color: rgba(0, 0, 0, 0) !important; width: 72rem !important; left: 4rem !important;';
 
     if (!slider.classList.contains('ytLrProgressBarSlider')) {
       const rect = slider.getBoundingClientRect();
@@ -490,6 +491,17 @@ class SponsorBlockHandler {
 
 let activeSegments: readonly SponsorBlockSegment[] = [];
 let sponsorBlockInstalled = false;
+let sponsorBlockStylesInstalled = false;
+
+function installSponsorBlockStyles(): void {
+  if (sponsorBlockStylesInstalled || typeof document === 'undefined') return;
+  sponsorBlockStylesInstalled = true;
+  injectCss(`
+      ytlr-progress-bar :is(.ytLrProgressBarPlayhead, [idomkey="playhead"]) {
+        z-index: 2 !important;
+      }
+    `);
+}
 
 export function getActiveSponsorBlockSegments(): readonly SponsorBlockSegment[] {
   return activeSegments;
@@ -501,6 +513,7 @@ export function getActiveSponsorBlockSegments(): readonly SponsorBlockSegment[] 
 export function installSponsorBlock(): void {
   if (sponsorBlockInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
   sponsorBlockInstalled = true;
+  installSponsorBlockStyles();
   onWatchSession((videoId, signal) => {
     activeSegments = [];
     onAbort(signal, () => {
