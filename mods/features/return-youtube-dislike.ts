@@ -1,17 +1,12 @@
-import {
-  getActiveWatchVideoId,
-  isPlayerBarVisible,
-  observePlayerBar,
-  onAbort,
-  onWatchSession,
-  PLAYER_BAR_SELECTOR,
-} from '../core/lifecycle.ts';
+import { getActiveWatchVideoId, observeDom, onAbort, onWatchSession } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 import { formatCompactCount } from '../utils/feed-helpers.ts';
 
-const LIKE_BUTTON_SELECTOR = 'yt-button-container[idomkey="like-button"], [idomkey="like-button"]';
-const DISLIKE_BUTTON_SELECTOR = 'yt-button-container[idomkey="dislike-button"], [idomkey="dislike-button"]';
+const LIKE_BUTTON_SELECTOR =
+  'ytlr-watch-default yt-button-container[idomkey="like-button"], ytlr-watch-default [idomkey="like-button"]';
+const DISLIKE_BUTTON_SELECTOR =
+  'ytlr-watch-default yt-button-container[idomkey="dislike-button"], ytlr-watch-default [idomkey="dislike-button"]';
 
 let currentLike: { videoId: string; count: string } | null = null;
 let currentDislike: { videoId: string; count: string } | null = null;
@@ -22,14 +17,14 @@ function installVoteLabelStyles(): void {
   if (stylesInstalled || typeof document === 'undefined') return;
   stylesInstalled = true;
   injectCss(`
-      ytlr-progress-bar :is([idomkey="like-button"], [idomkey="dislike-button"]) {
+      ytlr-watch-default :is([idomkey="like-button"], [idomkey="dislike-button"]) {
         pointer-events: none !important;
       }
-      ytlr-progress-bar :is([idomkey="like-button"], [idomkey="dislike-button"])[data-tt-count] {
+      ytlr-watch-default :is([idomkey="like-button"], [idomkey="dislike-button"])[data-tt-count] {
         position: relative !important;
         overflow: visible !important;
       }
-      ytlr-progress-bar :is([idomkey="like-button"], [idomkey="dislike-button"])[data-tt-count]::after {
+      ytlr-watch-default :is([idomkey="like-button"], [idomkey="dislike-button"])[data-tt-count]::after {
         content: attr(data-tt-count);
         position: absolute;
         top: 100%;
@@ -49,8 +44,8 @@ function installVoteLabelStyles(): void {
     `);
 }
 
-function applyButtonLabel(bar: Element, selector: string, count: string | null): void {
-  const el = bar.querySelector<HTMLElement>(selector);
+function applyButtonLabel(selector: string, count: string | null): void {
+  const el = document.querySelector<HTMLElement>(selector);
   if (!el) return;
 
   // Treat like/dislike strictly as display-only count labels so D-pad skips them cleanly without tooltip overlap.
@@ -80,10 +75,9 @@ export function setWatchLikeCount(videoId: string | null, count: string | null):
   const compact = count.replace(/\s+/g, '');
   if (!compact) return;
   currentLike = { videoId, count: compact };
-  if (videoId !== getActiveWatchVideoId() || typeof document === 'undefined') return;
-  const bar = document.querySelector(PLAYER_BAR_SELECTOR);
-  if (!bar || !isPlayerBarVisible(bar)) return;
-  applyButtonLabel(bar, LIKE_BUTTON_SELECTOR, compact);
+  if (videoId === getActiveWatchVideoId() && typeof document !== 'undefined') {
+    applyButtonLabel(LIKE_BUTTON_SELECTOR, compact);
+  }
 }
 
 export async function fetchDislikeCount(videoId: string, signal?: AbortSignal): Promise<string | null> {
@@ -101,7 +95,7 @@ export async function fetchDislikeCount(videoId: string, signal?: AbortSignal): 
 }
 
 /**
- * Displays live YouTube like counts from `/next` alongside uncached RYD dislike counts on the player bar.
+ * Displays live YouTube like counts from `/next` alongside uncached RYD dislike counts as non-interactive labels.
  */
 export function installReturnYouTubeDislike(): void {
   if (rydInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -117,23 +111,51 @@ export function installReturnYouTubeDislike(): void {
       if (currentDislike?.videoId === videoId) currentDislike = null;
     });
 
-    const applyToBar = (bar: Element | null | undefined): void => {
-      if (signal.aborted || !bar || !isPlayerBarVisible(bar)) return;
-      applyButtonLabel(bar, LIKE_BUTTON_SELECTOR, currentLike?.videoId === videoId ? currentLike.count : null);
-      applyButtonLabel(bar, DISLIKE_BUTTON_SELECTOR, currentDislike?.videoId === videoId ? currentDislike.count : null);
+    const applyForSession = (): void => {
+      if (signal.aborted) return;
+      applyButtonLabel(LIKE_BUTTON_SELECTOR, currentLike?.videoId === videoId ? currentLike.count : null);
+      applyButtonLabel(DISLIKE_BUTTON_SELECTOR, currentDislike?.videoId === videoId ? currentDislike.count : null);
     };
-
-    let getBar: (() => Element | null) | null = null;
 
     void fetchDislikeCount(videoId, signal).then((dislikes) => {
       if (!dislikes || signal.aborted) return;
       currentDislike = { videoId, count: dislikes };
-      applyToBar(getBar?.() ?? document.querySelector(PLAYER_BAR_SELECTOR));
+      applyForSession();
     });
 
     onVideo(() => {
       if (signal.aborted) return;
-      getBar = observePlayerBar(signal, applyToBar);
+
+      let observedTarget: Element | null = null;
+      let hostAbort: AbortController | null = null;
+      onAbort(signal, () => {
+        hostAbort?.abort();
+        hostAbort = null;
+      });
+
+      const syncTargetObserverAndLabels = (): void => {
+        applyForSession();
+        if (signal.aborted) return;
+        const likeEl = document.querySelector<HTMLElement>(LIKE_BUTTON_SELECTOR);
+        const dislikeEl = document.querySelector<HTMLElement>(DISLIKE_BUTTON_SELECTOR);
+        const watchHost = document.querySelector('ytlr-watch-default');
+        // Like/dislike controls mount under ytlr-watch-default (outside ytlr-progress-bar); narrow to their strip once present.
+        const desiredTarget =
+          likeEl?.parentElement ?? dislikeEl?.parentElement ?? watchHost ?? document.body ?? document.documentElement;
+        if (!desiredTarget || (desiredTarget === observedTarget && observedTarget.isConnected !== false)) return;
+
+        hostAbort?.abort();
+        observedTarget = desiredTarget;
+        hostAbort = new AbortController();
+        observeDom(
+          desiredTarget,
+          syncTargetObserverAndLabels,
+          { childList: true, subtree: true, attributes: true, attributeFilter: ['hybridnavfocusable'] },
+          hostAbort.signal
+        );
+      };
+
+      syncTargetObserverAndLabels();
     });
   });
 }

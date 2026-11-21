@@ -6,25 +6,10 @@ export interface SubtitleLanguageDescriptor {
   name: string;
 }
 
-export const PINNED_SUBTITLE_LANGUAGES: readonly SubtitleLanguageDescriptor[] = [
+export const ALLOWED_SUBTITLE_LANGUAGES: readonly SubtitleLanguageDescriptor[] = [
   { code: 'en', name: 'English' },
   { code: 'hi', name: 'Hindi' },
 ];
-
-let languageDisplayNames: Intl.DisplayNames | null | undefined;
-
-function getLanguageDisplayNames(): Intl.DisplayNames | null {
-  if (languageDisplayNames !== undefined) return languageDisplayNames;
-  try {
-    languageDisplayNames =
-      typeof Intl !== 'undefined' && typeof Intl.DisplayNames === 'function'
-        ? new Intl.DisplayNames(['en'], { type: 'language' })
-        : null;
-  } catch {
-    languageDisplayNames = null;
-  }
-  return languageDisplayNames;
-}
 
 function readRecordPath(root: unknown, ...keys: string[]): Record<string, unknown> | null {
   let current: unknown = root;
@@ -33,21 +18,6 @@ function readRecordPath(root: unknown, ...keys: string[]): Record<string, unknow
     current = current[key];
   }
   return isRecord(current) ? current : null;
-}
-
-/**
- * Resolves a human-readable English display name for a BCP-47 language code
- * using Cobalt's native `Intl.DisplayNames` API.
- */
-export function resolveLanguageDisplayName(languageCode: string, fallbackName = languageCode): string {
-  const formatter = getLanguageDisplayNames();
-  if (!formatter || !languageCode) return fallbackName;
-
-  try {
-    return formatter.of(languageCode) || fallbackName;
-  } catch {
-    return fallbackName;
-  }
 }
 
 function extractTranslationLanguage(item: unknown): { languageCode?: string; languageName?: string } | null {
@@ -64,12 +34,12 @@ function extractTranslationLanguage(item: unknown): { languageCode?: string; lan
   };
 }
 
-export function hasAutoTranslateLanguage(
+function findExistingLanguageItem(
   items: readonly Record<string, unknown>[],
   languageCode: string,
   languageName: string
-): boolean {
-  return items.some((item) => {
+): Record<string, unknown> | undefined {
+  return items.find((item) => {
     const lang = extractTranslationLanguage(item);
     return Boolean(lang && (lang.languageCode === languageCode || lang.languageName === languageName));
   });
@@ -107,45 +77,22 @@ export function createAutoTranslateLanguageOption(languageCode: string, language
   };
 }
 
-function findSectionHeaderIndex(items: readonly Record<string, unknown>[], subtitleText: string): number {
-  return items.findIndex(
-    (item) => readRecordPath(item, 'overlayMessageRenderer', 'subtitle')?.simpleText === subtitleText
-  );
-}
-
 /**
- * Pins missing target languages (default: English & Hindi) into YouTube TV's
- * auto-translate subtitle menu without duplicating existing entries.
+ * Replaces YouTube TV's auto-translate subtitle menu items with only the allowed
+ * target languages (default: English & Hindi), reusing existing rows to preserve active state.
  */
-export function injectPinnedAutoTranslateLanguages(
+export function filterAutoTranslateLanguages(
   items: Record<string, unknown>[],
-  languages: readonly SubtitleLanguageDescriptor[] = PINNED_SUBTITLE_LANGUAGES
-): number {
-  const optionsToInsert: Record<string, unknown>[] = [];
+  languages: readonly SubtitleLanguageDescriptor[] = ALLOWED_SUBTITLE_LANGUAGES
+): boolean {
+  const nextItems = languages.map(
+    ({ code, name }) => findExistingLanguageItem(items, code, name) ?? createAutoTranslateLanguageOption(code, name)
+  );
+  const unchanged = items.length === nextItems.length && items.every((item, idx) => item === nextItems[idx]);
+  if (unchanged) return false;
 
-  for (const language of languages) {
-    const displayName = language.name || resolveLanguageDisplayName(language.code, language.code);
-    if (!hasAutoTranslateLanguage(items, language.code, displayName)) {
-      optionsToInsert.push(createAutoTranslateLanguageOption(language.code, displayName));
-    }
-  }
-
-  if (optionsToInsert.length === 0) return 0;
-
-  const recommendedIndex = findSectionHeaderIndex(items, 'Recommended languages');
-  if (recommendedIndex > -1) {
-    items.splice(recommendedIndex + 1, 0, ...optionsToInsert);
-    return optionsToInsert.length;
-  }
-
-  const otherLanguagesIndex = findSectionHeaderIndex(items, 'Other languages');
-  if (otherLanguagesIndex > -1) {
-    items.splice(otherLanguagesIndex, 0, ...optionsToInsert);
-    return optionsToInsert.length;
-  }
-
-  items.unshift(...optionsToInsert);
-  return optionsToInsert.length;
+  items.splice(0, items.length, ...nextItems);
+  return true;
 }
 
 function getAutoTranslateMenuItems(command: unknown): Record<string, unknown>[] | null {
@@ -170,5 +117,5 @@ export function patchAutoTranslateCommand(command: unknown, enabled = configRead
   const items = getAutoTranslateMenuItems(command);
   if (!items) return false;
 
-  return injectPinnedAutoTranslateLanguages(items) > 0;
+  return filterAutoTranslateLanguages(items);
 }

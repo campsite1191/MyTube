@@ -44,7 +44,7 @@ export const EN_TRANSLATIONS = {
   'settings.options.sponsorblock.options.segments': 'Segments',
   'settings.options.sponsorblock.options.showSBToasts': 'Show SponsorBlock Toasts',
   'settings.options.sponsorblock.title': 'SponsorBlock Settings',
-  'settings.options.subtitles.options.showLocalSubtitle': 'Pin English & Hindi in Auto-Translate',
+  'settings.options.subtitles.options.showLocalSubtitle': 'Only Show English & Hindi in Auto-Translate',
   'settings.options.subtitles.title': 'Subtitle Settings',
   'settings.options.uiSettings.options.categories.gaming': 'Gaming',
   'settings.options.uiSettings.options.categories.home': 'Home',

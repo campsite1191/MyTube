@@ -798,9 +798,9 @@ describe('End-to-end userscript bundle lifecycle', () => {
     videoEl.readyState = 4;
     videoEl.currentSrc = 'blob:e2eVid123';
 
-    progressBar.appendChild(likeBtn);
-    progressBar.appendChild(dislikeBtn);
     watchDefault.appendChild(progressBar);
+    watchDefault.appendChild(likeBtn);
+    watchDefault.appendChild(dislikeBtn);
     bodyEl.appendChild(watchDefault);
     bodyEl.appendChild(videoEl);
 
@@ -853,7 +853,25 @@ describe('End-to-end userscript bundle lifecycle', () => {
                   overlayPanelRenderer: {
                     content: {
                       overlayPanelItemListRenderer: {
-                        items: [{ overlayMessageRenderer: { subtitle: { simpleText: 'Recommended languages' } } }],
+                        items: [
+                          { overlayMessageRenderer: { subtitle: { simpleText: 'Recommended languages' } } },
+                          {
+                            compactLinkRenderer: {
+                              title: { simpleText: 'Spanish' },
+                              serviceEndpoint: {
+                                commandExecutorCommand: {
+                                  commands: [
+                                    {
+                                      selectSubtitlesTrackCommand: {
+                                        translationLanguage: { languageCode: 'es', languageName: 'Spanish' },
+                                      },
+                                    },
+                                  ],
+                                },
+                              },
+                            },
+                          },
+                        ],
                       },
                     },
                   },
@@ -868,7 +886,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
     const captionItems =
       autoTranslatePopup.openPopupAction.popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel
         .overlayPanelRenderer.content.overlayPanelItemListRenderer.items;
-    assert.equal(captionItems.length, 3);
+    assert.equal(captionItems.length, 2);
 
     // Verify Rewind on Pause (-5s after >= 30s pause)
     vm.runInContext('var __origDateNow = Date.now; var __fakeNow = 1000000; Date.now = () => __fakeNow;', context);
