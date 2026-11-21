@@ -4,21 +4,20 @@ import { describe, test } from 'node:test';
 import { computeEndTimeLabel, formatClockTime, getNextClockDelayMs, initClock } from '../mods/ui/clock.ts';
 
 describe('clock helpers', () => {
-  test('formatClockTime formats 24h and 12h', () => {
+  test('formatClockTime formats 24h HH:MM', () => {
     const date = new Date(2026, 0, 1, 14, 5, 9);
-    assert.equal(formatClockTime(date, false), '14:05');
-    assert.equal(formatClockTime(date, true), '02:05 PM');
+    assert.equal(formatClockTime(date), '14:05');
 
     const midnight = new Date(2026, 0, 1, 0, 7, 0);
-    assert.equal(formatClockTime(midnight, true), '12:07 AM');
+    assert.equal(formatClockTime(midnight), '00:07');
   });
 
   test('computeEndTimeLabel projects end time and rounds >= 30s up', () => {
     const now = new Date(2026, 0, 1, 10, 0, 0);
-    assert.equal(computeEndTimeLabel(now, 120, 0, 1, false), 'Ends 10:02');
-    assert.equal(computeEndTimeLabel(now, 120, 0, 2, false), 'Ends 10:01');
-    assert.equal(computeEndTimeLabel(now, 90, 0, 1, false), 'Ends 10:02');
-    assert.equal(computeEndTimeLabel(now, Number.POSITIVE_INFINITY, 0, 1, false), '');
+    assert.equal(computeEndTimeLabel(now, 120, 0, 1), 'Ends 10:02');
+    assert.equal(computeEndTimeLabel(now, 120, 0, 2), 'Ends 10:01');
+    assert.equal(computeEndTimeLabel(now, 90, 0, 1), 'Ends 10:02');
+    assert.equal(computeEndTimeLabel(now, Number.POSITIVE_INFINITY, 0, 1), '');
   });
 
   test('getNextClockDelayMs aligns to next minute boundary', () => {
@@ -26,7 +25,7 @@ describe('clock helpers', () => {
     assert.equal(getNextClockDelayMs(midMinute), 44_750);
   });
 
-  test('initClock installs #f1f1f1 YouTube Sans clock and updates Watch end-time via onWatchSession', (t) => {
+  test('initClock installs #f1f1f1 YTSans clock and updates Watch end-time via onWatchSession', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
@@ -119,7 +118,7 @@ describe('clock helpers', () => {
 
     const css = fakeDoc.adoptedStyleSheets.map((s) => s.cssText).join('\n');
     assert.match(css, /color:\s*#f1f1f1/);
-    assert.match(css, /font-family:\s*'YouTube Sans'/);
+    assert.match(css, /font-family:\s*'YTSans'/);
 
     const endEl = fakeBody.children[0]?.children[0]?.children[1];
     assert.equal(endEl?.textContent, '');

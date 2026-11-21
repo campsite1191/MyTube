@@ -464,6 +464,43 @@ describe('End-to-end userscript bundle lifecycle', () => {
     assert.doesNotThrow(() => vm.runInContext(bundleSource, context));
     assert.equal(pressureListeners.length, 1);
 
+    // YouTube inline shell config scripts run after document-start and must receive HD storyboard flags.
+    vm.runInContext(
+      `
+      window.environment = { enable_animation: false, enable_memory_saving_mode: true };
+      window.ytcfg = {
+        data_: {},
+        d: function() { return this.data_; },
+        set: function(obj) { Object.assign(this.data_, obj); }
+      };
+      window.ytcfg.set({ EXPERIMENT_FLAGS: { web_l3_storyboard: false, force_memory_saving_mode: true } });
+      window.tectonicConfig = { featureSwitches: { enableHdStoryboardThumbnails: false } };
+      `,
+      context
+    );
+    assert.equal((fakeWindow.environment as { enable_animation?: boolean }).enable_animation, true);
+    assert.equal(
+      (
+        fakeWindow.ytcfg as {
+          data_: { EXPERIMENT_FLAGS: { web_l3_storyboard?: boolean; force_full_animation?: boolean } };
+        }
+      ).data_.EXPERIMENT_FLAGS.web_l3_storyboard,
+      true
+    );
+    assert.equal(
+      (
+        fakeWindow.ytcfg as {
+          data_: { EXPERIMENT_FLAGS: { force_full_animation?: boolean } };
+        }
+      ).data_.EXPERIMENT_FLAGS.force_full_animation,
+      true
+    );
+    assert.equal(
+      (fakeWindow.tectonicConfig as { featureSwitches: { enableHdStoryboardThumbnails?: boolean } }).featureSwitches
+        .enableHdStoryboardThumbnails,
+      true
+    );
+
     // 2. Mount DOM + fire DOMContentLoaded
     const htmlEl = createMockElement('html', docRef);
     const headEl = createMockElement('head', docRef);

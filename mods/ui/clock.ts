@@ -9,17 +9,12 @@ let tickAbort: AbortController | null = null;
 let stylesInstalled = false;
 
 /**
- * Formats a `Date` into `HH:MM` or `HH:MM AM/PM`.
+ * Formats a `Date` into 24-hour `HH:MM`.
  */
-export function formatClockTime(date: Date, is12HourFormat = false): string {
-  let hours = date.getHours();
-  const suffix = is12HourFormat ? (hours >= 12 ? ' PM' : ' AM') : '';
-  if (is12HourFormat) {
-    hours = hours % 12 || 12;
-  }
-  const hh = String(hours).padStart(2, '0');
+export function formatClockTime(date: Date): string {
+  const hh = String(date.getHours()).padStart(2, '0');
   const mm = String(date.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}${suffix}`;
+  return `${hh}:${mm}`;
 }
 
 /**
@@ -29,15 +24,14 @@ export function computeEndTimeLabel(
   now: Date,
   durationSec: number,
   currentTimeSec: number,
-  playbackRate: number,
-  is12HourFormat = false
+  playbackRate: number
 ): string {
   if (!Number.isFinite(durationSec) || durationSec <= 0 || durationSec >= MAX_VOD_DURATION_SEC) return '';
   const rate = playbackRate > 0 ? playbackRate : 1;
   const secondsLeft = Math.max(0, durationSec - currentTimeSec);
   const at = new Date(now.getTime() + Math.round(secondsLeft / rate) * 1000);
   const end = new Date(at.getTime() + (at.getSeconds() >= 30 ? 60000 : 0));
-  return `Ends ${formatClockTime(end, is12HourFormat)}`;
+  return `Ends ${formatClockTime(end)}`;
 }
 
 /**
@@ -57,7 +51,7 @@ function installClockStyles(): void {
         pointer-events: none;
         top: max(2%, env(safe-area-inset-top, 0px));
         right: max(4%, env(safe-area-inset-right, 0px));
-        font-family: 'YouTube Sans', 'Roboto', Arial, sans-serif;
+        font-family: 'YTSans', 'Roboto', Arial, sans-serif;
         color: #f1f1f1;
       }
       #${CLOCK_ID} .tt-clock-inner {
@@ -65,16 +59,17 @@ function installClockStyles(): void {
         flex-direction: column;
         align-items: flex-end;
         text-align: right;
-        font-size: 1.15rem;
-        line-height: 1.15;
+        font-size: 1.25rem;
+        line-height: 1.75rem;
         font-variant-numeric: tabular-nums;
         font-weight: 500;
         text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
       }
       #${CLOCK_ID} .tt-clock-end {
-        font-size: 0.8125rem;
+        font-size: 0.875rem;
+        line-height: 1.25rem;
         font-weight: 500;
-        margin-top: 0.125rem;
+        color: #aaaaaa;
         display: none;
       }
     `);

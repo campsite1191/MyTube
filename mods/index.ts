@@ -3,6 +3,7 @@ import { preconnectOrigins, schedulePostFirstPaint, waitForDomReady } from './co
 import './core/innertube-interceptor.ts';
 import { setupMemoryPressureListener } from './core/memory-pressure.ts';
 import { installDisableWhosWatching } from './features/disable-whos-watching.ts';
+import { installHdStoryboard } from './features/hd-storyboard.ts';
 import { installPreferredVideoQuality } from './features/preferred-video-quality.ts';
 import { installRemainingTime } from './features/remaining-time.ts';
 import { installReturnYouTubeDislike } from './features/return-youtube-dislike.ts';
@@ -12,6 +13,7 @@ import { initClock } from './ui/clock.ts';
 
 setupMemoryPressureListener();
 installDisableWhosWatching();
+installHdStoryboard();
 
 import './ui/ui.ts';
 import './ui/speed-ui.ts';
