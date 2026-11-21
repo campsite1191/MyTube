@@ -453,6 +453,6 @@ jobs:
         with:
           keep_latest: 7
           delete_tags: true
-          delete_tag_pattern: '^custom-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}(?:$|-)'
+          delete_tag_pattern: '^custom-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}(?:$|-\d)'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

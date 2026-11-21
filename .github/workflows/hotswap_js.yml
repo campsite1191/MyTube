@@ -48,7 +48,7 @@ jobs:
           if [ -z "$TAG" ]; then
             TAG=$(gh release list --repo "${{ github.repository }}" --exclude-drafts --limit 50 \
               --json tagName,createdAt \
-              --jq "[.[] | select(.tagName == \"${PREFIX}\" or ((.tagName | startswith(\"${PREFIX}-\")) and (.tagName | startswith(\"${PREFIX}-js-\") | not)))] | sort_by(.createdAt) | last | .tagName // empty")
+              --jq "([.[] | select(.tagName == \"${PREFIX}\" or ((.tagName | startswith(\"${PREFIX}-\")) and (.tagName | startswith(\"${PREFIX}-js-\") | not)))] | sort_by(.createdAt) | last | .tagName) // ([.[] | select(.tagName | startswith(\"${PREFIX}-js-\"))] | sort_by(.createdAt) | last | .tagName) // empty")
           fi
           if [ -z "$TAG" ]; then
             echo "::error::No release found matching ${PREFIX}"
@@ -155,6 +155,6 @@ jobs:
         with:
           keep_latest: 7
           delete_tags: true
-          delete_tag_pattern: '^custom-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}(?:$|-)'
+          delete_tag_pattern: '^custom-${{ env.PLATFORM }}-${{ env.BUILD_TYPE }}-js-'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
