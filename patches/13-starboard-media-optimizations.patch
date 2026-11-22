@@ -1,9 +1,38 @@
+diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
+index bf8d319..c8aa7fc 100644
+--- a/media/base/media_switches.cc
++++ b/media/base/media_switches.cc
+@@ -524,7 +524,7 @@ BASE_FEATURE(kCobaltUsingAndroidOverlay,
+ // Bypass Mojo for media pipeline in Cobalt single-process mode.
+ BASE_FEATURE(kCobaltBypassMojoForMedia,
+              "CobaltBypassMojoForMedia",
+-             base::FEATURE_DISABLED_BY_DEFAULT);
++             base::FEATURE_ENABLED_BY_DEFAULT);
+ // When enabled, Cobalt uses PartitionAlloc for DecoderBuffer storage instead of
+ // DecoderBufferAllocator.
+ // Experiment bug: b/563478845
+@@ -543,11 +543,7 @@ BASE_FEATURE(kCobaltDisableDecoderBufferAllocator,
+ // Disabled by default on Android, enabled by default on other platforms.
+ BASE_FEATURE(kCobaltInPlaceMediaSourceParser,
+              "CobaltInPlaceMediaSourceParser",
+-#if BUILDFLAG(IS_ANDROID)
+-             base::FEATURE_DISABLED_BY_DEFAULT);
+-#else   // BUILDFLAG(IS_ANDROID)
+              base::FEATURE_ENABLED_BY_DEFAULT);
+-#endif  // BUILDFLAG(IS_ANDROID)
+ // Whether kCobaltInPlaceMediaSourceParser borrows or copies appended data.
+ // When false, the stream parser is instead meant to copy each append into
+ // memory that it owns, and then parse it in place.
 diff --git a/media/base/starboard/experimental_features.h b/media/base/starboard/experimental_features.h
-index 65a94a1..53d3b8a 100644
+index 65a94a1..93eab56 100644
 --- a/media/base/starboard/experimental_features.h
 +++ b/media/base/starboard/experimental_features.h
-@@ -181,7 +181,7 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaBypassMojoForMedia(
-     "Media.BypassMojoForMedia");
+@@ -171,10 +171,10 @@ inline std::optional<std::string> ExperimentalFeatures::GetValue<std::string>(
+ // starboard/shared/starboard/experimental_features.h.
+ // keep-sorted start by_regex=k\w+ newline_separated=yes
+ inline constexpr ExperimentalFeatureKey<bool> kMediaBypassMojoForMedia(
+-    "Media.BypassMojoForMedia");
++    "Media.BypassMojoForMedia", true);
  
  inline constexpr ExperimentalFeatureKey<bool> kMediaEnableTrivialOptimizations(
 -    "Media.EnableTrivialOptimizations");
@@ -11,12 +40,30 @@ index 65a94a1..53d3b8a 100644
  
  inline constexpr ExperimentalFeatureKey<bool> kMediaForceDecodeToTexture(
      "Media.ForceDecodeToTexture");
+diff --git a/starboard/extension/feature_config.h b/starboard/extension/feature_config.h
+index 2238b38..8d67c41 100644
+--- a/starboard/extension/feature_config.h
++++ b/starboard/extension/feature_config.h
+@@ -110,7 +110,7 @@ STARBOARD_FEATURE(kAreaBasedVideoBufferBudget,
+ // Set the following variable to true to enable av1 startup optimization.
+ STARBOARD_FEATURE(kEnableAv1StartupOptimization,
+                   "EnableAv1StartupOptimization",
+-                  false)
++                  true)
+ 
+ // Enables the ExoPlayer-based SbPlayer for playback.
+ STARBOARD_FEATURE(kEnableExoPlayer, "EnableExoPlayer", false)
 diff --git a/starboard/shared/starboard/experimental_features.h b/starboard/shared/starboard/experimental_features.h
-index 4af464f..49b16b7 100644
+index 4af464f..4ab2164 100644
 --- a/starboard/shared/starboard/experimental_features.h
 +++ b/starboard/shared/starboard/experimental_features.h
-@@ -184,7 +184,8 @@ inline constexpr ExperimentalFeatureKey<bool>
-     kMediaEnableAv1StartupOptimization("Media.EnableAv1StartupOptimization");
+@@ -193,33 +193,35 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaAllowAudioWritingOnPause(
+     "Media.AllowAudioWritingOnPause");
+ 
+ inline constexpr ExperimentalFeatureKey<bool>
+-    kMediaEnableAv1StartupOptimization("Media.EnableAv1StartupOptimization");
++    kMediaEnableAv1StartupOptimization("Media.EnableAv1StartupOptimization",
++                                       true);
  
  inline constexpr ExperimentalFeatureKey<bool>
 -    kMediaEnableCodecThreadImprovements("Media.EnableCodecThreadImprovements");
@@ -24,9 +71,17 @@ index 4af464f..49b16b7 100644
 +                                        true);
  
  inline constexpr ExperimentalFeatureKey<bool> kMediaEnableFlushDuringSeek(
-     "Media.EnableFlushDuringSeek");
-@@ -197,7 +198,7 @@ inline constexpr ExperimentalFeatureKey<bool>
-         "Media.EnableSimdBasedAudioFormatSwitching");
+-    "Media.EnableFlushDuringSeek");
++    "Media.EnableFlushDuringSeek", true);
+ 
+ inline constexpr ExperimentalFeatureKey<bool> kMediaEnableResetAudioDecoder(
+-    "Media.EnableResetAudioDecoder");
++    "Media.EnableResetAudioDecoder", true);
+ 
+ inline constexpr ExperimentalFeatureKey<bool>
+     kMediaEnableSimdBasedAudioFormatSwitching(
+-        "Media.EnableSimdBasedAudioFormatSwitching");
++        "Media.EnableSimdBasedAudioFormatSwitching", true);
  
  inline constexpr ExperimentalFeatureKey<bool> kMediaEnableTrivialOptimizations(
 -    "Media.EnableTrivialOptimizations");
@@ -34,8 +89,11 @@ index 4af464f..49b16b7 100644
  
  inline constexpr ExperimentalFeatureKey<bool>
      kMediaEnableVideoRendererVspAdjustment(
-@@ -207,7 +208,7 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaFlushAudioTrackDuringSeek(
-     "Media.FlushAudioTrackDuringSeek");
+         "Media.EnableVideoRendererVspAdjustment");
+ 
+ inline constexpr ExperimentalFeatureKey<bool> kMediaFlushAudioTrackDuringSeek(
+-    "Media.FlushAudioTrackDuringSeek");
++    "Media.FlushAudioTrackDuringSeek", true);
  
  inline constexpr ExperimentalFeatureKey<bool> kMediaForceDualThreads(
 -    "Media.ForceDualThreads");
@@ -43,7 +101,7 @@ index 4af464f..49b16b7 100644
  
  // Decode-To-Texture (used by WebGL video shaders) may use this.
  // Main tracking bug: b/490474392, DRM exploration: b/494037632
-@@ -216,7 +217,8 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaForceSoftwareVideoDecoder(
+@@ -228,7 +230,8 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaForceSoftwareVideoDecoder(
  
  inline constexpr ExperimentalFeatureKey<bool>
      kMediaIgnoreStaleRenderedFramesAfterSeek(
@@ -53,7 +111,7 @@ index 4af464f..49b16b7 100644
  
  // Selects which NDK audio mode to use. The int value maps to `NdkAudioMode`.
  // TODO: b/565474970 - Remove this flag once the experiment is complete.
-@@ -234,7 +236,8 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaPauseUsingAudioTrackState(
+@@ -247,10 +250,11 @@ inline constexpr ExperimentalFeatureKey<bool> kMediaPauseUsingAudioTrackState(
  // TODO(b/511356295): Remove this flag once the experiment is complete.
  inline constexpr ExperimentalFeatureKey<bool>
      kMediaSkipAudioResamplingOnUnchangedSampleRate(
@@ -62,12 +120,16 @@ index 4af464f..49b16b7 100644
 +        true);
  
  inline constexpr ExperimentalFeatureKey<bool> kMediaSkipFlushOnDecoderTeardown(
-     "Media.SkipFlushOnDecoderTeardown");
+-    "Media.SkipFlushOnDecoderTeardown");
++    "Media.SkipFlushOnDecoderTeardown", true);
+ 
+ inline constexpr ExperimentalFeatureKey<bool> kMediaSkipVideoFramesOver60Fps(
+     "Media.SkipVideoFramesOver60Fps");
 diff --git a/starboard/shared/starboard/player/decoded_audio_internal.cc b/starboard/shared/starboard/player/decoded_audio_internal.cc
-index 0bf9da1..39c598e 100644
+index 0bf9da1..fa4608b 100644
 --- a/starboard/shared/starboard/player/decoded_audio_internal.cc
 +++ b/starboard/shared/starboard/player/decoded_audio_internal.cc
-@@ -37,7 +37,7 @@ namespace starboard {
+@@ -36,7 +36,7 @@ namespace starboard {
  
  namespace {
  
