@@ -74,6 +74,9 @@ function installVoteLabelStyles(): void {
         white-space: nowrap;
         pointer-events: none;
       }
+      ytlr-watch-default :is(ytlr-redux-connect-ytlr-like-button-renderer, div > ytlr-like-button-renderer):last-child [idomkey="dislike-button"][data-tt-count]::after {
+        padding-right: 1rem;
+      }
     `);
 }
 

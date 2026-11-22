@@ -206,6 +206,10 @@ describe('return-youtube-dislike', () => {
     assert.match(injectedCss, /pointer-events:\s*none\s*!important/);
     assert.match(injectedCss, /display:\s*inline-flex\s*!important/);
     assert.match(injectedCss, /flex-direction:\s*row\s*!important/);
+    assert.match(
+      injectedCss,
+      /:last-child\s*\[idomkey="dislike-button"\]\[data-tt-count\]::after\s*\{\s*padding-right:\s*1rem;/
+    );
     assert.doesNotMatch(injectedCss, /top:\s*100%/);
 
     fakeLocation.hash = '#/';
