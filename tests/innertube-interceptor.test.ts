@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { installInnertubeInterceptor, transformInnertubeResponseSync } from '../mods/core/innertube-interceptor.ts';
+import {
+  installInnertubeInterceptor,
+  patchPlaybackContextBody,
+  syncYttvPreviewAndJson,
+  transformInnertubeResponseSync,
+} from '../mods/core/innertube-interceptor.ts';
 import type { AudioFormatEntry, SubscriptionTab } from '../mods/transforms/innertube-player.ts';
 import {
   dedupeAndSortSubscriptionTabs,
@@ -77,6 +82,88 @@ describe('getAudioTier and filterStreamingFormats', () => {
     assert.equal(filtered[5]?.audioTrack?.audioIsDefault, false);
     assert.equal(filtered[6]?.audioTrack?.audioIsDefault, false);
   });
+
+  test('breaks audio track ties by channels, sourceDefault, bitrate, and original input order', () => {
+    const tieFormats: AudioFormatEntry[] = [
+      {
+        itag: 301,
+        mimeType: 'audio/mp4',
+        audioChannels: 2,
+        bitrate: 128000,
+        audioTrack: { id: 'a.1', displayName: 'Same', audioIsDefault: false },
+      },
+      {
+        itag: 302,
+        mimeType: 'audio/mp4',
+        audioChannels: 2,
+        bitrate: 128000,
+        audioTrack: { id: 'b.1', displayName: 'Same', audioIsDefault: true },
+      },
+      {
+        itag: 303,
+        mimeType: 'audio/mp4',
+        audioChannels: 2,
+        bitrate: 96000,
+        audioTrack: { id: 'c.1', displayName: 'Same', audioIsDefault: false },
+      },
+      {
+        itag: 304,
+        mimeType: 'audio/mp4; codecs="ec-3"',
+        audioChannels: 6,
+        bitrate: 256000,
+        audioTrack: { id: 'c.1', displayName: 'Same', audioIsDefault: false },
+      },
+      {
+        itag: 305,
+        mimeType: 'audio/mp4; codecs="ec-3"',
+        audioChannels: 6,
+        bitrate: 384000,
+        audioTrack: { id: 'a.1', displayName: 'Same', audioIsDefault: false },
+      },
+      {
+        itag: 306,
+        mimeType: 'audio/mp4',
+        audioChannels: 2,
+        bitrate: 64000,
+        audioTrack: { id: 'a.1', displayName: 'Same', audioIsDefault: false },
+      },
+    ];
+
+    const ranked = filterStreamingFormats(tieFormats);
+    // All 3 share displayName 'Same', but a.1 & c.1 upgrade to 5.1; b.1 picks up sourceDefault after a.1/c.1.
+    assert.equal(ranked[0]?.audioTrack?.id, 'a.1');
+    assert.equal(ranked[0]?.audioTrack?.audioIsDefault, true);
+    assert.deepEqual(
+      ranked.filter((f) => f.audioTrack?.id === 'a.1').map((f) => f.itag),
+      [305, 301, 306]
+    );
+
+    // Non-best tracks with identical isOriginal, bestTier, and displayName fall back to firstIndex tie-breaker.
+    const sameNonBestRanked = filterStreamingFormats([
+      {
+        itag: 401,
+        mimeType: 'audio/mp4',
+        audioChannels: 2,
+        audioTrack: { id: 'best.4', displayName: 'Original', audioIsDefault: false },
+      },
+      {
+        itag: 402,
+        mimeType: 'audio/mp4',
+        audioChannels: 2,
+        audioTrack: { id: 'dup.2', displayName: 'Alt', audioIsDefault: false },
+      },
+      {
+        itag: 403,
+        mimeType: 'audio/mp4',
+        audioChannels: 2,
+        audioTrack: { id: 'dup.1', displayName: 'Alt', audioIsDefault: true },
+      },
+    ]);
+    assert.deepEqual(
+      sameNonBestRanked.map((f) => f.itag),
+      [401, 402, 403]
+    );
+  });
 });
 
 describe('disableAutoCaptionsInPayload', () => {
@@ -141,11 +228,8 @@ describe('stripAdsFromPayload', () => {
 
 describe('TV browse/JSON.parse transforms', () => {
   test('transforms tvBrowseRenderer home feed shelves synchronously via JSON.parse', (t) => {
-    const prevParse = JSON.parse;
-    installInnertubeInterceptor();
-    t.after(() => {
-      JSON.parse = prevParse;
-    });
+    const restore = installInnertubeInterceptor();
+    t.after(restore);
 
     const rawHomeJson = JSON.stringify({
       contents: {
@@ -575,5 +659,255 @@ describe('TV browse/JSON.parse transforms', () => {
       payload.continuationContents.tvSurfaceContentContinuation.content.sectionListRenderer.contents.length,
       1
     );
+  });
+
+  test('strips nested playerResponse ads/endscreen/messages, handles direct list/action/nav/fallback paths, and hooks fetch/XHR/Response', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevXhr = globals.XMLHttpRequest;
+
+    const sentFetchRequests: Array<{ url: string; body?: string }> = [];
+    const sentXhrBodies: unknown[] = [];
+
+    class MockXhr {
+      send(body?: unknown): void {
+        sentXhrBodies.push(body);
+      }
+    }
+
+    const flagsMap = new Map<string, unknown>([['ENABLE_PREVIEWS_WITH_SOUND', false]]);
+    const yttvParse = (s: string) => JSON.parse(s);
+    const fakeWindow: Record<string, unknown> = {
+      fetch: async (resource: unknown, init?: { body?: string }) => {
+        sentFetchRequests.push({ url: String(resource), body: init?.body });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      _yttv: {
+        flags: flagsMap,
+        jsonMod: { JSON: { parse: yttvParse } },
+        host: { instance: { resolveCommand: () => true } },
+      },
+    };
+    globals.window = fakeWindow;
+    globals.document = {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      documentElement: {},
+    };
+    globals.XMLHttpRequest = MockXhr;
+
+    const restore = installInnertubeInterceptor();
+    // Second install returns idempotent no-op.
+    installInnertubeInterceptor()();
+    t.after(() => {
+      restore();
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevXhr === undefined) delete globals.XMLHttpRequest;
+      else globals.XMLHttpRequest = prevXhr;
+    });
+
+    // JSON.parse array & primitive passthrough + _yttv JSON wrapper + ENABLE_PREVIEWS_WITH_SOUND sync.
+    syncYttvPreviewAndJson();
+    assert.equal(flagsMap.get('ENABLE_PREVIEWS_WITH_SOUND'), true);
+    assert.deepEqual(JSON.parse('[1,2]'), [1, 2]);
+    assert.equal(JSON.parse('null'), null);
+    assert.equal(JSON.parse('42'), 42);
+
+    // Filtered tile inside replaceEnclosingAction.item is removed.
+    const replacePaid = {
+      onResponseReceivedCommand: {
+        replaceEnclosingAction: {
+          item: { tileRenderer: { onSelectCommand: { ypcGetOffersEndpoint: {} } } },
+        },
+      },
+    };
+    transformInnertubeResponseSync(replacePaid);
+    assert.equal('item' in replacePaid.onResponseReceivedCommand.replaceEnclosingAction, false);
+
+    // Outgoing fetch & XHR playbackContext body patching + malformed/already-patched cases.
+    assert.equal(patchPlaybackContextBody('no-context'), null);
+    assert.equal(patchPlaybackContextBody('{"playbackContext":'), null);
+    assert.equal(
+      patchPlaybackContextBody(
+        JSON.stringify({ playbackContext: { contentPlaybackContext: { isInlinePlaybackNoAd: true } } })
+      ),
+      null
+    );
+
+    await (fakeWindow.fetch as typeof fetch)('https://www.youtube.com/youtubei/v1/player', {
+      body: JSON.stringify({ playbackContext: { contentPlaybackContext: { vis: 0 } } }),
+    });
+    await (fakeWindow.fetch as typeof fetch)('https://www.youtube.com/youtubei/v1/browse', {
+      body: JSON.stringify({ context: {} }),
+    });
+    assert.equal(
+      JSON.parse(sentFetchRequests[0]?.body || '{}').playbackContext.contentPlaybackContext.isInlinePlaybackNoAd,
+      true
+    );
+    assert.equal(JSON.parse(sentFetchRequests[1]?.body || '{}').playbackContext, undefined);
+
+    const xhr = new MockXhr();
+    xhr.send(JSON.stringify({ playbackContext: { contentPlaybackContext: { vis: 0 } } }));
+    xhr.send('plain');
+    assert.equal(
+      JSON.parse(String(sentXhrBodies[0])).playbackContext.contentPlaybackContext.isInlinePlaybackNoAd,
+      true
+    );
+    assert.equal(sentXhrBodies[1], 'plain');
+
+    // Response.prototype.json skips external hosts and transforms InnerTube payloads.
+    const sbResp = Object.assign(new Response(JSON.stringify({ adSlots: [1] })), {});
+    Object.defineProperty(sbResp, 'url', { value: 'https://sponsor.ajay.app/api/branding' });
+    assert.deepEqual(await sbResp.json(), { adSlots: [1] });
+
+    const ytResp = new Response(
+      JSON.stringify({
+        playerResponse: {
+          adPlacements: [{}],
+          endscreen: { endscreenRenderer: {} },
+          messages: [{ youThereRenderer: {} }, { mealbarPromoRenderer: {} }],
+          streamingData: {
+            adaptiveFormats: [{ itag: 140, mimeType: 'audio/mp4', audioTrack: { id: 'en.4', displayName: 'English' } }],
+          },
+        },
+        overlay: {
+          reelPlayerOverlayRenderer: {},
+        },
+      })
+    );
+    const ytParsed = (await ytResp.json()) as {
+      playerResponse: { adPlacements: unknown[]; endscreen: unknown; messages: unknown[] };
+    };
+    assert.deepEqual(ytParsed.playerResponse.adPlacements, []);
+    assert.equal(ytParsed.playerResponse.endscreen, null);
+    assert.equal(ytParsed.playerResponse.messages.length, 1);
+
+    // Covers non-subscription tvSecondaryNavSectionRenderer (keeps server tab order while filtering content),
+    // richSectionRenderer fallback content, sectionListRenderer/horizontalListRenderer inside shelves,
+    // onResponseReceivedCommand, top-level listMutationCommand, and replaceEnclosingAction removal.
+    const complexPayload: Record<string, unknown> = {
+      tvBrowseContent: {
+        tvSecondaryNavRenderer: {
+          sections: [
+            {
+              tvSecondaryNavSectionRenderer: {
+                tabs: [
+                  {
+                    tabRenderer: {
+                      title: 'Zebra Tab',
+                      endpoint: { browseEndpoint: { browseId: 'FEhistory' } },
+                      content: {
+                        tvSurfaceContentRenderer: {
+                          content: {
+                            gridRenderer: { items: [{ adSlotRenderer: {} }, { tileRenderer: { contentId: 'h1' } }] },
+                          },
+                        },
+                      },
+                    },
+                  },
+                  {
+                    tabRenderer: {
+                      title: 'Alpha Tab',
+                      endpoint: { browseEndpoint: { browseId: 'FElibrary' } },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      contents: {
+        sectionListRenderer: {
+          contents: [
+            {
+              richSectionRenderer: {
+                content: {
+                  horizontalListRenderer: { items: [{ adSlotRenderer: {} }, { tileRenderer: { contentId: 'rs1' } }] },
+                },
+              },
+            },
+            {
+              sectionListRenderer: {
+                contents: [{ adSlotRenderer: {} }, { tileRenderer: { contentId: 'nestedSl1' } }],
+              },
+            },
+            {
+              horizontalListRenderer: {
+                items: [{ adSlotRenderer: {} }, { tileRenderer: { contentId: 'hl1' } }],
+              },
+            },
+          ],
+        },
+      },
+      onResponseReceivedCommand: {
+        replaceEnclosingAction: { item: { adSlotRenderer: {} } },
+      },
+      listMutationCommand: {
+        operations: {
+          operations: [
+            {
+              insertItemSectionContent: {
+                contents: [{ adSlotRenderer: {} }, { tileRenderer: { contentId: 'lm1' } }],
+              },
+            },
+          ],
+        },
+      },
+      onResponseReceivedActions: [
+        {
+          replaceEnclosingAction: { item: { surveyRenderer: {} } },
+        },
+      ],
+    };
+
+    transformInnertubeResponseSync(complexPayload);
+    const navTabs =
+      (
+        complexPayload.tvBrowseContent as {
+          tvSecondaryNavRenderer: {
+            sections: Array<{ tvSecondaryNavSectionRenderer: { tabs: Array<{ tabRenderer: { title: string } }> } }>;
+          };
+        }
+      ).tvSecondaryNavRenderer.sections[0]?.tvSecondaryNavSectionRenderer.tabs ?? [];
+    assert.deepEqual(
+      navTabs.map((t) => t.tabRenderer.title),
+      ['Zebra Tab', 'Alpha Tab']
+    );
+    assert.equal(
+      'item' in
+        (complexPayload.onResponseReceivedCommand as { replaceEnclosingAction: Record<string, unknown> })
+          .replaceEnclosingAction,
+      false
+    );
+    const firstAction = (
+      complexPayload.onResponseReceivedActions as Array<{ replaceEnclosingAction: Record<string, unknown> }>
+    )[0];
+    assert.equal(firstAction ? 'item' in firstAction.replaceEnclosingAction : true, false);
+
+    // Top-level try/catch handles cyclic or throwing getters cleanly.
+    const origError = console.error;
+    let errorCount = 0;
+    console.error = () => {
+      errorCount++;
+    };
+    try {
+      const broken = {
+        adPlacements: [],
+        get endscreen() {
+          throw new Error('bad getter');
+        },
+      };
+      transformInnertubeResponseSync(broken);
+      assert.equal(errorCount, 1);
+    } finally {
+      console.error = origError;
+    }
   });
 });

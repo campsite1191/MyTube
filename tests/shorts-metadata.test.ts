@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
+import { installInnertubeInterceptor } from '../mods/core/innertube-interceptor.ts';
 import {
   applyShortsFeedMetadata,
   clearShortsMetadataCache,
@@ -213,7 +214,9 @@ describe('shorts-metadata', () => {
       };
     };
 
+    const uninstallShortsMeta = installShortsMetadata();
     t.after(() => {
+      uninstallShortsMeta();
       clearShortsMetadataCache();
       if (prevWindow === undefined) delete globals.window;
       else globals.window = prevWindow;
@@ -318,7 +321,9 @@ describe('shorts-metadata', () => {
       };
     };
 
+    const uninstallShortsMeta = installShortsMetadata();
     t.after(() => {
+      uninstallShortsMeta();
       clearShortsMetadataCache();
       if (prevWindow === undefined) delete globals.window;
       else globals.window = prevWindow;
@@ -329,7 +334,6 @@ describe('shorts-metadata', () => {
       globals.fetch = prevFetch;
     });
 
-    installShortsMetadata();
     assert.equal(typeof focusInHandler, 'function');
     assert.equal(typeof hashChangeHandler, 'function');
 
@@ -345,6 +349,234 @@ describe('shorts-metadata', () => {
     assert.equal(fetchCount, 1);
     assert.equal(lineTextEl.textContent, '98.4K views • 5 hours ago');
 
+    // Focusing a regular video tile with empty text must NOT call reel_item_watch.
+    const regularTile = Object.assign(new MockElement(), {
+      classList: { contains: () => false },
+      closest: () => regularTile,
+      querySelector: (sel: string) => {
+        if (sel === 'ytlr-thumbnail-details') {
+          return { style: { backgroundImage: 'url("https://i.ytimg.com/vi/regVideo123/hq720.jpg")' } };
+        }
+        if (sel.includes('yt-formatted-string')) return { textContent: '' };
+        return null;
+      },
+    });
+    focusInHandler?.({ target: regularTile });
+    assert.equal(fetchCount, 1);
+
     hashChangeHandler?.();
+  });
+
+  test('suppresses overlay enrichment during response.json() with interceptor active, enforces 6-item cap, deduplicates in-flight, and handles rAF/errors', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevFetch = globals.fetch;
+    const prevRaf = globals.requestAnimationFrame;
+
+    const fetchedIds: string[] = [];
+    let overlayTriggeredDuringPrefetch = false;
+
+    globals.requestAnimationFrame = (cb: () => void) => {
+      cb();
+      return 1;
+    };
+    globals.window = {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      ytcfg: {
+        d: () => ({
+          INNERTUBE_CONTEXT: { client: { clientName: 'TVHTML5' } },
+          INNERTUBE_CONTEXT_CLIENT_NAME: 7,
+          INNERTUBE_CONTEXT_CLIENT_VERSION: '7.2026',
+        }),
+      },
+    };
+    globals.fetch = async (_url: unknown, init?: { body?: string }) => {
+      const parsed = init?.body ? (JSON.parse(init.body) as { playerRequest?: { videoId?: string } }) : {};
+      const vid = parsed.playerRequest?.videoId ?? '';
+      fetchedIds.push(vid);
+      if (vid === 'errShort001') {
+        return { ok: false, status: 500 };
+      }
+      // Deliberately expose only .json() (not .text()) while Response.prototype.json is intercepted.
+      const resp = new Response(JSON.stringify(makeReelPayload(vid, '10,000 views', '1 day ago')), { status: 200 });
+      const origJson = resp.json.bind(resp);
+      Object.defineProperty(resp, 'text', { value: undefined });
+      resp.json = async () => {
+        const data = (await origJson()) as Record<string, unknown>;
+        if (enrichShortsPlayerOverlay(data)) {
+          overlayTriggeredDuringPrefetch = true;
+        }
+        return data;
+      };
+      return resp;
+    };
+
+    const restoreInterceptor = installInnertubeInterceptor();
+    t.after(() => {
+      restoreInterceptor();
+      clearShortsMetadataCache();
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      globals.fetch = prevFetch;
+      if (prevRaf === undefined) delete globals.requestAnimationFrame;
+      else globals.requestAnimationFrame = prevRaf;
+    });
+
+    const shortsBatch: FeedItem[] = [];
+    for (let i = 1; i <= 8; i++) {
+      const id = i === 1 ? 'errShort001' : `capShort00${i}`;
+      shortsBatch.push({
+        tileRenderer: {
+          style: 'TILE_STYLE_YTLR_SHORTS',
+          contentId: id,
+          metadata: { tileMetadataRenderer: { title: { simpleText: `Short ${i}` } } },
+        },
+      });
+    }
+    // Add duplicate videoId to exercise inFlightShortsMeta dedup and pre-populated line skip.
+    shortsBatch.push(
+      {
+        tileRenderer: {
+          style: 'TILE_STYLE_YTLR_SHORTS',
+          contentId: 'capShort002',
+          metadata: { tileMetadataRenderer: { title: { simpleText: 'Dup Short 2' } } },
+        },
+      },
+      {
+        tileRenderer: {
+          style: 'TILE_STYLE_YTLR_SHORTS',
+          contentId: 'alreadyFull1',
+          metadata: {
+            tileMetadataRenderer: {
+              lines: [{ lineRenderer: { items: [{ lineItemRenderer: { text: { simpleText: '1K views' } } }] } }],
+            },
+          },
+        },
+      }
+    );
+
+    await applyShortsFeedMetadata(shortsBatch);
+    assert.equal(fetchedIds.length, 6);
+    assert.equal(overlayTriggeredDuringPrefetch, false);
+
+    // Calling ytcfg.d() throwing returns null safely; aborting mid-yield skips fetches cleanly.
+    (globals.window as { ytcfg: { d: () => unknown } }).ytcfg = {
+      d: () => {
+        throw new Error('broken ytcfg');
+      },
+    };
+    const sixthShort = shortsBatch[6];
+    assert.ok(sixthShort);
+    await applyShortsFeedMetadata([sixthShort]);
+
+    globals.window = {
+      ytcfg: {
+        data_: { INNERTUBE_CONTEXT: {} },
+      },
+    };
+    const abortBatch = applyShortsFeedMetadata([sixthShort]);
+    clearShortsMetadataCache();
+    await abortBatch;
+
+    // Missing engagement panel description header & factoids without Views return null; reelTitle without runs/simpleText skips title mutation.
+    assert.equal(
+      extractShortsMetadataFromReel({
+        engagementPanels: [
+          {
+            engagementPanelSectionListRenderer: {
+              content: { structuredDescriptionContentRenderer: { items: [{ unrelated: {} }] } },
+            },
+          },
+        ],
+      }),
+      null
+    );
+    assert.equal(
+      extractShortsMetadataFromReel({
+        engagementPanels: [
+          {
+            engagementPanelSectionListRenderer: {
+              content: {
+                structuredDescriptionContentRenderer: {
+                  items: [
+                    {
+                      videoDescriptionHeaderRenderer: {
+                        factoid: [{ factoidRenderer: { label: { simpleText: 'Likes' }, value: { simpleText: '5K' } } }],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      }),
+      null
+    );
+    const rawHeaderPayload = makeReelPayload('titleless1', '500 views', '1 day ago');
+    (
+      rawHeaderPayload as {
+        overlay: {
+          reelPlayerOverlayRenderer: {
+            reelPlayerHeaderSupportedRenderers: {
+              reelPlayerHeaderRenderer: { reelTitleText: Record<string, unknown> };
+            };
+          };
+        };
+      }
+    ).overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.reelTitleText = {
+      accessibility: { accessibilityData: { label: 'Short accessible title' } },
+    };
+    assert.equal(enrichShortsPlayerOverlay(rawHeaderPayload), true);
+
+    // Thumbnail-URL videoId fallback, non-YT URL miss, existing PLACEHOLDER_TEXT line replacement, setTimeout yield (no rAF), fetch error & empty metadata cleanup.
+    delete globals.requestAnimationFrame;
+    const unidentifiableShortTile: FeedItem = {
+      tileRenderer: {
+        style: 'TILE_STYLE_YTLR_SHORTS',
+        header: {
+          tileHeaderRenderer: {
+            thumbnail: { thumbnails: [{ url: 'https://example.com/no-video-id.jpg', width: 100, height: 100 }] },
+          },
+        },
+      },
+    };
+    const shortPlaceholderTile: FeedItem = {
+      tileRenderer: {
+        style: 'TILE_STYLE_YTLR_SHORTS',
+        header: {
+          tileHeaderRenderer: {
+            thumbnail: {
+              thumbnails: [{ url: 'https://i.ytimg.com/vi/thumbShort1/oar2.jpg', width: 720, height: 1280 }],
+            },
+          },
+        },
+        metadata: {
+          tileMetadataRenderer: {
+            lines: [{ lineRenderer: { items: [{ lineItemRenderer: { text: { simpleText: '\u00A0' } } }] } }],
+          },
+        },
+      },
+    };
+    globals.fetch = async () => {
+      throw new Error('network down');
+    };
+    await applyShortsFeedMetadata([unidentifiableShortTile, shortPlaceholderTile]);
+    // Empty metadata payload deletes pending targets cleanly; missing INNERTUBE_CONTEXT returns null.
+    const emptyPayloadTile: FeedItem = {
+      tileRenderer: {
+        style: 'TILE_STYLE_YTLR_SHORTS',
+        contentId: 'emptyShort2',
+        metadata: { tileMetadataRenderer: {} },
+      },
+    };
+    globals.fetch = async () => ({
+      ok: true,
+      text: async () => JSON.stringify({}),
+    });
+    await applyShortsFeedMetadata([emptyPayloadTile]);
+    globals.window = { ytcfg: { data_: {} } };
+    await applyShortsFeedMetadata([emptyPayloadTile]);
   });
 });

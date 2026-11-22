@@ -1,48 +1,70 @@
 import type { YtPlayerElement } from '../types/yttv.ts';
+import { onAbort } from './lifecycle.ts';
 
 const PLAYER_SELECTOR = '.html5-video-player';
 
 type PlayerWaiter = (player: YtPlayerElement) => void;
 type VideoWaiter = (video: HTMLVideoElement) => void;
 
-const playerWaiters: PlayerWaiter[] = [];
-const videoWaiters: VideoWaiter[] = [];
+interface WaiterEntry<T> {
+  callback: (target: T) => void;
+  cleanup?: () => void;
+}
+
+const playerWaiters: Array<WaiterEntry<YtPlayerElement>> = [];
+const videoWaiters: Array<WaiterEntry<HTMLVideoElement>> = [];
 let domObserver: MutationObserver | null = null;
 let domReadyListenerAttached = false;
-
 let pendingFlush = false;
+
+function disconnectIfEmpty(): void {
+  if (playerWaiters.length === 0 && videoWaiters.length === 0 && domObserver) {
+    domObserver.disconnect();
+    domObserver = null;
+  }
+}
+
+function drainWaiters<T>(waiters: Array<WaiterEntry<T>>, target: T): void {
+  for (const entry of waiters.splice(0)) {
+    entry.cleanup?.();
+    try {
+      entry.callback(target);
+    } catch (error) {
+      console.error('[PlayerObserver] Waiter failed:', error);
+    }
+  }
+}
+
 function flushWaiters(): void {
   if (pendingFlush) return;
   pendingFlush = true;
-  requestAnimationFrame(() => {
+  const schedule =
+    typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb: () => void) => setTimeout(cb, 0);
+  schedule(() => {
     pendingFlush = false;
     if (playerWaiters.length > 0) {
       const player = document.querySelector<YtPlayerElement>(PLAYER_SELECTOR);
-      if (player) {
-        for (const waiter of playerWaiters.splice(0)) {
-          waiter(player);
-        }
-      }
+      if (player) drainWaiters(playerWaiters, player);
     }
 
     if (videoWaiters.length > 0) {
       const video = document.querySelector<HTMLVideoElement>('video');
-      if (video) {
-        for (const waiter of videoWaiters.splice(0)) {
-          waiter(video);
-        }
-      }
+      if (video) drainWaiters(videoWaiters, video);
     }
 
-    if (playerWaiters.length === 0 && videoWaiters.length === 0 && domObserver) {
-      domObserver.disconnect();
-      domObserver = null;
-    }
+    disconnectIfEmpty();
   });
 }
 
 function ensureObserving(): void {
-  if (domObserver || typeof MutationObserver === 'undefined' || typeof document === 'undefined') return;
+  if (
+    (playerWaiters.length === 0 && videoWaiters.length === 0) ||
+    domObserver ||
+    typeof MutationObserver === 'undefined' ||
+    typeof document === 'undefined'
+  ) {
+    return;
+  }
   const target = document.body ?? document.documentElement;
   if (!target) {
     if (domReadyListenerAttached) return;
@@ -62,22 +84,37 @@ function ensureObserving(): void {
   domObserver.observe(target, { childList: true, subtree: true });
 }
 
-export function onPlayer(callback: PlayerWaiter): void {
+function enqueueWaiter<T>(waiters: Array<WaiterEntry<T>>, callback: (target: T) => void, signal?: AbortSignal): void {
+  const entry: WaiterEntry<T> = { callback };
+  if (signal) {
+    const removeWaiter = () => {
+      const idx = waiters.indexOf(entry);
+      if (idx >= 0) waiters.splice(idx, 1);
+      disconnectIfEmpty();
+    };
+    entry.cleanup = () => signal.removeEventListener('abort', removeWaiter);
+    onAbort(signal, removeWaiter);
+  }
+  waiters.push(entry);
+  ensureObserving();
+}
+
+export function onPlayer(callback: PlayerWaiter, signal?: AbortSignal): void {
+  if (signal?.aborted) return;
   const player = document.querySelector<YtPlayerElement>(PLAYER_SELECTOR);
   if (player) {
     callback(player);
     return;
   }
-  playerWaiters.push(callback);
-  ensureObserving();
+  enqueueWaiter(playerWaiters, callback, signal);
 }
 
-export function onVideo(callback: VideoWaiter): void {
+export function onVideo(callback: VideoWaiter, signal?: AbortSignal): void {
+  if (signal?.aborted) return;
   const video = document.querySelector<HTMLVideoElement>('video');
   if (video) {
     callback(video);
     return;
   }
-  videoWaiters.push(callback);
-  ensureObserving();
+  enqueueWaiter(videoWaiters, callback, signal);
 }

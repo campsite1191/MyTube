@@ -173,7 +173,8 @@ describe('return-youtube-dislike', () => {
 
     // Live YouTube likeCountText takes precedence and never falls back to RYD likes (999999).
     setWatchLikeCount('testVid123', '12.5 K');
-    installReturnYouTubeDislike();
+    const uninstallRyd = installReturnYouTubeDislike();
+    t.after(uninstallRyd);
     await fetchSettled;
     await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -274,8 +275,8 @@ describe('return-youtube-dislike', () => {
         return null;
       },
       querySelectorAll: (selector: string) => {
-        if (selector.includes('ytlr-toggle-button-view-model')) return [shortLikeBtn];
         if (selector.includes('aria-label="Dislike"')) return [shortDislikeBtn];
+        if (selector.includes('ytlr-toggle-button-view-model')) return [shortLikeBtn];
         return [];
       },
     };
@@ -365,5 +366,178 @@ describe('return-youtube-dislike', () => {
 
     assert.equal(inst.canFocusButton(0), true);
     assert.equal(inst.canFocusButton(1), false);
+
+    // Fallback regex heuristic + multi-arg forwarding + missing predicate guard.
+    class MinifiedControls {
+      buttons: Array<{ inert?: boolean; getAttribute?: (k: string) => string | null }>;
+      constructor(buttons: Array<{ inert?: boolean; getAttribute?: (k: string) => string | null }>) {
+        this.buttons = buttons;
+      }
+      step(i: number) {
+        if (this.checkFocus(i)) {
+          return Boolean(this.buttons[i]);
+        }
+        return false;
+      }
+      checkFocus(i: number, bonus = 10) {
+        return i >= 0 && bonus === 10;
+      }
+    }
+    const minInst = new MinifiedControls([focusableBtn, lockedLikeBtn]);
+    globals.document = {
+      querySelector: (sel: string) => (sel.includes('transport-controls') ? { __instance: minInst } : null),
+      querySelectorAll: () => [],
+    };
+    setWatchLikeCount('protoSkipVid', '9.2K');
+    assert.equal(minInst.checkFocus(0, 10), true);
+    assert.equal(minInst.checkFocus(1, 10), false);
+  });
+
+  test('protects active Shorts overlay from prefetched reel_item_watch, activates cached Short on hashchange, and handles deferred overlay mount', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevMutationObserver = globals.MutationObserver;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+    });
+
+    const observers: Array<{ target: unknown; cb: () => void; disconnected: boolean }> = [];
+    globals.MutationObserver = class {
+      private readonly rec: { target: unknown; cb: () => void; disconnected: boolean };
+      constructor(cb: () => void) {
+        this.rec = { target: null, cb, disconnected: false };
+      }
+      observe(target: unknown): void {
+        this.rec.target = target;
+        observers.push(this.rec);
+      }
+      disconnect(): void {
+        this.rec.disconnected = true;
+      }
+    };
+    globals.CSSStyleSheet = class {
+      replaceSync(): void {}
+    };
+
+    const makeBtn = () => {
+      const attrs: Record<string, string> = {};
+      return {
+        dataset: {} as Record<string, string>,
+        inert: false,
+        getAttribute: (k: string) => attrs[k] ?? null,
+        hasAttribute: (k: string) => Object.hasOwn(attrs, k),
+        setAttribute: (k: string, v: string) => {
+          attrs[k] = v;
+        },
+        querySelectorAll: () => [],
+      };
+    };
+
+    const likeBtn = makeBtn();
+    const dislikeBtn = makeBtn();
+    let mountedOverlay: Record<string, unknown> | null = null;
+    const bodyEl = { nodeName: 'BODY' };
+    const winListeners = new Map<string, Set<() => void>>();
+    const fakeLocation = { hash: '#/shorts/curShort11', search: '' };
+
+    globals.window = {
+      location: fakeLocation,
+      addEventListener: (type: string, fn: () => void) => {
+        const set = winListeners.get(type) ?? new Set();
+        set.add(fn);
+        winListeners.set(type, set);
+      },
+      removeEventListener: (type: string, fn: () => void) => {
+        winListeners.get(type)?.delete(fn);
+      },
+    };
+    globals.document = {
+      body: bodyEl,
+      documentElement: bodyEl,
+      adoptedStyleSheets: [],
+      querySelector: (sel: string) => (sel === 'ytlr-reel-player-overlay-renderer' ? mountedOverlay : null),
+      querySelectorAll: (sel: string) => {
+        if (sel.includes('aria-label="Dislike"')) return [dislikeBtn];
+        if (sel.includes('ytlr-toggle-button-view-model')) return [likeBtn];
+        return [];
+      },
+    };
+
+    const fetchedIds: string[] = [];
+    globals.fetch = (async (url: unknown) => {
+      const vid = new URL(String(url)).searchParams.get('videoId') ?? '';
+      fetchedIds.push(vid);
+      return new Response(JSON.stringify({ dislikes: vid === 'curShort11' ? 11 : 22 }), { status: 200 });
+    }) as typeof fetch;
+
+    const uninstallRyd = installReturnYouTubeDislike();
+    t.after(uninstallRyd);
+
+    // Activate curShort11 before overlay mounts -> lightweight wait observer watches body until overlay appears.
+    setShortsOverlayStats('curShort11', '500');
+    assert.equal(observers[0]?.target, bodyEl);
+    assert.equal(likeBtn.dataset.ttCount, '500');
+
+    // Prefetched response for nextShort99 must NOT overwrite or abort curShort11.
+    setShortsOverlayStats('nextShort99', '888');
+    assert.equal(likeBtn.dataset.ttCount, '500');
+    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(fetchedIds, ['curShort11']);
+    assert.equal(dislikeBtn.dataset.ttCount, '11');
+
+    // Mounting overlay disconnects body wait observer and attaches strictly to overlay.
+    mountedOverlay = { nodeName: 'YTLR-REEL-PLAYER-OVERLAY-RENDERER' };
+    observers[0]?.cb();
+    assert.equal(observers[0]?.disconnected, true);
+    assert.equal(observers.at(-1)?.target, mountedOverlay);
+
+    // Swiping to cached nextShort99 immediately activates cached likes and fetches RYD dislikes.
+    fakeLocation.hash = '#/shorts/nextShort99';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(likeBtn.dataset.ttCount, '888');
+    assert.equal(dislikeBtn.dataset.ttCount, '22');
+
+    // Stale wait-observer fires after switching away -> self-aborts cleanly.
+    mountedOverlay = null;
+    fakeLocation.hash = '#/shorts/waitShortA';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
+    setShortsOverlayStats('waitShortA', '100');
+    const waitObsA = observers.at(-1);
+    fakeLocation.hash = '#/shorts/waitShortB';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
+    waitObsA?.cb();
+    assert.equal(waitObsA?.disconnected, true);
+
+    // Populate > MAX_SHORTS_CACHE_SIZE (64) entries to exercise LRU eviction cleanly.
+    for (let i = 0; i < 70; i++) {
+      setShortsOverlayStats(`evictShort${i}`, `${i}`);
+    }
+
+    // Network rejection in fetchDislikeCount returns null cleanly.
+    globals.fetch = async () => {
+      throw new Error('offline');
+    };
+    assert.equal(await fetchDislikeCount('errVid'), null);
+
+    // Swiping to uncached Short clears stale overlay state.
+    fakeLocation.hash = '#/shorts/uncachedShort';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
+    // Exiting Shorts clears state and cache.
+    fakeLocation.hash = '#/';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
   });
 });

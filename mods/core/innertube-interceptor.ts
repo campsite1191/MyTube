@@ -1,4 +1,9 @@
-import { filterFeedItemsSync, filterShelvesInPlaceSync, isHiddenShelf } from '../transforms/feed-filter.ts';
+import {
+  filterFeedItemsSync,
+  filterShelvesInPlaceSync,
+  isHiddenShelf,
+  isStandaloneHeaderNode,
+} from '../transforms/feed-filter.ts';
 import { transformGuideResponse } from '../transforms/guide.ts';
 import type { AudioFormatEntry, SubscriptionTab } from '../transforms/innertube-player.ts';
 import {
@@ -103,7 +108,7 @@ function processContentNodeSync(node: unknown, shouldAddPreviews = true): void {
 }
 
 function isStandaloneHiddenHeader(entry: FeedItem): boolean {
-  return Boolean((entry.shelfHeaderRenderer || entry.sectionHeaderViewModel) && isHiddenShelf(entry));
+  return isStandaloneHeaderNode(entry) && isHiddenShelf(entry);
 }
 
 function isUntitledShelfRenderer(entry: FeedItem): boolean {
@@ -144,7 +149,9 @@ function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void
       if (isrContents && prevLen > 0 && isrContents.length === 0) {
         emptySections.add(entry);
       }
-    } else if (entry.sectionListRenderer || entry.richGridRenderer || ITEM_LIST_KEYS.some((k) => entry[k])) {
+    } else if (entry.sectionListRenderer || entry.richGridRenderer) {
+      processBrowseContentSync(entry, shouldAddPreviews);
+    } else if (ITEM_LIST_KEYS.some((k) => entry[k])) {
       processContentNodeSync(entry, shouldAddPreviews);
     } else if (
       entry.tileRenderer ||
@@ -212,19 +219,33 @@ function processBrowseActionsSync(actions: unknown, shouldAddPreviews = true): v
     }
     const replaceContainer = isRecord(action.replaceEnclosingAction) ? action.replaceEnclosingAction : undefined;
     const replace = isRecord(replaceContainer?.item) ? replaceContainer.item : undefined;
-    if (replace) {
+    if (replace && replaceContainer) {
       if (
         replace.tileRenderer ||
         replace.lockupViewModel ||
         replace.shortsLockupViewModel ||
         (isRecord(replace.richItemRenderer) && replace.richItemRenderer.content)
       ) {
-        processItemsListSync([replace as FeedItem], shouldAddPreviews);
+        const kept = processItemsListSync([replace as FeedItem], shouldAddPreviews);
+        if (kept.length === 0) {
+          delete replaceContainer.item;
+        }
       } else {
-        processShelvesSync([replace as FeedItem], shouldAddPreviews);
+        const arr = [replace as FeedItem];
+        processShelvesSync(arr, shouldAddPreviews);
+        if (arr.length === 0) {
+          delete replaceContainer.item;
+        }
       }
     }
   }
+}
+
+function isSubscriptionNavSection(tabs: readonly SubscriptionTab[]): boolean {
+  return tabs.some((tab) => {
+    const browseId = tab.tabRenderer?.endpoint?.browseEndpoint?.browseId;
+    return typeof browseId === 'string' && (browseId.startsWith('UC') || browseId === 'FEsubscriptions');
+  });
 }
 
 function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefined): void {
@@ -237,7 +258,9 @@ function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefin
       : undefined;
     if (!section || !Array.isArray(section.tabs)) continue;
 
-    section.tabs = dedupeAndSortSubscriptionTabs(section.tabs as SubscriptionTab[], seenTabs);
+    if (isSubscriptionNavSection(section.tabs as SubscriptionTab[])) {
+      section.tabs = dedupeAndSortSubscriptionTabs(section.tabs as SubscriptionTab[], seenTabs);
+    }
     for (const tab of section.tabs as SubscriptionTab[]) {
       const content = tab.tabRenderer?.content?.tvSurfaceContentRenderer?.content;
       if (content) processBrowseContentSync(content, true);
@@ -297,6 +320,18 @@ function hasRelevantInnertubeKey(r: Record<string, unknown>): boolean {
   );
 }
 
+function stripPlayerNoise(target: Record<string, unknown>): void {
+  if (target.adPlacements || target.playerAds || target.adSlots || target.entries) {
+    stripAdsFromPayload(target);
+  }
+  if (target.endscreen) {
+    target.endscreen = null;
+  }
+  if (Array.isArray(target.messages)) {
+    target.messages = target.messages.filter((msg) => !isRecord(msg) || !msg.youThereRenderer);
+  }
+}
+
 /**
  * Synchronously mutates parsed InnerTube payloads across `fetch` (`Response.json`),
  * `JSON.parse`, and `_yttv` internal JSON parsers without double-processing objects.
@@ -310,11 +345,12 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       transformGuideResponse(r);
     }
 
-    if (r.adPlacements || r.playerAds || r.adSlots || r.entries) {
-      stripAdsFromPayload(r);
+    const playerResponse = isRecord(r.playerResponse) ? r.playerResponse : undefined;
+    stripPlayerNoise(r);
+    if (playerResponse) {
+      stripPlayerNoise(playerResponse);
     }
 
-    const playerResponse = isRecord(r.playerResponse) ? r.playerResponse : undefined;
     const streamingData = isRecord(r.streamingData)
       ? r.streamingData
       : isRecord(playerResponse?.streamingData)
@@ -328,14 +364,6 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
 
     if (r.overlay) {
       enrichShortsPlayerOverlay(r);
-    }
-
-    if (r.endscreen) {
-      r.endscreen = null;
-    }
-
-    if (Array.isArray(r.messages)) {
-      r.messages = r.messages.filter((msg) => !isRecord(msg) || !msg.youThereRenderer);
     }
 
     const contents = isRecord(r.contents) ? r.contents : undefined;
@@ -432,7 +460,7 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
   return r;
 }
 
-function patchPlaybackContextBody(rawBody: string): string | null {
+export function patchPlaybackContextBody(rawBody: string): string | null {
   if (!rawBody.includes('playbackContext')) return null;
   try {
     const parseFn = rawJsonParse ?? JSON.parse;
@@ -475,7 +503,7 @@ function wrapJsonParseFn(origParse: typeof JSON.parse): typeof JSON.parse {
   return wrappedParse;
 }
 
-function syncYttvPreviewAndJson(): void {
+export function syncYttvPreviewAndJson(): void {
   if (typeof window === 'undefined' || !window._yttv) return;
   for (const entry of Object.values(window._yttv)) {
     if (entry instanceof Map && entry.has('ENABLE_PREVIEWS_WITH_SOUND')) {
@@ -487,14 +515,19 @@ function syncYttvPreviewAndJson(): void {
   }
 }
 
-export function installInnertubeInterceptor(): void {
-  if (interceptorInstalled) return;
+export function installInnertubeInterceptor(): () => void {
+  if (interceptorInstalled) return () => {};
   interceptorInstalled = true;
+  const restorers: Array<() => void> = [];
 
   // 1. Wrap JSON.parse so XHR, Response.text(), and inline XSSI-stripped payloads transform synchronously.
   if (typeof JSON !== 'undefined' && typeof JSON.parse === 'function') {
     if (!rawJsonParse) rawJsonParse = JSON.parse;
-    JSON.parse = wrapJsonParseFn(JSON.parse);
+    const prevJsonParse = JSON.parse;
+    JSON.parse = wrapJsonParseFn(prevJsonParse);
+    restorers.push(() => {
+      JSON.parse = prevJsonParse;
+    });
   }
 
   // 2. Intercept Response.json() (native V8 JSON path that bypasses JSON.parse).
@@ -508,28 +541,33 @@ export function installInnertubeInterceptor(): void {
       }
       return transformInnertubeResponseSync(data);
     } as typeof Response.prototype.json;
+    restorers.push(() => {
+      Response.prototype.json = origResponseJson;
+    });
   }
 
   // 3. Intercept fetch() & XMLHttpRequest.send() for outgoing playbackContext modifications.
   if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
-    const origFetch = window.fetch;
-    window.fetch = (resource, init) => {
+    const targetWindow = window;
+    const origFetch = targetWindow.fetch;
+    targetWindow.fetch = (resource, init) => {
       if (init && typeof init.body === 'string') {
         const patchedBody = patchPlaybackContextBody(init.body);
         if (patchedBody !== null) {
-          return origFetch(resource, { ...init, body: patchedBody });
+          return origFetch.call(targetWindow, resource, { ...init, body: patchedBody });
         }
       }
-      return origFetch(resource, init);
+      return origFetch.call(targetWindow, resource, init);
     };
+    restorers.push(() => {
+      targetWindow.fetch = origFetch;
+    });
   }
 
   if (typeof XMLHttpRequest !== 'undefined' && typeof XMLHttpRequest.prototype?.send === 'function') {
-    const origXhrSend = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.send = function (
-      this: XMLHttpRequest,
-      body?: Document | XMLHttpRequestBodyInit | null
-    ): void {
+    const xhrProto = XMLHttpRequest.prototype;
+    const origXhrSend = xhrProto.send;
+    xhrProto.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null): void {
       if (typeof body === 'string') {
         const patchedBody = patchPlaybackContextBody(body);
         if (patchedBody !== null) {
@@ -539,12 +577,20 @@ export function installInnertubeInterceptor(): void {
       }
       origXhrSend.call(this, body);
     };
+    restorers.push(() => {
+      xhrProto.send = origXhrSend;
+    });
   }
 
   // 4. Sync feature flags & _yttv-scoped JSON.parse once YouTube TV runtime initializes.
   whenYttvReady(syncYttvPreviewAndJson);
 
   installThumbnailErrorFallback();
+
+  return () => {
+    for (const restore of restorers) restore();
+    interceptorInstalled = false;
+  };
 }
 
 if (typeof window !== 'undefined') {

@@ -82,5 +82,12 @@ jobs:
               assert not (perms & banned), f"Banned permissions present: {perms & banned}"
               schemes = {el.attrib.get(f"{{{ns['android']}}}scheme") for el in root.findall(".//intent-filter/data")}
               assert "http" not in schemes, f"Unexpected http scheme in deep-link filter: {schemes}"
+              meta = {
+                  el.attrib.get(f"{{{ns['android']}}}name"): el.attrib.get(f"{{{ns['android']}}}value")
+                  for el in app.findall(".//meta-data")
+              }
+              assert meta.get("cobalt.ENABLE_SPLASH_SCREEN") == "false", (
+                  f"Unexpected cobalt.ENABLE_SPLASH_SCREEN: {meta.get('cobalt.ENABLE_SPLASH_SCREEN')}"
+              )
               print("Manifest XML & hardening checks passed.")
           PY

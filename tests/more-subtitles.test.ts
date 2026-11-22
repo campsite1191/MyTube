@@ -130,6 +130,33 @@ describe('patchAutoTranslateCommand', () => {
     assert.equal(patchAutoTranslateCommand(indexedPopup), true);
     assert.equal(listRenderer.selectedIndex, 1);
 
+    // Out-of-bounds selectedIndex with no checked item clamps to items.length - 1.
+    const uncheckedPopup = createAutoTranslatePopup([
+      createAutoTranslateLanguageOption('es', 'Spanish'),
+      createAutoTranslateLanguageOption('hi', 'Hindi'),
+    ]);
+    const uncheckedList = (
+      uncheckedPopup.openPopupAction as {
+        popup: {
+          overlaySectionRenderer: {
+            overlay: {
+              overlayTwoPanelRenderer: {
+                actionPanel: {
+                  overlayPanelRenderer: {
+                    content: { overlayPanelItemListRenderer: { items: unknown[]; selectedIndex?: number } };
+                  };
+                };
+              };
+            };
+          };
+        };
+      }
+    ).popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel.overlayPanelRenderer.content
+      .overlayPanelItemListRenderer;
+    uncheckedList.selectedIndex = 99;
+    assert.equal(patchAutoTranslateCommand(uncheckedPopup), true);
+    assert.equal(uncheckedList.selectedIndex, 1);
+
     assert.equal(patchAutoTranslateCommand({ openPopupAction: { uniqueId: 'OTHER_POPUP' } }), false);
     assert.equal(patchAutoTranslateCommand(null), false);
   });

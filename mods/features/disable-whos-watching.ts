@@ -7,6 +7,7 @@ const ACTION_KEYS = [
   'startup-screen-signed-out-welcome-back',
 ] as const;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 let whosWatchingInstalled = false;
 
@@ -45,7 +46,7 @@ export function suppressWhosWatching(): void {
 
   const now = Date.now();
   if (!recurringActions) {
-    recurringActions = { data: { data: {} }, creation: now };
+    recurringActions = { data: { data: {} }, creation: now, expiration: now + ONE_YEAR_MS };
   }
 
   let outerData = isRecord(recurringActions.data) ? recurringActions.data : undefined;

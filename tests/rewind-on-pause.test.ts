@@ -78,8 +78,8 @@ describe('installRewindOnPause Watch session lifecycle', () => {
       querySelector: (sel: string) => (sel === 'video' ? videoEl : null),
     };
 
+    const uninstallRewind = installRewindOnPause();
     try {
-      installRewindOnPause();
       assert.equal(videoListeners.get('pause')?.size ?? 0, 0);
 
       // Entering Watch (#/?v=vid123) attaches ONLY the pause listener initially
@@ -97,13 +97,13 @@ describe('installRewindOnPause Watch session lifecycle', () => {
       videoEl.dispatch('seeking');
       assert.equal(videoListeners.get('play')?.size ?? 0, 1);
 
-      // Resuming after >=30s tears down seeking/play, rewinds to 85s, and verifies once on playing
+      // Resuming after >=30s tears down pause-phase seeking/play, rewinds to 85s, and verifies once on playing
       fakeNow += 35_000;
       videoEl.currentTime = 90;
       videoEl.paused = false;
       videoEl.dispatch('play');
       assert.equal(videoEl.currentTime, 85);
-      assert.equal(videoListeners.get('seeking')?.size ?? 0, 0);
+      assert.equal(videoListeners.get('seeking')?.size ?? 0, 1);
       assert.equal(videoListeners.get('play')?.size ?? 0, 0);
       assert.equal(videoListeners.get('playing')?.size ?? 0, 1);
 
@@ -111,6 +111,22 @@ describe('installRewindOnPause Watch session lifecycle', () => {
       videoEl.dispatch('playing');
       assert.equal(videoEl.currentTime, 85);
       assert.equal(videoListeners.get('playing')?.size ?? 0, 0);
+      assert.equal(videoListeners.get('seeking')?.size ?? 0, 0);
+
+      // Manual seek (>5s) between play and playing cancels snap-back guard cleanly
+      videoEl.paused = true;
+      videoEl.currentTime = 150;
+      videoEl.dispatch('pause');
+      fakeNow += 35_000;
+      videoEl.paused = false;
+      videoEl.dispatch('play');
+      assert.equal(videoEl.currentTime, 145);
+      videoEl.currentTime = 220;
+      videoEl.dispatch('seeking');
+      assert.equal(videoListeners.get('playing')?.size ?? 0, 0);
+      assert.equal(videoListeners.get('seeking')?.size ?? 0, 0);
+      videoEl.dispatch('playing');
+      assert.equal(videoEl.currentTime, 220);
 
       // Manual seek (>5s) while paused cancels play/seeking immediately
       videoEl.paused = true;
@@ -121,11 +137,23 @@ describe('installRewindOnPause Watch session lifecycle', () => {
       assert.equal(videoListeners.get('play')?.size ?? 0, 0);
       assert.equal(videoListeners.get('seeking')?.size ?? 0, 0);
 
+      // Short or invalid pauses return early without leaving listeners
+      videoEl.ended = true;
+      videoEl.dispatch('pause');
+      assert.equal(videoListeners.get('play')?.size ?? 0, 0);
+      videoEl.ended = false;
+      videoEl.currentTime = 50;
+      videoEl.dispatch('pause');
+      fakeNow += 1_000;
+      videoEl.dispatch('play');
+      assert.equal(videoEl.currentTime, 50);
+
       // Leaving Watch route removes pause listener too
       fakeLocation.hash = '#/';
       for (const fn of [...(winListeners.get('hashchange') ?? [])]) fn({ type: 'hashchange' });
       assert.equal(videoListeners.get('pause')?.size ?? 0, 0);
     } finally {
+      uninstallRewind();
       Date.now = prevDateNow;
       globals.window = prevWindow;
       globals.document = prevDocument;

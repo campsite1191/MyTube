@@ -87,4 +87,66 @@ describe('suppressWhosWatching', () => {
       initialParsed.data.data['startup-screen-account-selector-with-guest'].lastFired > Date.now() + 6 * 86400_000
     );
   });
+
+  test('handles throwing localStorage, corrupt JSON, malformed nested data, and quota errors safely', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevDesc = Object.getOwnPropertyDescriptor(globals, 'localStorage');
+    t.after(() => {
+      if (prevDesc) Object.defineProperty(globals, 'localStorage', prevDesc);
+      else delete globals.localStorage;
+    });
+
+    // 1. Throwing localStorage getter returns cleanly.
+    Object.defineProperty(globals, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('SecurityError');
+      },
+    });
+    assert.doesNotThrow(() => suppressWhosWatching());
+
+    // 2. Corrupt JSON in storage returns early without overwriting.
+    let setCalls = 0;
+    Object.defineProperty(globals, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: {
+        getItem: () => '{broken-json',
+        setItem: () => {
+          setCalls++;
+        },
+      },
+    });
+    suppressWhosWatching();
+    assert.equal(setCalls, 0);
+
+    // 3. Non-object recurringActions.data and outerData.data are repaired, and setItem throw is ignored.
+    let stored = JSON.stringify({ data: 'bad', creation: 1 });
+    Object.defineProperty(globals, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: {
+        getItem: () => stored,
+        setItem: (_k: string, val: string) => {
+          stored = val;
+        },
+      },
+    });
+    suppressWhosWatching();
+    const repairedOuter = JSON.parse(stored);
+    assert.ok(repairedOuter.data.data['startup-screen-account-selector-with-guest'].lastFired > Date.now());
+
+    stored = JSON.stringify({ data: { data: 'not-an-object' } });
+    Object.defineProperty(globals, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: {
+        getItem: () => stored,
+        setItem: () => {
+          throw new Error('QuotaExceededError');
+        },
+      },
+    });
+    assert.doesNotThrow(() => suppressWhosWatching());
+  });
 });

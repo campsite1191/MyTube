@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { observeDom, onAbort, onWatchSession, scheduleAbortableTimeout } from '../mods/core/lifecycle.ts';
+import {
+  isPlayerBarVisible,
+  observeDom,
+  observePlayerBar,
+  onAbort,
+  onWatchSession,
+  scheduleAbortableTimeout,
+} from '../mods/core/lifecycle.ts';
 
 describe('AbortSignal lifecycle helpers', () => {
   test('onAbort runs cleanup on abort or immediately when already aborted', () => {
@@ -99,6 +106,9 @@ describe('onWatchSession helper', () => {
         }
         set.add(fn);
       },
+      removeEventListener: (type: string, fn: () => void) => {
+        winListeners.get(type)?.delete(fn);
+      },
     };
 
     const events: string[] = [];
@@ -116,16 +126,138 @@ describe('onWatchSession helper', () => {
       for (const fn of winListeners.get('hashchange') ?? []) fn();
       assert.deepEqual(events, ['start:firstVid']);
 
+      // Adding another handler mid-Watch receives active session immediately; throwing handler is isolated.
+      const origError = console.error;
+      let loggedErrors = 0;
+      console.error = () => {
+        loggedErrors++;
+      };
+      const lateEvents: string[] = [];
+      const unsubLate = onWatchSession((videoId) => {
+        lateEvents.push(videoId);
+      });
+      const unsubThrowing = onWatchSession((videoId) => {
+        if (videoId === 'secondVid') throw new Error('session error');
+      });
+      assert.deepEqual(lateEvents, ['firstVid']);
+
       fakeLocation.hash = '#/?v=secondVid';
       for (const fn of winListeners.get('hashchange') ?? []) fn();
+      console.error = origError;
+      assert.equal(loggedErrors, 1);
       assert.deepEqual(events, ['start:firstVid', 'abort:firstVid', 'start:secondVid']);
+      assert.deepEqual(lateEvents, ['firstVid', 'secondVid']);
+
+      unsubLate();
+      unsubThrowing();
 
       fakeLocation.hash = '#/';
       for (const fn of winListeners.get('hashchange') ?? []) fn();
       assert.deepEqual(events, ['start:firstVid', 'abort:firstVid', 'start:secondVid', 'abort:secondVid']);
     } finally {
       unsubscribe();
-      globals.window = prevWindow;
+      assert.equal(winListeners.get('hashchange')?.size ?? 0, 0);
+      delete globals.window;
+      if (prevWindow !== undefined) globals.window = prevWindow;
     }
+  });
+
+  test('observePlayerBar waits for late mount, re-binds on parent detachment or manual getter, and cleans up on abort', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevMutationObserver = globals.MutationObserver;
+
+    t.after(() => {
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+    });
+
+    const observers: Array<{ target: unknown; cb: () => void; disconnected: boolean }> = [];
+    globals.MutationObserver = class {
+      private readonly entry: { target: unknown; cb: () => void; disconnected: boolean };
+      constructor(cb: () => void) {
+        this.entry = { target: null, cb, disconnected: false };
+      }
+      observe(target: unknown): void {
+        this.entry.target = target;
+        observers.push(this.entry);
+      }
+      disconnect(): void {
+        this.entry.disconnected = true;
+      }
+    };
+
+    const parentNode = { nodeName: 'YTLR-WATCH' };
+    let activeBar: {
+      isConnected: boolean;
+      parentNode: unknown;
+      getAttribute: () => string | null;
+      classList: { contains: () => boolean };
+    } | null = null;
+
+    globals.document = {
+      body: { nodeName: 'BODY' },
+      documentElement: { nodeName: 'HTML' },
+      querySelector: (sel: string) => (sel === 'ytlr-progress-bar' ? activeBar : null),
+    };
+
+    const controller = new AbortController();
+    const seenBars: unknown[] = [];
+    const getBar = observePlayerBar(controller.signal, (bar) => {
+      seenBars.push(bar);
+    });
+
+    // Not yet mounted: getBar returns null and wait observer watches body.
+    assert.equal(getBar(), null);
+    assert.equal(observers.length, 1);
+
+    // Mount first bar and trigger wait observer.
+    const bar1 = {
+      isConnected: true,
+      parentNode,
+      getAttribute: () => 'true',
+      classList: { contains: () => false },
+    };
+    activeBar = bar1;
+    assert.equal(isPlayerBarVisible(bar1 as unknown as Element), true);
+    observers[0]?.cb();
+    assert.deepEqual(seenBars, [bar1]);
+    assert.equal(observers[0]?.disconnected, true);
+    assert.equal(getBar(), bar1);
+
+    // Trigger normal bar mutation while connected -> invokes onBar again.
+    const barObs = observers.find((o) => o.target === bar1 && !o.disconnected);
+    const parentObs = observers.find((o) => o.target === parentNode && !o.disconnected);
+    assert.ok(barObs && parentObs);
+    barObs.cb();
+    assert.equal(seenBars.length, 2);
+
+    // Detach bar1 -> parent observer immediately triggers re-bind to bar2.
+    const bar2 = {
+      isConnected: true,
+      parentNode,
+      getAttribute: () => 'true',
+      classList: { contains: () => false },
+    };
+    bar1.isConnected = false;
+    activeBar = bar2;
+    parentObs.cb();
+    assert.equal(seenBars.at(-1), bar2);
+
+    // Detach bar2 without parent callback -> manual getBar() rebinds or returns null cleanly.
+    const bar2Obs = observers.find((o) => o.target === bar2 && !o.disconnected);
+    bar2.isConnected = false;
+    activeBar = null;
+    assert.equal(getBar(), null);
+    bar2Obs?.cb();
+
+    controller.abort();
+    assert.equal(getBar(), null);
+    assert.equal(
+      observers.every((o) => o.disconnected),
+      true
+    );
   });
 });

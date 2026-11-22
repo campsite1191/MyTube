@@ -9,6 +9,7 @@ import {
   fetchSponsorBlockSegments,
   getActiveSponsorBlockSegments,
   installSponsorBlock,
+  onSponsorBlockSegmentsReady,
 } from '../mods/features/sponsorblock.ts';
 import { transformPlayerOverlays, transformTransportControls } from '../mods/transforms/player-overlays.ts';
 
@@ -52,6 +53,26 @@ describe('computeSegmentBarGeometry', () => {
     };
     assert.deepEqual(computeSegmentBarGeometry(highlight, 120), {
       leftPercent: 50,
+      widthPercent: 1,
+      color: '#ff1684',
+      opacity: '0.7',
+    });
+
+    // Clamps segments extending beyond duration and handles <= 0 / non-finite durations.
+    assert.deepEqual(computeSegmentBarGeometry({ UUID: 'over', category: 'unknown', segment: [90, 150] }, 120), {
+      leftPercent: 75,
+      widthPercent: 25,
+      color: 'blue',
+      opacity: '0.7',
+    });
+    assert.deepEqual(computeSegmentBarGeometry({ UUID: 'z', category: 'sponsor', segment: [10, 20] }, 0), {
+      leftPercent: 0,
+      widthPercent: 0,
+      color: '#00d400',
+      opacity: '0.7',
+    });
+    assert.deepEqual(computeSegmentBarGeometry(highlight, Number.NaN), {
+      leftPercent: 0,
       widthPercent: 1,
       color: '#ff1684',
       opacity: '0.7',
@@ -186,6 +207,10 @@ describe('fetchSponsorBlockSegments', () => {
           style: { display: '', setProperty: () => {} },
           children,
           append: (...els: unknown[]) => children.push(...els),
+          replaceChildren: (...els: unknown[]) => {
+            children.length = 0;
+            children.push(...els);
+          },
           remove: () => {},
         };
       },
@@ -202,7 +227,8 @@ describe('fetchSponsorBlockSegments', () => {
         resolveFetch = resolve;
       })) as typeof fetch;
 
-    installSponsorBlock();
+    const uninstallSponsorBlock = installSponsorBlock();
+    t.after(uninstallSponsorBlock);
     fakeLocation.hash = '#/watch?v=raceVid1';
     for (const fn of winListeners.get('hashchange') ?? []) fn();
 
@@ -260,5 +286,231 @@ describe('fetchSponsorBlockSegments', () => {
     fakeLocation.hash = '#/';
     for (const fn of winListeners.get('hashchange') ?? []) fn();
     assert.equal(getActiveSponsorBlockSegments().length, 0);
+  });
+
+  test('handles A->B /next-before-hashchange race, durationchange bar rescaling, host re-attach, waitingForTrack, and errors', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+    const prevMutationObserver = globals.MutationObserver;
+
+    const winListeners = new Map<string, Set<() => void>>();
+    const videoListeners = new Map<string, Set<() => void>>();
+    const observers: Array<{ target: unknown; cb: (m: unknown[]) => void }> = [];
+    const fakeLocation = { hash: '#/', search: '' };
+    const appendedOverlays: Array<{
+      children: Array<{ style: { cssText: string } }>;
+      style: Record<string, string> & { setProperty: (k: string, v: string) => void };
+    }> = [];
+
+    let mountTrack = false;
+    const trackEl = {
+      classList: { contains: () => false, [Symbol.iterator]: () => ['customTrack'][Symbol.iterator]() },
+      getBoundingClientRect: () => ({ left: 10, top: 5, width: 800, height: 8 }),
+    };
+    const hostEl = {
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 20 }),
+      appendChild: (el: (typeof appendedOverlays)[number]) => appendedOverlays.push(el),
+    };
+    const barEl = {
+      isConnected: true,
+      getAttribute: () => 'true',
+      classList: { contains: () => false },
+    };
+    const videoEl = {
+      duration: 100,
+      addEventListener: (type: string, fn: () => void, opts?: { signal?: AbortSignal }) => {
+        if (opts?.signal?.aborted) return;
+        const set = videoListeners.get(type) ?? new Set();
+        set.add(fn);
+        videoListeners.set(type, set);
+        opts?.signal?.addEventListener('abort', () => set.delete(fn), { once: true });
+      },
+    };
+
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+    });
+
+    globals.CSSStyleSheet = class {
+      cssText = '';
+      replaceSync(text: string): void {
+        this.cssText = text;
+      }
+    };
+    globals.MutationObserver = class {
+      private readonly cb: (m: unknown[]) => void;
+      constructor(cb: (m: unknown[]) => void) {
+        this.cb = cb;
+      }
+      observe(target: unknown): void {
+        observers.push({ target, cb: this.cb });
+      }
+      disconnect(): void {}
+    };
+    globals.window = {
+      location: fakeLocation,
+      addEventListener: (type: string, fn: () => void) => {
+        const set = winListeners.get(type) ?? new Set();
+        set.add(fn);
+        winListeners.set(type, set);
+      },
+      removeEventListener: (type: string, fn: () => void) => {
+        winListeners.get(type)?.delete(fn);
+      },
+    };
+    globals.document = {
+      body: {},
+      documentElement: {},
+      adoptedStyleSheets: [],
+      createElement: () => {
+        const children: Array<{ style: { cssText: string } }> = [];
+        const styleObj: Record<string, unknown> = {
+          display: '',
+          setProperty: (k: string, v: string) => {
+            styleObj[k] = v;
+          },
+        };
+        return {
+          classList: { add: () => {} },
+          style: styleObj,
+          children,
+          append: (...els: Array<{ style: { cssText: string } }>) => children.push(...els),
+          replaceChildren: (...els: Array<{ style: { cssText: string } }>) => {
+            children.length = 0;
+            children.push(...els);
+          },
+          remove: () => {},
+        };
+      },
+      querySelector: (sel: string) => {
+        if (sel === 'video') return videoEl;
+        if (mountTrack && sel.includes('slider')) return trackEl;
+        if (mountTrack && sel === 'ytlr-redux-connect-ytlr-progress-bar') return hostEl;
+        if (sel === 'ytlr-progress-bar') return barEl;
+        return null;
+      },
+    };
+
+    const resolvers = new Map<string, (resp: Response) => void>();
+    let rejectNext = false;
+    let abortMidDigest = false;
+    globals.fetch = ((url: unknown, init?: { signal?: AbortSignal }) => {
+      if (rejectNext) {
+        rejectNext = false;
+        return Promise.reject(new Error('network down'));
+      }
+      const key = String(url);
+      return new Promise<Response>((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        resolvers.set(key, resolve);
+      });
+    }) as typeof fetch;
+
+    const uninstallSponsorBlock = installSponsorBlock();
+    t.after(uninstallSponsorBlock);
+
+    // 1. Start Watch on vidA.
+    fakeLocation.hash = '#/watch?v=raceVidA';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
+
+    // 2. /next for raceVidB arrives BEFORE hashchange to raceVidB.
+    onSponsorBlockSegmentsReady('staleOldVid', () => {
+      assert.fail('stale queued listener should be cleared when newer video queues');
+    });
+    let bNotified = 0;
+    onSponsorBlockSegmentsReady('raceVidB', () => {
+      bNotified++;
+    });
+    // Also verify stale listener replacement when an even newer video queues.
+    onSponsorBlockSegmentsReady('raceVidB', () => {
+      bNotified++;
+    });
+
+    // Switch to raceVidB -> raceVidA's abort must NOT wipe raceVidB's queued listeners.
+    fakeLocation.hash = '#/watch?v=raceVidB';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
+
+    const hashB = await computeSha256HexPrefix('raceVidB', 4);
+    await new Promise((r) => setTimeout(r, 15));
+    const entryB = [...resolvers.entries()].find(([u]) => u.includes(hashB));
+    entryB?.[1](
+      new Response(
+        JSON.stringify([{ videoID: 'raceVidB', segments: [{ UUID: 'b1', category: 'sponsor', segment: [10, 30] }] }]),
+        { status: 200 }
+      )
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(bNotified, 2);
+
+    // Immediate hit path for already-loaded active video.
+    let immediateHit = 0;
+    onSponsorBlockSegmentsReady('raceVidB', (segs) => {
+      immediateHit = segs.length;
+    });
+    assert.equal(immediateHit, 1);
+
+    // durationchange before overlay mounts takes buildOverlay() fallback safely.
+    for (const fn of videoListeners.get('durationchange') ?? []) fn();
+
+    // waitingForTrack observer mounts overlay once track appears; host observer re-attaches removed overlay.
+    mountTrack = true;
+    for (const obs of observers.filter(
+      (o) => o.target === globals.document || o.target === (globals.document as { body: unknown }).body
+    )) {
+      obs.cb([]);
+    }
+    assert.equal(appendedOverlays.length, 1);
+    const overlay = appendedOverlays[0];
+    assert.ok(overlay);
+    assert.match(overlay.children[0]?.style.cssText ?? '', /width:\s*20%/);
+
+    // durationchange rescales bars from 100s -> 200s (width halves to 10%).
+    videoEl.duration = 200;
+    for (const fn of videoListeners.get('durationchange') ?? []) fn();
+    assert.match(overlay.children[0]?.style.cssText ?? '', /width:\s*10%/);
+
+    // Host observer re-appends overlay when removed by Incremental DOM.
+    const hostObs = observers.find((o) => o.target === hostEl);
+    assert.ok(hostObs);
+    hostObs.cb([{ removedNodes: [overlay] }]);
+    assert.equal(appendedOverlays.length, 2);
+
+    // Network rejection is handled without crashing; abort after digest returns [].
+    const origWarn = console.warn;
+    let warnCount = 0;
+    console.warn = () => {
+      warnCount++;
+    };
+    try {
+      rejectNext = true;
+      fakeLocation.hash = '#/watch?v=errVid1';
+      for (const fn of winListeners.get('hashchange') ?? []) fn();
+      await new Promise((r) => setTimeout(r, 15));
+      assert.equal(warnCount, 1);
+
+      const abCtrl = new AbortController();
+      abortMidDigest = true;
+      const pDigest = fetchSponsorBlockSegments('digestVid');
+      const pAbort = fetchSponsorBlockSegments('digestVid', abCtrl.signal);
+      abCtrl.abort();
+      assert.deepEqual(await pAbort, []);
+      void pDigest;
+      void abortMidDigest;
+    } finally {
+      console.warn = origWarn;
+      fakeLocation.hash = '#/';
+      for (const fn of winListeners.get('hashchange') ?? []) fn();
+    }
   });
 });

@@ -84,4 +84,61 @@ describe('installHdStoryboard', () => {
       true
     );
   });
+
+  test('ignores throwing ytcfg.d(), non-configurable props, preserves descriptors, and guards global window', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+    });
+
+    const win: Record<string, unknown> = {};
+    Object.defineProperty(win, 'environment', {
+      configurable: false,
+      writable: true,
+      value: { enable_animation: false },
+    });
+
+    let getterVal: unknown;
+    let setterCalls = 0;
+    Object.defineProperty(win, 'tectonicConfig', {
+      configurable: true,
+      get() {
+        return getterVal;
+      },
+      set(v: unknown) {
+        setterCalls++;
+        getterVal = v;
+      },
+    });
+
+    installHdStoryboard(win);
+    assert.equal((win.environment as Record<string, unknown>).enable_animation, true);
+
+    win.tectonicConfig = { featureSwitches: { enableHdStoryboardThumbnails: false } };
+    assert.equal(setterCalls, 1);
+    assert.equal(
+      (win.tectonicConfig as { featureSwitches: Record<string, unknown> }).featureSwitches.enableHdStoryboardThumbnails,
+      true
+    );
+
+    win.ytcfg = {
+      data_: {},
+      d: () => {
+        throw new Error('pre-init');
+      },
+      set: () => {},
+    };
+    assert.doesNotThrow(() =>
+      (win.ytcfg as { set: (k: string, v: unknown) => void }).set('EXPERIMENT_FLAGS', { web_l3_storyboard: false })
+    );
+
+    const globalWin: Record<string, unknown> = {};
+    globals.window = globalWin;
+    installHdStoryboard();
+    installHdStoryboard(); // Idempotent second call on global window.
+    globalWin.environment = {};
+    assert.equal((globalWin.environment as Record<string, unknown>).enable_animation, true);
+  });
 });

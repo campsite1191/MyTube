@@ -206,8 +206,19 @@ describe('speed-ui', () => {
     assert.equal(formatPlaybackSpeedLabel(), '1x');
 
     // Missing video element falls back cleanly to 1x
-    globals.document = { querySelector: () => null };
+    const subtitleEl = { isConnected: true, textContent: '1x' };
+    globals.document = {
+      activeElement: {
+        querySelector: (sel: string) => (sel.includes('yt-formatted-string + div') ? subtitleEl : null),
+      },
+      querySelector: () => null,
+    };
     assert.equal(getActivePlaybackSpeed(), 1);
     assert.equal(formatPlaybackSpeedLabel(), '1x');
+
+    // speedSettings captures connected subtitle element via WeakRef and updates it on speed change.
+    speedSettings();
+    setPlaybackSpeed(1.5);
+    assert.equal(subtitleEl.textContent, '1.5x');
   });
 });

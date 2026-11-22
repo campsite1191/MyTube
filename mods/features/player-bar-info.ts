@@ -233,8 +233,8 @@ let playerBarInfoInstalled = false;
 /**
  * Installs remaining-time (`• -m:ss`) and metadata display on the Watch player bar, updating only while visible.
  */
-export function installPlayerBarInfo(): void {
-  if (playerBarInfoInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
+export function installPlayerBarInfo(): () => void {
+  if (playerBarInfoInstalled || typeof window === 'undefined' || typeof document === 'undefined') return () => {};
   playerBarInfoInstalled = true;
 
   injectCss(`
@@ -263,12 +263,14 @@ export function installPlayerBarInfo(): void {
       }
     `);
 
-  onWatchSession((_videoId, signal) => {
+  const unsub = onWatchSession((_videoId, signal) => {
     let cachedElapsed: ClockTarget | null = null;
     let cachedDuration: ClockTarget | null = null;
     let desiredElapsed: string | null = null;
     let desiredRemaining: string | null = null;
     let desiredDuration: string | null = null;
+    let lastRenderedElapsedRaw: string | null = null;
+    let lastRenderedDurKey: string | null = null;
     let boundVideo: HTMLVideoElement | null = null;
     let videoAbort: AbortController | null = null;
     let boundPlayer: YtPlayerElement | null = null;
@@ -281,6 +283,7 @@ export function installPlayerBarInfo(): void {
       videoAbort?.abort();
       videoAbort = null;
       boundVideo = null;
+      boundPlayer = null;
     });
 
     const getElapsedTarget = (bar: Element): ClockTarget | null => {
@@ -311,7 +314,18 @@ export function installPlayerBarInfo(): void {
     const resolveLiveVideo = (): HTMLVideoElement | null => {
       const current =
         typeof document.querySelector === 'function' ? document.querySelector<HTMLVideoElement>('video') : null;
-      return current ? bindVideo(current) : boundVideo;
+      if (current) return bindVideo(current);
+      return boundVideo?.isConnected !== false ? boundVideo : null;
+    };
+
+    const resolvePlayer = (): YtPlayerElement | null => {
+      const player =
+        typeof document.querySelector === 'function' ? document.querySelector<YtPlayerElement>(PLAYER_SELECTOR) : null;
+      if (player && player !== boundPlayer) {
+        boundPlayer = player;
+        player.addEventListener?.('onPlaybackQualityChange', scheduleRender, { signal });
+      }
+      return player ?? boundPlayer;
     };
 
     const render = (bar: Element): boolean => {
@@ -322,6 +336,8 @@ export function installPlayerBarInfo(): void {
         desiredElapsed = null;
         desiredRemaining = null;
         desiredDuration = null;
+        lastRenderedElapsedRaw = null;
+        lastRenderedDurKey = null;
         if (elapsedTarget && !elapsedTarget.fallbackDur) {
           const { target, marker } = resolveRemainingAttrTarget(elapsedTarget.el);
           writeRemainingAttribute(elapsedTarget.el, null);
@@ -339,9 +355,10 @@ export function installPlayerBarInfo(): void {
         Number.isFinite(video.duration) && video.duration > 0 ? video.duration : (durOverride ?? 0);
 
       if (elapsedTarget && effectiveDuration > 0) {
+        const rawElapsedBefore = readTarget(elapsedTarget);
         if (elapsedTarget.fallbackDur) {
           const nextElapsed = formatRemainingLabel(
-            readTarget(elapsedTarget),
+            rawElapsedBefore,
             effectiveDuration,
             video.currentTime,
             durOverride,
@@ -349,12 +366,13 @@ export function installPlayerBarInfo(): void {
           );
           if (nextElapsed !== null) {
             desiredElapsed = nextElapsed;
+            lastRenderedElapsedRaw = nextElapsed;
             writeTarget(elapsedTarget, nextElapsed);
             updated = true;
           }
         } else {
           const nextRemaining = computeRemainingText(
-            readTarget(elapsedTarget),
+            rawElapsedBefore,
             effectiveDuration,
             video.currentTime,
             durOverride,
@@ -362,6 +380,7 @@ export function installPlayerBarInfo(): void {
           );
           if (nextRemaining !== null) {
             desiredRemaining = nextRemaining;
+            lastRenderedElapsedRaw = rawElapsedBefore;
             const { target, marker, isMarker } = resolveRemainingAttrTarget(elapsedTarget.el);
             if (isMarker) {
               writeRemainingAttribute(elapsedTarget.el, null);
@@ -375,21 +394,12 @@ export function installPlayerBarInfo(): void {
       }
 
       if (durTarget) {
-        const player =
-          typeof document.querySelector === 'function'
-            ? document.querySelector<YtPlayerElement>(PLAYER_SELECTOR)
-            : null;
-        if (player && player !== boundPlayer) {
-          boundPlayer = player;
-          player.addEventListener?.('onPlaybackQualityChange', () => scheduleRender(), { signal });
-        }
-        const nextDuration = formatDurationLabel(
-          readTarget(durTarget),
-          video.playbackRate,
-          readActiveQualityLabel(player, video)
-        );
+        const player = resolvePlayer();
+        const qualityLabel = readActiveQualityLabel(player, video);
+        const nextDuration = formatDurationLabel(readTarget(durTarget), video.playbackRate, qualityLabel);
         if (nextDuration !== null) {
           desiredDuration = nextDuration;
+          lastRenderedDurKey = `${video.playbackRate}|${qualityLabel ?? ''}`;
           writeTarget(durTarget, nextDuration);
           updated = true;
         }
@@ -431,15 +441,25 @@ export function installPlayerBarInfo(): void {
         if (!video) return;
         const elapsedTarget = getElapsedTarget(bar);
         const durTarget = elapsedTarget?.fallbackDur ? null : getDurationTarget(bar);
+        const rawElapsed = elapsedTarget ? readTarget(elapsedTarget) : null;
+        const player = durTarget ? resolvePlayer() : null;
+        const durKey = durTarget ? `${video.playbackRate}|${readActiveQualityLabel(player, video) ?? ''}` : null;
         const elapsedReady =
           !elapsedTarget ||
-          (elapsedTarget.fallbackDur
-            ? desiredElapsed !== null && readTarget(elapsedTarget) === desiredElapsed
-            : desiredRemaining !== null &&
-              resolveRemainingAttrTarget(elapsedTarget.el).target.dataset?.ttRemaining === desiredRemaining);
-        const durReady = !durTarget || (desiredDuration !== null && readTarget(durTarget) === desiredDuration);
+          (rawElapsed === lastRenderedElapsedRaw &&
+            (elapsedTarget.fallbackDur
+              ? desiredElapsed !== null && rawElapsed === desiredElapsed
+              : desiredRemaining !== null &&
+                resolveRemainingAttrTarget(elapsedTarget.el).target.dataset?.ttRemaining === desiredRemaining));
+        const durReady =
+          !durTarget ||
+          (!pendingForceRender &&
+            durKey === lastRenderedDurKey &&
+            desiredDuration !== null &&
+            readTarget(durTarget) === desiredDuration);
         if (elapsedReady && durReady) return;
         if (render(bar)) {
+          pendingForceRender = false;
           lastAppliedSec = Math.floor(video.currentTime);
         }
       },
@@ -456,6 +476,11 @@ export function installPlayerBarInfo(): void {
       if (!signal.aborted && bindVideo(video)) {
         scheduleRender();
       }
-    });
+    }, signal);
   });
+
+  return () => {
+    unsub();
+    playerBarInfoInstalled = false;
+  };
 }

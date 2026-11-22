@@ -11,6 +11,7 @@ import {
   installThumbnailErrorFallback,
   resolveFallbackThumbnailUrl,
   selectHighestVotedEntry,
+  setupMemoryPressureListener,
   upgradeFeedItemThumbnails,
   upgradeFeedThumbnails,
 } from '../mods/transforms/thumbnails.ts';
@@ -382,23 +383,18 @@ describe('DeArrow branding helpers', () => {
       await pendingQueued;
       assert.equal(queuedFetchCalled, false);
 
-      // 2) Navigation abort while fetch is already in-flight fires AbortSignal and skips stale DOM mutation.
+      // 2) Navigation abort while fetch is already in-flight rejects with AbortError, skips stale DOM mutation, and does NOT cache.
       let sawAbort = false;
       let notifyStarted!: () => void;
       const fetchStarted = new Promise<void>((resolve) => {
         notifyStarted = resolve;
       });
       globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit): Promise<Response> =>
-        new Promise((resolve) => {
+        new Promise((_resolve, reject) => {
           notifyStarted();
           init?.signal?.addEventListener('abort', () => {
             sawAbort = true;
-            resolve(
-              new Response(JSON.stringify({ titles: [{ title: 'Stale Title', votes: 9 }], thumbnails: [] }), {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-              })
-            );
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
           });
         })) as typeof globalThis.fetch;
 
@@ -410,10 +406,145 @@ describe('DeArrow branding helpers', () => {
 
       assert.equal(sawAbort, true);
       assert.equal(staleItem.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Original Tile Title');
+
+      // 3) Re-fetching stale-abort must still hit network because aborted results are never cached.
+      let refetched = false;
+      globalThis.fetch = (async () => {
+        refetched = true;
+        return new Response(JSON.stringify({ titles: [{ title: 'Fresh Title', votes: 3 }], thumbnails: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof globalThis.fetch;
+      await applyDeArrowBranding([staleItem.entry]);
+      assert.equal(refetched, true);
+      assert.equal(staleItem.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Fresh Title');
     } finally {
       clearDeArrowCache();
       globalThis.fetch = originalFetch;
     }
+  });
+
+  test('probes DeArrow background-image fallbacks, updates IMG/lockup DOM, skips cache-hit DOM queries, and wires memory pressure', async (t) => {
+    clearDeArrowCache();
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevWindow = globals.window;
+    const prevImage = globals.Image;
+    const prevFetch = globals.fetch;
+
+    const createdProbes: Array<{ src: string; onload: (() => void) | null; onerror: (() => void) | null }> = [];
+    globals.Image = class {
+      src = '';
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() {
+        createdProbes.push(this);
+      }
+    };
+
+    let queryAllCalls = 0;
+    const bgThumb = {
+      tagName: 'YTLR-THUMBNAIL-DETAILS',
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/probeVid123/hq720.jpg")' },
+      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileCard : null),
+    };
+    const tileTitle = { textContent: 'Old' };
+    const tileCard = { querySelector: () => tileTitle };
+
+    const imgEl = {
+      tagName: 'IMG',
+      src: 'https://i.ytimg.com/vi/imgVid12345/hq720.jpg',
+      closest: (sel: string) => (sel === 'yt-lockup-view-model' ? lockupCard : null),
+    };
+    const lockupTitle = { textContent: 'Old Lockup' };
+    const lockupCard = { querySelector: () => lockupTitle };
+
+    globals.document = {
+      querySelectorAll: (sel: string) => {
+        queryAllCalls++;
+        if (sel.includes('/probeVid123/')) return [bgThumb];
+        if (sel.includes('/imgVid12345/')) return [imgEl];
+        return [];
+      },
+    };
+    globals.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          titles: [{ title: 'New Clean Title', votes: 7 }],
+          thumbnails: [{ timestamp: 8, votes: 4 }],
+        }),
+        { status: 200 }
+      )) as typeof fetch;
+
+    const pressureListeners: Array<() => void> = [];
+    const origWarn = console.warn;
+    console.warn = () => {};
+    globals.window = {
+      h5vcc: {
+        system: {
+          onMemoryPressure: {
+            addListener: (cb: () => void) => pressureListeners.push(cb),
+          },
+        },
+      },
+    };
+
+    t.after(() => {
+      console.warn = origWarn;
+      clearDeArrowCache();
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevImage === undefined) delete globals.Image;
+      else globals.Image = prevImage;
+      globals.fetch = prevFetch;
+    });
+
+    // Invalid videoId must be ignored by updateMountedDeArrowDom without calling querySelectorAll.
+    applyDeArrowBrandingToItem(createTileFeedItem().entry, 'bad"]id', {
+      titles: [{ title: 'X', votes: 1 }],
+    });
+    assert.equal(queryAllCalls, 0);
+
+    // Cold fetch updates mounted background-image tile and steps down DeArrow -> hq720 -> hqdefault via Image probe.
+    const probeTile = createTileFeedItem({
+      contentId: 'probeVid123',
+      onSelectCommand: { watchEndpoint: { videoId: 'probeVid123' } },
+    });
+    await applyDeArrowBranding([probeTile.entry]);
+    assert.equal(queryAllCalls, 1);
+    assert.equal(createdProbes.length, 1);
+    const probe = createdProbes[0];
+    assert.ok(probe);
+    probe.onerror?.();
+    assert.equal(bgThumb.style.backgroundImage, 'url("https://i.ytimg.com/vi/probeVid123/hq720.jpg")');
+    probe.onerror?.();
+    assert.equal(bgThumb.style.backgroundImage, 'url("https://i.ytimg.com/vi/probeVid123/hqdefault.jpg")');
+    probe.onerror?.(); // Terminal fallback cleans up handlers.
+    assert.equal(probe.onerror, null);
+    assert.equal(probe.onload, null);
+
+    // Warm cache hit does NOT invoke querySelectorAll.
+    await applyDeArrowBranding([probeTile.entry]);
+    assert.equal(queryAllCalls, 1);
+
+    // IMG + lockupViewModel update path.
+    applyDeArrowBrandingToItem(createLockupFeedItem({ contentId: 'imgVid12345' }).entry, 'imgVid12345', {
+      titles: [{ title: 'Lockup Updated', votes: 3 }],
+      thumbnails: [{ timestamp: 2, votes: 2 }],
+    });
+    assert.equal(lockupTitle.textContent, 'Lockup Updated');
+    assert.equal(imgEl.src, 'https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=imgVid12345&time=2');
+    assert.equal(queryAllCalls, 2);
+
+    // Memory pressure listener evicts DeArrow cache cleanly.
+    setupMemoryPressureListener();
+    assert.equal(pressureListeners.length, 1);
+    pressureListeners[0]?.();
+    await applyDeArrowBranding([probeTile.entry]);
+    assert.equal(queryAllCalls, 3);
   });
 });
 

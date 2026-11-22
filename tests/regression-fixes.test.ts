@@ -7,7 +7,13 @@ import {
   requestNextAndNavigateChannel,
   sendFeedbackToken,
 } from '../mods/core/innertube-calls.ts';
-import { patchResolveCommand } from '../mods/core/resolve-command.ts';
+import {
+  extractCustomAction,
+  hasReportOrFeedbackEndpointNode,
+  isReportOrFeedbackIcon,
+  isReportOrFeedbackText,
+  patchResolveCommand,
+} from '../mods/core/resolve-command.ts';
 import { injectCss } from '../mods/core/styles.ts';
 import { whenYttvReady } from '../mods/core/yttv-bridge.ts';
 import { transformGuideResponse } from '../mods/transforms/guide.ts';
@@ -636,6 +642,165 @@ describe('regression fixes', () => {
       resolvedCmds.some(
         (c) => (c as { openPopupAction?: { popupType?: string } }).openPopupAction?.popupType === 'TOAST'
       )
+    );
+
+    // 5. Coverage for helper guards, PREF merging, SET_PLAYER_SPEED, GO_TO_CHANNEL, report filtering, and native passthrough.
+    assert.equal(isReportOrFeedbackIcon('BUG_REPORT'), false);
+    assert.equal(isReportOrFeedbackIcon('FLAG'), true);
+    assert.equal(isReportOrFeedbackText('Send Feedback'), true);
+    assert.equal(hasReportOrFeedbackEndpointNode({ getReportFormEndpoint: {} }), true);
+    assert.equal(
+      extractCustomAction({ signalAction: { customAction: { action: 'PING', parameters: 1 } } })?.action,
+      'PING'
+    );
+
+    fakeDoc.cookie = 'PREF=tz=America.Los_Angeles&hl=fr&f6=8; OTHER=1';
+    host.instance.resolveCommand({
+      setClientSettingEndpoint: {
+        settingDatas: [
+          { clientSettingEnum: { item: 'OTHER' } },
+          { clientSettingEnum: { item: 'I18N_LANGUAGE' }, stringValue: 'ja JP' },
+        ],
+      },
+    });
+    assert.match(fakeDoc.cookie, /PREF=hl=ja%20JP&tz=America\.Los_Angeles&f6=8;/);
+
+    // Unknown setting enum falls through cleanly; native commandExecutorCommand is NOT unpacked.
+    host.instance.resolveCommand({
+      setClientSettingEndpoint: { settingDatas: [{ clientSettingEnum: { item: 'UNKNOWN' } }] },
+    });
+    const nativeBatch = {
+      commandExecutorCommand: {
+        commands: [{ signalAction: { signal: 'KEEP_NATIVE' } }],
+      },
+    };
+    host.instance.resolveCommand(nativeBatch);
+    assert.ok(resolvedCmds.includes(nativeBatch));
+
+    // Playback popup and non-tt settings popup strip report/feedback items.
+    const settingsPopup = {
+      openPopupAction: {
+        uniqueId: 'settings-overlay',
+        popup: {
+          overlaySectionRenderer: {
+            overlay: {
+              overlayTwoPanelRenderer: {
+                actionPanel: {
+                  overlayPanelRenderer: {
+                    content: {
+                      overlayPanelItemListRenderer: {
+                        items: [
+                          { compactLinkRenderer: { command: { openClientOverlayAction: { type: 'FEEDBACK' } } } },
+                          {
+                            menuNavigationItemRenderer: {
+                              navigationEndpoint: { openPopupAction: { uniqueId: 'report-dialog' } },
+                            },
+                          },
+                          {
+                            menuServiceItemRenderer: { serviceEndpoint: { signalAction: { signal: 'send feedback' } } },
+                          },
+                          { compactLinkRenderer: { title: { simpleText: 'Keep Setting' } } },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    host.instance.resolveCommand(settingsPopup);
+    const filteredPopupItems =
+      settingsPopup.openPopupAction.popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel
+        .overlayPanelRenderer.content.overlayPanelItemListRenderer.items;
+    assert.equal(filteredPopupItems.length, 1);
+
+    // SET_PLAYER_SPEED, GO_TO_CHANNEL, and error paths for FEEDBACK_REASON / markFeedback.
+    host.instance.resolveCommand({ customAction: { action: 'SET_PLAYER_SPEED', parameters: '1.5' } });
+    assert.equal((fakeVideo as unknown as { playbackRate?: number }).playbackRate, 1.5);
+    host.instance.resolveCommand({ customAction: { action: 'GO_TO_CHANNEL', parameters: { videoId: 'vid-err' } } });
+
+    const origErr = console.error;
+    let errCalls = 0;
+    console.error = () => {
+      errCalls++;
+    };
+    try {
+      serviceMap.set('KabukiInnerTubeClient', {
+        fetch: () => ({
+          subscribe: (_onNext: unknown, onError?: (err: unknown) => void) => {
+            onError?.(new Error('network boom'));
+          },
+        }),
+      });
+      host.instance.resolveCommand({ customAction: { action: 'FEEDBACK_REASON', parameters: { token: 't1' } } });
+      host.instance.resolveCommand({
+        customAction: { action: 'NOT_INTERESTED', parameters: { panelId: 'p', params: 'q' } },
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      assert.ok(errCalls >= 2);
+    } finally {
+      console.error = origErr;
+    }
+
+    // addLongPress edge cases: non-video tile, missing/plain text menu normalization, menu without showMenuCommand.
+    const nonVideoTile: FeedItem = {
+      tileRenderer: { contentType: 'TILE_CONTENT_TYPE_CHANNEL', contentId: 'chan1' },
+    };
+    const menuNoShowCmd: FeedItem = {
+      tileRenderer: {
+        contentType: 'TILE_CONTENT_TYPE_VIDEO',
+        contentId: 'v-menu-no-show',
+        onLongPressCommand: {
+          signalAction: { signal: 'OTHER' },
+        },
+        menu: {
+          menuRenderer: {
+            items: [
+              { menuServiceItemRenderer: { text: { runs: [{ text: 'save to watch later' }] } } },
+              { menuNavigationItemRenderer: { text: { runs: [{ text: 'add to queue' }] }, navigationEndpoint: {} } },
+              { menuServiceItemRenderer: { text: { fallback: true } } },
+            ],
+          },
+        },
+      },
+    };
+    const plainTextTile: FeedItem = {
+      tileRenderer: {
+        contentType: 'TILE_CONTENT_TYPE_VIDEO',
+        contentId: 'v-plain-text',
+        menu: {
+          menuRenderer: {
+            items: [
+              {
+                menuServiceItemRenderer: {
+                  text: { accessibility: { accessibilityData: { label: 'not interested' } } },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+    addLongPress([nonVideoTile, menuNoShowCmd, plainTextTile]);
+    assert.ok(menuNoShowCmd.tileRenderer?.onLongPressCommand?.showMenuCommand);
+    assert.equal(
+      (
+        menuNoShowCmd.tileRenderer?.menu?.menuRenderer?.items?.[0] as {
+          menuServiceItemRenderer?: { text?: { runs?: Array<{ text?: string }> } };
+        }
+      )?.menuServiceItemRenderer?.text?.runs?.[0]?.text,
+      'Save to Watch Later'
+    );
+    assert.equal(
+      (
+        plainTextTile.tileRenderer?.menu?.menuRenderer?.items?.[0] as {
+          menuServiceItemRenderer?: { text?: { runs?: Array<{ text?: string }> } };
+        }
+      )?.menuServiceItemRenderer?.text?.runs?.[0]?.text,
+      'Not Interested'
     );
   });
 });

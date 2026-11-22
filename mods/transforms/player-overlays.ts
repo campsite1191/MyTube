@@ -108,12 +108,14 @@ export function injectChapters(r: Record<string, unknown>): void {
   const mutations: unknown[] = Array.isArray(batchUpdate.mutations) ? batchUpdate.mutations : [];
   batchUpdate.mutations = mutations;
   mutations.push(chapterData);
-  resolveCommand({
-    clickTrackingParams: null,
-    loadMarkersCommand: {
-      visibleOnLoadKeys: [chapterData.entityKey],
-      entityKeys: [chapterData.entityKey],
-    },
+  queueMicrotask(() => {
+    resolveCommand({
+      clickTrackingParams: null,
+      loadMarkersCommand: {
+        visibleOnLoadKeys: [chapterData.entityKey],
+        entityKeys: [chapterData.entityKey],
+      },
+    });
   });
 }
 

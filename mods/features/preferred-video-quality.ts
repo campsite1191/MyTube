@@ -19,6 +19,7 @@ export interface QualityControllablePlayer {
   ) => void;
   removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
   getPlayerStateObject?: () => YtPlayerStateObject | null | undefined;
+  getVideoData?: () => { video_id?: string } | null | undefined;
   getPlaybackQuality?: () => string | null | undefined;
   getAvailableQualityData?: () => readonly YtQualityData[] | null | undefined;
   setPlaybackQualityRange?: (minQuality: string, maxQuality: string) => void;
@@ -143,7 +144,8 @@ export function applyPreferredQualityToPlayer(player: QualityControllablePlayer)
 
 export function attachPreferredQualityController(
   player: QualityControllablePlayer,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  expectedVideoId?: string
 ): PreferredQualityController {
   const controllerAbort = new AbortController();
   let locked = false;
@@ -164,9 +166,21 @@ export function attachPreferredQualityController(
     const state = player.getPlayerStateObject?.();
     if (!state?.isOrWillBePlaying && !state?.isPlaying) return;
 
-    const availableQualities = player.getAvailableQualityData?.();
-    if (player.getAvailableQualityData && (!availableQualities || availableQualities.length === 0)) {
-      return;
+    if (expectedVideoId) {
+      const activeVideoId = player.getVideoData?.()?.video_id;
+      if (activeVideoId && activeVideoId !== expectedVideoId) {
+        return;
+      }
+    }
+
+    if (player.getAvailableQualityData) {
+      const availableQualities = player.getAvailableQualityData();
+      const hasConcreteResolution = Boolean(
+        availableQualities?.some((entry) => Boolean(entry?.quality) && parseResolutionHeight(entry.qualityLabel) > 0)
+      );
+      if (!hasConcreteResolution) {
+        return;
+      }
     }
 
     // Lock at most once per Watch session so mid-playback MSE loadstart events cannot re-trigger a seek to 0.
@@ -197,13 +211,19 @@ let preferredQualityInstalled = false;
  * Seeds persistent quality preferences and locks Watch sessions to 2160p on initial startup
  * without interrupting Home inline previews or Shorts.
  */
-export function installPreferredVideoQuality(): void {
-  if (preferredQualityInstalled || typeof document === 'undefined' || typeof window === 'undefined') return;
+export function installPreferredVideoQuality(): () => void {
+  if (preferredQualityInstalled || typeof document === 'undefined' || typeof window === 'undefined') return () => {};
   preferredQualityInstalled = true;
   seedPreferredQualityStorage();
-  onPlayer((player) => {
-    onWatchSession((_videoId, signal) => {
-      attachPreferredQualityController(player, signal);
-    });
+  const unsub = onWatchSession((videoId, signal) => {
+    onPlayer((player) => {
+      if (signal.aborted) return;
+      attachPreferredQualityController(player, signal, videoId);
+    }, signal);
   });
+
+  return () => {
+    unsub();
+    preferredQualityInstalled = false;
+  };
 }

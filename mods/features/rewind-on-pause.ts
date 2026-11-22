@@ -17,11 +17,11 @@ export function computeRewindTime(pausedAt: number, now: number, duration: numbe
 
 let rewindInstalled = false;
 
-export function installRewindOnPause(): void {
-  if (rewindInstalled || typeof document === 'undefined' || typeof window === 'undefined') return;
+export function installRewindOnPause(): () => void {
+  if (rewindInstalled || typeof document === 'undefined' || typeof window === 'undefined') return () => {};
   rewindInstalled = true;
 
-  onWatchSession((_videoId, signal) => {
+  const unsub = onWatchSession((_videoId, signal) => {
     onVideo((video) => {
       if (signal.aborted) return;
 
@@ -68,6 +68,15 @@ export function installRewindOnPause(): void {
               const verifyAbort = new AbortController();
               activeAbort = verifyAbort;
               video.addEventListener(
+                'seeking',
+                () => {
+                  if (Math.abs(video.currentTime - nextTime) > MANUAL_SEEK_RESET_THRESHOLD_SEC) {
+                    cancelPending();
+                  }
+                },
+                { signal: verifyAbort.signal }
+              );
+              video.addEventListener(
                 'playing',
                 () => {
                   cancelPending();
@@ -88,6 +97,11 @@ export function installRewindOnPause(): void {
         },
         { signal }
       );
-    });
+    }, signal);
   });
+
+  return () => {
+    unsub();
+    rewindInstalled = false;
+  };
 }

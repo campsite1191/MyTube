@@ -23,7 +23,7 @@ const pendingTileTextTargets = new Map<string, Set<Record<string, unknown>>>();
 let activeNavigationController: AbortController | null =
   typeof AbortController === 'function' ? new AbortController() : null;
 let shortsMetadataInstalled = false;
-let suppressOverlayEnrichment = false;
+let suppressOverlayEnrichmentCount = 0;
 
 /**
  * Normalizes a view-count string (e.g. `"12,318,166 views"`) into compact form (`"12.3M views"`).
@@ -192,7 +192,7 @@ function enrichShortsActionBar(payload: Record<string, unknown>): boolean {
  * Appends views & upload time onto the Shorts player header and adds Like/Dislike counts to the Shorts action bar.
  */
 export function enrichShortsPlayerOverlay(payload: unknown): boolean {
-  if (suppressOverlayEnrichment || !isRecord(payload)) return false;
+  if (suppressOverlayEnrichmentCount > 0 || !isRecord(payload)) return false;
   const barUpdated = enrichShortsActionBar(payload);
 
   const hdr = readHeaderRenderer(payload);
@@ -310,8 +310,17 @@ function readYtcfgContext(): {
   visitorData?: string;
 } | null {
   if (typeof window === 'undefined') return null;
-  const ytcfg = (window as unknown as { ytcfg?: { data_?: Record<string, unknown> } }).ytcfg?.data_;
-  if (!isRecord(ytcfg) || !isRecord(ytcfg.INNERTUBE_CONTEXT)) return null;
+  const rawYtcfg = (window as unknown as { ytcfg?: { data_?: unknown; d?: () => unknown } }).ytcfg;
+  let ytcfg = isRecord(rawYtcfg?.data_) ? rawYtcfg.data_ : undefined;
+  if (!ytcfg && typeof rawYtcfg?.d === 'function') {
+    try {
+      const candidate = rawYtcfg.d();
+      if (isRecord(candidate)) ytcfg = candidate;
+    } catch {
+      return null;
+    }
+  }
+  if (!ytcfg || !isRecord(ytcfg.INNERTUBE_CONTEXT)) return null;
   return {
     context: ytcfg.INNERTUBE_CONTEXT,
     clientName: String(ytcfg.INNERTUBE_CONTEXT_CLIENT_NAME ?? 7),
@@ -359,21 +368,19 @@ function fetchShortsMetadata(videoId: string, controller: AbortController | null
       let json: unknown;
       if (typeof response.text === 'function') {
         const rawText = await response.text();
-        suppressOverlayEnrichment = true;
+        suppressOverlayEnrichmentCount++;
         try {
           json = JSON.parse(rawText);
         } finally {
-          suppressOverlayEnrichment = false;
+          suppressOverlayEnrichmentCount--;
         }
       } else {
-        suppressOverlayEnrichment = true;
-        let jsonPromise: Promise<unknown>;
+        suppressOverlayEnrichmentCount++;
         try {
-          jsonPromise = response.json();
+          json = await response.json();
         } finally {
-          suppressOverlayEnrichment = false;
+          suppressOverlayEnrichmentCount--;
         }
-        json = await jsonPromise;
       }
       const label = extractShortsMetadataFromReel(json);
       if (!label) return null;
@@ -462,36 +469,46 @@ export async function applyShortsFeedMetadata(items: FeedItem[]): Promise<void> 
  * Fetches metadata when scrolling/focusing off-screen Short tiles past the initial viewport batch,
  * and aborts pending Short metadata lookups on route changes.
  */
-export function installShortsMetadata(): void {
-  if (shortsMetadataInstalled || typeof document === 'undefined' || typeof window === 'undefined') return;
+export function installShortsMetadata(): () => void {
+  if (shortsMetadataInstalled || typeof document === 'undefined' || typeof window === 'undefined') return () => {};
   shortsMetadataInstalled = true;
 
-  window.addEventListener('hashchange', abortPendingShortsMetadataRequests);
-  document.addEventListener(
-    'focusin',
-    (event) => {
-      const target = event.target instanceof Element ? event.target.closest('ytlr-tile-renderer') : null;
-      if (!target) return;
-      const bg = (target.querySelector('ytlr-thumbnail-details') as HTMLElement | null)?.style?.backgroundImage || '';
-      const match = bg.match(THUMB_VIDEO_ID_RE);
-      const videoId = match?.[1];
-      if (!videoId || !VIDEO_ID_RE.test(videoId)) return;
+  const targetWindow = window;
+  const targetDoc = document;
+  const onFocusIn = (event: FocusEvent): void => {
+    const target = event.target instanceof Element ? event.target.closest('ytlr-tile-renderer') : null;
+    if (!target) return;
+    const bg = (target.querySelector('ytlr-thumbnail-details') as HTMLElement | null)?.style?.backgroundImage || '';
+    const match = bg.match(THUMB_VIDEO_ID_RE);
+    const videoId = match?.[1];
+    if (!videoId || !VIDEO_ID_RE.test(videoId)) return;
 
-      const cached = shortsMetadataCache.get(videoId);
-      if (cached) {
-        updateMountedTileDom(videoId, cached);
-        return;
+    const cached = shortsMetadataCache.get(videoId);
+    if (cached) {
+      updateMountedTileDom(videoId, cached);
+      return;
+    }
+    const lineEl = target.querySelector('ytlr-tile-metadata-renderer ytlr-line yt-formatted-string');
+    const rawLine = lineEl?.textContent ?? '';
+    const isPlaceholder = rawLine === PLACEHOLDER_TEXT;
+    const isEmptyShortsTile = rawLine.trim() === '' && Boolean(target.classList?.contains('ytLrTileRendererShorts'));
+    if (!lineEl || (!isPlaceholder && !isEmptyShortsTile)) return;
+
+    const controller = activeNavigationController;
+    void fetchShortsMetadata(videoId, controller).then((label) => {
+      if (!controller?.signal.aborted && label) {
+        applyResolvedMetadata(videoId, label);
       }
-      const lineEl = target.querySelector('ytlr-tile-metadata-renderer ytlr-line yt-formatted-string');
-      if (!lineEl || (lineEl.textContent && lineEl.textContent.trim() !== '')) return;
+    });
+  };
 
-      const controller = activeNavigationController;
-      void fetchShortsMetadata(videoId, controller).then((label) => {
-        if (!controller?.signal.aborted && label) {
-          applyResolvedMetadata(videoId, label);
-        }
-      });
-    },
-    true
-  );
+  targetWindow.addEventListener('hashchange', abortPendingShortsMetadataRequests);
+  targetDoc.addEventListener('focusin', onFocusIn, true);
+
+  return () => {
+    targetWindow.removeEventListener?.('hashchange', abortPendingShortsMetadataRequests);
+    targetDoc.removeEventListener?.('focusin', onFocusIn, true);
+    abortPendingShortsMetadataRequests();
+    shortsMetadataInstalled = false;
+  };
 }

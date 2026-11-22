@@ -1,15 +1,20 @@
 diff --git a/third_party/blink/renderer/core/frame/csp/content_security_policy.cc b/third_party/blink/renderer/core/frame/csp/content_security_policy.cc
-index f03c185..8f7e9af 100644
+index f03c185..69116ff 100644
 --- a/third_party/blink/renderer/core/frame/csp/content_security_policy.cc
 +++ b/third_party/blink/renderer/core/frame/csp/content_security_policy.cc
-@@ -901,6 +901,12 @@ bool ContentSecurityPolicy::AllowFromSource(
+@@ -901,6 +901,17 @@ bool ContentSecurityPolicy::AllowFromSource(
      }
    }
  
-+  const StringView host = url.Host();
-+  if (host == "sponsor.ajay.app" || host == "dearrow-thumb.ajay.app" ||
-+      host == "returnyoutubedislikeapi.com") {
-+    return true;
++  if (url.ProtocolIs("https")) {
++    const StringView host = url.Host();
++    if ((type == CSPDirectiveName::ConnectSrc &&
++         (host == "sponsor.ajay.app" ||
++          host == "returnyoutubedislikeapi.com")) ||
++        (type == CSPDirectiveName::ImgSrc &&
++         host == "dearrow-thumb.ajay.app")) {
++      return true;
++    }
 +  }
 +
    CSPCheckResult result = CSPCheckResult::Allowed();

@@ -92,27 +92,28 @@ function clearScheduledTick(): void {
 let clockInitialized = false;
 
 /** Initializes the always-on 24h overlay clock and Watch end-time projection via `onWatchSession`. */
-export function initClock(): void {
-  if (clockInitialized || typeof document === 'undefined' || document.getElementById(CLOCK_ID)) return;
+export function initClock(): () => void {
+  if (clockInitialized || typeof document === 'undefined' || document.getElementById(CLOCK_ID)) return () => {};
+  const targetDoc = document;
+  const host = targetDoc.body ?? targetDoc.documentElement;
+  if (!host) return () => {};
   clockInitialized = true;
 
   installClockStyles();
 
-  const clock = document.createElement('div');
+  const clock = targetDoc.createElement('div');
   clock.id = CLOCK_ID;
 
-  const inner = document.createElement('div');
+  const inner = targetDoc.createElement('div');
   inner.className = 'tt-clock-inner';
 
-  const clockTimeEl = document.createElement('div');
-  const endTimeEl = document.createElement('div');
+  const clockTimeEl = targetDoc.createElement('div');
+  const endTimeEl = targetDoc.createElement('div');
   endTimeEl.className = 'tt-clock-end';
 
   inner.appendChild(clockTimeEl);
   inner.appendChild(endTimeEl);
   clock.appendChild(inner);
-  const host = document.body ?? document.documentElement;
-  if (!host) return;
   host.appendChild(clock);
 
   let activeVideo: HTMLVideoElement | null = null;
@@ -135,14 +136,14 @@ export function initClock(): void {
     if (endTimeEl.style.display !== nextEndDisplay) endTimeEl.style.display = nextEndDisplay;
     if (endTimeEl.textContent !== nextEnd) endTimeEl.textContent = nextEnd;
 
-    if (!document.hidden) {
+    if (!targetDoc.hidden) {
       tickAbort = new AbortController();
       scheduleAbortableTimeout(renderAndSchedule, getNextClockDelayMs(now), tickAbort.signal);
     }
   };
 
-  document.addEventListener('visibilitychange', renderAndSchedule);
-  onWatchSession((_videoId, signal) => {
+  targetDoc.addEventListener('visibilitychange', renderAndSchedule);
+  const unsub = onWatchSession((_videoId, signal) => {
     inWatchSession = true;
     onVideo((video) => {
       if (signal.aborted) return;
@@ -151,7 +152,7 @@ export function initClock(): void {
         video.addEventListener(evt, renderAndSchedule, { signal });
       }
       renderAndSchedule();
-    });
+    }, signal);
     onAbort(signal, () => {
       inWatchSession = false;
       activeVideo = null;
@@ -160,4 +161,12 @@ export function initClock(): void {
   });
 
   renderAndSchedule();
+
+  return () => {
+    clearScheduledTick();
+    targetDoc.removeEventListener?.('visibilitychange', renderAndSchedule);
+    unsub();
+    clock.remove?.();
+    clockInitialized = false;
+  };
 }

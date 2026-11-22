@@ -219,5 +219,52 @@ describe('chapters', () => {
         ['480000', '120000'],
       ]
     );
+
+    // Invalid clock formats, missing videoMetadataRenderer, and DOM duration === 0 return null cleanly.
+    globals.document = {
+      getElementsByTagName: () => [{ duration: 0 }],
+    };
+    const missingMeta = buildChaptersMarkerEntity({
+      contents: {
+        singleColumnWatchNextResults: {
+          results: {
+            results: {
+              contents: [{ itemSectionRenderer: { contents: [{ unrelated: true }] } }],
+            },
+          },
+        },
+      },
+      videoDetails: { videoId: 'noMetaVid' },
+    });
+    assert.equal(missingMeta, null);
+
+    for (const badClock of ['0:00', '1:65', '2:70:10', 'not-a-clock']) {
+      const res = buildChaptersMarkerEntity({
+        contents: {
+          singleColumnWatchNextResults: {
+            results: {
+              results: {
+                contents: [
+                  {
+                    itemSectionRenderer: {
+                      contents: [
+                        {
+                          videoMetadataRenderer: {
+                            videoId: 'badLenVid',
+                            lengthText: { simpleText: badClock },
+                            description: { simpleText: '0:00 A\n1:00 B' },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      });
+      assert.equal(res, null);
+    }
   });
 });

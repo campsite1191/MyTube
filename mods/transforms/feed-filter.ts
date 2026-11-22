@@ -27,7 +27,7 @@ const SHELF_HEADER_KEYS = [
   'headerRenderer',
   'header',
 ] as const;
-const HEADER_CONTAINER_KEYS = new Set<string>([
+const STANDALONE_HEADER_KEYS = [
   'shelfHeaderRenderer',
   'richShelfHeaderRenderer',
   'tvShelfHeaderRenderer',
@@ -37,6 +37,9 @@ const HEADER_CONTAINER_KEYS = new Set<string>([
   'gridHeaderRenderer',
   'carouselHeaderRenderer',
   'richListHeaderRenderer',
+] as const;
+const HEADER_CONTAINER_KEYS = new Set<string>([
+  ...STANDALONE_HEADER_KEYS,
   'feedFilterChipBarRenderer',
   'headerRenderer',
   'header',
@@ -51,6 +54,10 @@ const BADGE_SKIP_KEYS = new Set([
   'accessibility',
   'menu',
   'onLongPressCommand',
+  'onSelectCommand',
+  'onFocusCommand',
+  'commandContext',
+  'itemPlayback',
   'loggingDirectives',
 ]);
 const PAID_BADGE_STYLES = ['BADGE_STYLE_TYPE_YPC', 'BADGE_STYLE_TYPE_PAID', 'PAID_CONTENT'] as const;
@@ -255,6 +262,10 @@ export function isSurveyItem(item: FeedItem | null | undefined): boolean {
   return false;
 }
 
+export function isStandaloneHeaderNode(entry: Record<string, unknown>): boolean {
+  return STANDALONE_HEADER_KEYS.some((key) => Boolean(entry[key]));
+}
+
 export function isHiddenShelf(item: FeedItem | null | undefined): boolean {
   if (!isRecord(item) || isDirectMediaCard(item)) return false;
 
@@ -394,8 +405,8 @@ export function shouldHideFeedItem(item: FeedItem | null | undefined): boolean {
 
   if (item.adSlotRenderer || target.adSlotRenderer) return true;
   if (item.feedNudgeRenderer || target.feedNudgeRenderer) return true;
-  if (isSurveyItem(item) || isSurveyItem(target)) return true;
-  if (isHiddenShelf(item) || isHiddenShelf(target)) return true;
+  if (isSurveyItem(item) || (target !== item && isSurveyItem(target))) return true;
+  if (isHiddenShelf(item) || (target !== item && isHiddenShelf(target))) return true;
 
   if (isShelfContainer(target)) {
     return false;

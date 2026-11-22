@@ -1,17 +1,21 @@
 diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
-index 92db351..538d65c 100644
+index 92db351..c766e39 100644
 --- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
 +++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
-@@ -475,6 +475,8 @@ public class BaseStarboardBridge {
+@@ -475,6 +475,12 @@ public class BaseStarboardBridge {
      Activity activity = mActivityHolder.get();
      if (activity != null) {
        activity.finishAndRemoveTask();
 +    } else {
++      closeAllCobaltService();
++      mNatives.closeNativeStarboard(mNativeApp);
++      mTtsHelper.shutdown();
++      mAdvertisingId.shutdown();
 +      System.exit(0);
      }
    }
  
-@@ -1109,10 +1111,7 @@ public class BaseStarboardBridge {
+@@ -1109,10 +1115,7 @@ public class BaseStarboardBridge {
  
    @CalledByNative
    public void closeApp() {

@@ -110,6 +110,7 @@ export function filterStreamingFormats(formats: AudioFormatEntry[]): AudioFormat
         if (aTrack.bestTier !== bTrack.bestTier) return aTrack.bestTier - bTrack.bestTier;
         const nameCmp = aTrack.displayName.localeCompare(bTrack.displayName);
         if (nameCmp !== 0) return nameCmp;
+        if (aTrack.firstIndex !== bTrack.firstIndex) return aTrack.firstIndex - bTrack.firstIndex;
       }
     }
 

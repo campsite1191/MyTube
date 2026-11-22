@@ -38,6 +38,7 @@ interface MockElement {
   removeEventListener: (type: string, fn: (ev?: unknown) => void) => void;
   dispatchEvent: (ev: { type: string; target?: unknown }) => boolean;
   appendChild: (child: MockElement) => MockElement;
+  replaceChildren: (...children: MockElement[]) => void;
   querySelector: (selector: string) => MockElement | null;
   querySelectorAll: (selector: string) => MockElement[];
   getAttribute: (name: string) => string | null;
@@ -138,6 +139,11 @@ function createMockElement(tagName: string, docRef: { root: MockElement | null }
       el.children.push(child);
       el.childNodes.push(child);
       return child;
+    },
+    replaceChildren: (...children: MockElement[]) => {
+      el.children.length = 0;
+      el.childNodes.length = 0;
+      for (const child of children) el.appendChild(child);
     },
     querySelector: (selector: string) => el.querySelectorAll(selector)[0] ?? null,
     querySelectorAll: (selector: string) => {
@@ -411,9 +417,16 @@ describe('End-to-end userscript bundle lifecycle', () => {
       disconnect(): void {}
     }
 
+    function MockDocument(): void {}
+    MockDocument.prototype.createElement = fakeDocument.createElement;
+    delete fakeDocument.createElement;
+    Object.setPrototypeOf(fakeDocument, MockDocument.prototype);
+
     const sandbox: Record<string, unknown> = {
       window: fakeWindow,
       document: fakeDocument,
+      Document: MockDocument,
+      queueMicrotask,
       location: fakeLocation,
       localStorage: fakeLocalStorage,
       fetch: mockFetch,

@@ -1,4 +1,4 @@
-import { getActiveWatchVideoId, observeDom, onAbort, onWatchSession } from '../core/lifecycle.ts';
+import { extractWatchVideoId, getActiveWatchVideoId, observeDom, onAbort, onWatchSession } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 import { formatCompactCount } from '../utils/feed-helpers.ts';
@@ -13,10 +13,13 @@ const FOCUSABLE_CHILD_SELECTOR =
   '[hybridnavfocusable]:not([hybridnavfocusable="false"]), [tabindex]:not([tabindex="-1"])';
 const TRANSPORT_CONTROLS_DOM_SELECTOR =
   'ytlr-watch-default [idomkey="transport-controls"], ytlr-watch-default ytlr-player-actions-container';
+const SHORTS_ROUTE_ID_RE = /\/shorts\/([A-Za-z0-9_-]+)/;
+const MAX_SHORTS_CACHE_SIZE = 64;
 
 let currentLike: { videoId: string; count: string } | null = null;
 let currentDislike: { videoId: string; count: string } | null = null;
 let currentShorts: { videoId: string; likeCount: string | null; dislikeCount: string | null } | null = null;
+const shortsLikeStatsCache = new Map<string, string | null>();
 let activeShortsAbort: AbortController | null = null;
 let stylesInstalled = false;
 let rydInstalled = false;
@@ -27,7 +30,7 @@ const VOTE_TARGET =
 const SHORTS_LIKE_SELECTOR =
   'ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(ytlr-toggle-button-view-model)';
 const SHORTS_DISLIKE_SELECTOR =
-  'ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(yt-button-container[aria-label="Dislike"])';
+  'ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(yt-button-container[aria-label="Dislike"]), ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(ytlr-toggle-button-view-model) + ytlr-reel-action-bar-button-view-model';
 const SHORTS_COUNT_TARGET = 'ytlr-reel-action-bar-button-view-model[data-tt-count]';
 
 function installVoteLabelStyles(): void {
@@ -136,7 +139,7 @@ function patchTransportFocusSkip(): void {
       break;
     }
     if (!predicateKey && src.includes('this.buttons')) {
-      const match = src.match(/if\s*\(\s*this\.(\w+)\s*\(/);
+      const match = src.match(/if\s*\(\s*this\.(\w+)\s*\(\s*\w+\s*\)/);
       if (match?.[1] && typeof inst[match[1]] === 'function') {
         predicateKey = match[1];
       }
@@ -144,13 +147,14 @@ function patchTransportFocusSkip(): void {
   }
   if (!predicateKey) return;
 
-  const origPredicate = inst[predicateKey] as (idx: number) => boolean;
-  inst[predicateKey] = function (this: { buttons?: ArrayLike<HTMLElement> }, idx: number): boolean {
-    const btn = this.buttons?.[idx];
+  const origPredicate = inst[predicateKey] as (...args: unknown[]) => boolean;
+  inst[predicateKey] = function (this: { buttons?: ArrayLike<HTMLElement> }, ...args: unknown[]): boolean {
+    const idx = typeof args[0] === 'number' ? args[0] : Number.NaN;
+    const btn = Number.isInteger(idx) ? this.buttons?.[idx] : undefined;
     if (btn && (btn.inert || btn.getAttribute?.('hybridnavfocusable') === 'false')) {
       return false;
     }
-    return origPredicate.call(this, idx);
+    return origPredicate.apply(this, args);
   };
 }
 
@@ -211,6 +215,28 @@ export function setWatchLikeCount(videoId: string | null, count: string | null):
   }
 }
 
+function extractShortsIdFromRoute(route: string | null | undefined): string | null {
+  if (typeof route !== 'string') return null;
+  const pathMatch = route.match(SHORTS_ROUTE_ID_RE);
+  return pathMatch?.[1] ?? extractWatchVideoId(route);
+}
+
+function getActiveShortsVideoId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return extractShortsIdFromRoute(window.location?.hash) ?? extractShortsIdFromRoute(window.location?.search);
+}
+
+function rememberShortsLikeCount(videoId: string, likeCount: string | null): void {
+  if (shortsLikeStatsCache.has(videoId)) {
+    shortsLikeStatsCache.delete(videoId);
+  }
+  shortsLikeStatsCache.set(videoId, likeCount);
+  if (shortsLikeStatsCache.size > MAX_SHORTS_CACHE_SIZE) {
+    const oldest = shortsLikeStatsCache.keys().next().value;
+    if (oldest !== undefined) shortsLikeStatsCache.delete(oldest);
+  }
+}
+
 function clearShortsOverlayState(): void {
   activeShortsAbort?.abort();
   activeShortsAbort = null;
@@ -229,6 +255,13 @@ function applyShortsOverlayLabels(): void {
 export function setShortsOverlayStats(videoId: string | null, likeCount: string | null): void {
   if (!videoId) return;
   const compactLikes = typeof likeCount === 'string' && likeCount.trim() ? likeCount.replace(/\s+/g, '') : null;
+  rememberShortsLikeCount(videoId, compactLikes);
+
+  const activeShortsId = getActiveShortsVideoId();
+  if (activeShortsId !== null && activeShortsId !== videoId) {
+    return;
+  }
+
   if (currentShorts?.videoId === videoId) {
     if (compactLikes) currentShorts.likeCount = compactLikes;
     applyShortsOverlayLabels();
@@ -249,16 +282,41 @@ export function setShortsOverlayStats(videoId: string | null, likeCount: string 
     }
   };
 
-  const scheduleFrame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb: () => void) => cb();
-  scheduleFrame(() => {
+  const attachOverlayObserver = (): void => {
     if (controller?.signal.aborted || currentShorts?.videoId !== videoId) return;
     sync();
-    const target =
-      document.querySelector?.('ytlr-reel-player-overlay-renderer') ?? document.body ?? document.documentElement;
-    if (target) {
-      observeDom(target, sync, { childList: true, subtree: true }, controller?.signal);
+    const overlayTarget = document.querySelector?.('ytlr-reel-player-overlay-renderer');
+    if (overlayTarget) {
+      observeDom(overlayTarget, sync, { childList: true, subtree: true }, controller?.signal);
+      return;
     }
-  });
+    const root = document.body ?? document.documentElement;
+    if (!root) return;
+    const waitAbort = typeof AbortController === 'function' ? new AbortController() : null;
+    if (controller && waitAbort) {
+      onAbort(controller.signal, () => waitAbort.abort());
+    }
+    observeDom(
+      root,
+      () => {
+        if (controller?.signal.aborted || currentShorts?.videoId !== videoId) {
+          waitAbort?.abort();
+          return;
+        }
+        const mounted = document.querySelector?.('ytlr-reel-player-overlay-renderer');
+        if (mounted) {
+          waitAbort?.abort();
+          sync();
+          observeDom(mounted, sync, { childList: true, subtree: true }, controller?.signal);
+        }
+      },
+      { childList: true, subtree: true },
+      waitAbort?.signal ?? controller?.signal
+    );
+  };
+
+  const scheduleFrame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb: () => void) => cb();
+  scheduleFrame(attachOverlayObserver);
 
   void fetchDislikeCount(videoId, controller?.signal).then((dislikes) => {
     if (!dislikes || controller?.signal.aborted || currentShorts?.videoId !== videoId) return;
@@ -284,19 +342,32 @@ export async function fetchDislikeCount(videoId: string, signal?: AbortSignal): 
 /**
  * Displays live YouTube like counts from `/next` alongside uncached RYD dislike counts as non-interactive labels.
  */
-export function installReturnYouTubeDislike(): void {
-  if (rydInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
+export function installReturnYouTubeDislike(): () => void {
+  if (rydInstalled || typeof window === 'undefined' || typeof document === 'undefined') return () => {};
   rydInstalled = true;
   installVoteLabelStyles();
 
-  window.addEventListener('hashchange', () => {
-    if (!window.location.hash.includes('shorts')) {
+  const targetWindow = window;
+  const onHashChange = (): void => {
+    if (!targetWindow.location.hash.includes('shorts')) {
       clearShortsOverlayState();
+      shortsLikeStatsCache.clear();
+      return;
     }
-  });
+    const activeShortsId = getActiveShortsVideoId();
+    if (activeShortsId && currentShorts?.videoId !== activeShortsId) {
+      if (shortsLikeStatsCache.has(activeShortsId)) {
+        setShortsOverlayStats(activeShortsId, shortsLikeStatsCache.get(activeShortsId) ?? null);
+      } else {
+        clearShortsOverlayState();
+      }
+    }
+  };
+  targetWindow.addEventListener('hashchange', onHashChange);
 
-  onWatchSession((videoId, signal) => {
+  const unsub = onWatchSession((videoId, signal) => {
     clearShortsOverlayState();
+    shortsLikeStatsCache.clear();
     if (currentLike?.videoId !== videoId) currentLike = null;
     if (currentDislike?.videoId !== videoId) currentDislike = null;
 
@@ -360,6 +431,16 @@ export function installReturnYouTubeDislike(): void {
       };
 
       syncTargetObserverAndLabels();
-    });
+    }, signal);
   });
+
+  return () => {
+    targetWindow.removeEventListener?.('hashchange', onHashChange);
+    unsub();
+    clearShortsOverlayState();
+    shortsLikeStatsCache.clear();
+    currentLike = null;
+    currentDislike = null;
+    rydInstalled = false;
+  };
 }

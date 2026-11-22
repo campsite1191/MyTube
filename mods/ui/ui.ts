@@ -1,17 +1,22 @@
-import { onVideo } from '../core/player-observer.ts';
 import resolveCommand, { patchResolveCommand } from '../core/resolve-command.ts';
 import { getCommandExecutor, whenYttvReady } from '../core/yttv-bridge.ts';
 
 const STARTUP_COMMAND = { browseEndpoint: { browseId: 'FEtopics' } } as const;
 
 let uiInitialized = false;
+let uiHooksInstalled = false;
 
-function initUi(): void {
-  if (uiInitialized) return;
+function isHomeStartupRoute(): boolean {
+  if (typeof location === 'undefined') return true;
+  const hash = location.hash;
+  return !hash || hash === '#' || hash === '#/';
+}
+
+export function initUi(force = false): void {
+  if (uiInitialized && !force) return;
   uiInitialized = true;
 
-  const isWatchRoute = typeof location !== 'undefined' && location.hash.includes('watch');
-  if (!isWatchRoute) {
+  if (isHomeStartupRoute()) {
     resolveCommand(STARTUP_COMMAND);
   }
 
@@ -21,7 +26,7 @@ function initUi(): void {
   }
 }
 
-function ensureResolveHooksOnActionKey(event: KeyboardEvent): void {
+export function ensureResolveHooksOnActionKey(event: KeyboardEvent): void {
   if (
     event.key === 'Enter' ||
     event.key === ' ' ||
@@ -33,18 +38,30 @@ function ensureResolveHooksOnActionKey(event: KeyboardEvent): void {
   }
 }
 
-if (typeof document !== 'undefined') {
+export function installUiHooks(): () => void {
+  if (uiHooksInstalled || typeof document === 'undefined') return () => {};
+  uiHooksInstalled = true;
+
+  const targetDocument = document;
+  const targetWindow = typeof window !== 'undefined' ? window : undefined;
+
   whenYttvReady(() => {
     patchResolveCommand();
     initUi();
   });
-  onVideo(() => {
-    patchResolveCommand();
-    initUi();
-  });
-  if (typeof window !== 'undefined') {
-    window.addEventListener('hashchange', patchResolveCommand);
-  }
-  document.addEventListener('keydown', ensureResolveHooksOnActionKey, true);
-  document.addEventListener('click', patchResolveCommand, true);
+  targetWindow?.addEventListener?.('hashchange', patchResolveCommand);
+  targetDocument.addEventListener('keydown', ensureResolveHooksOnActionKey, true);
+  targetDocument.addEventListener('click', patchResolveCommand, true);
+
+  return () => {
+    targetWindow?.removeEventListener?.('hashchange', patchResolveCommand);
+    targetDocument.removeEventListener?.('keydown', ensureResolveHooksOnActionKey, true);
+    targetDocument.removeEventListener?.('click', patchResolveCommand, true);
+    uiHooksInstalled = false;
+    uiInitialized = false;
+  };
+}
+
+if (typeof document !== 'undefined') {
+  installUiHooks();
 }

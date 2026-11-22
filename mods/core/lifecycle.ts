@@ -72,7 +72,11 @@ function syncWatchSession(): void {
   const { signal } = activeWatchAbort;
   for (const handler of watchSessionHandlers) {
     if (signal.aborted) break;
-    handler(nextVideoId, signal);
+    try {
+      handler(nextVideoId, signal);
+    } catch (error) {
+      console.error('[Lifecycle] Watch session handler failed:', error);
+    }
   }
 }
 
@@ -103,6 +107,7 @@ export function observePlayerBar(
   let waitAbort: AbortController | null = null;
 
   onAbort(signal, () => {
+    observedBar = null;
     barAbort?.abort();
     barAbort = null;
     waitAbort?.abort();
@@ -151,6 +156,18 @@ export function observePlayerBar(
       options,
       barAbort.signal
     );
+    if (bar.parentNode) {
+      observeDom(
+        bar.parentNode,
+        () => {
+          if (!bar.isConnected) {
+            bind();
+          }
+        },
+        { childList: true },
+        barAbort.signal
+      );
+    }
     onBar(bar);
     return bar;
   };
@@ -183,6 +200,10 @@ export function onWatchSession(handler: WatchSessionHandler): () => void {
       activeWatchAbort?.abort();
       activeWatchAbort = null;
       activeWatchVideoId = null;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener?.('hashchange', syncWatchSession);
+      }
+      watchRouterInstalled = false;
     }
   };
 }

@@ -30,6 +30,17 @@ export default function resolveCommand(cmd: unknown, arg?: unknown): unknown {
 
 registerCommandDispatcher(resolveCommand);
 
+function buildUpdatedPrefCookieValue(existingCookie: string, lang: string): string {
+  const prefEntry = existingCookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('PREF='));
+  const rawPref = prefEntry ? prefEntry.slice('PREF='.length) : '';
+  const parts = rawPref ? rawPref.split('&').filter((entry) => entry && !entry.startsWith('hl=')) : [];
+  parts.unshift(`hl=${encodeURIComponent(lang)}`);
+  return parts.join('&');
+}
+
 function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
   const settingDatas = Array.isArray(endpoint.settingDatas) ? endpoint.settingDatas : [];
   for (const rawSetting of settingDatas) {
@@ -39,8 +50,9 @@ function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
       const lang = typeof rawSetting.stringValue === 'string' ? rawSetting.stringValue : '';
       const date = new Date();
       date.setFullYear(date.getFullYear() + 10);
+      const nextPref = buildUpdatedPrefCookieValue(typeof document !== 'undefined' ? document.cookie : '', lang);
       // biome-ignore lint/suspicious/noDocumentCookie: YouTube TV reads PREF cookie synchronously before RELOAD_PAGE.
-      document.cookie = `PREF=hl=${lang}; expires=${date.toUTCString()};`;
+      document.cookie = `PREF=${nextPref}; path=/; expires=${date.toUTCString()};`;
       resolveCommand({ signalAction: { signal: 'RELOAD_PAGE' } });
       return true;
     }
@@ -76,11 +88,7 @@ export function isReportOrFeedbackText(text: unknown): boolean {
 
 export function hasReportOrFeedbackEndpointNode(node: Record<string, unknown>): boolean {
   return Boolean(
-    node.getReportVideoFormEndpoint ||
-      node.getReportFormEndpoint ||
-      node.flagVideoEndpoint ||
-      node.sendFeedbackEndpoint ||
-      node.feedbackEndpoint
+    node.getReportVideoFormEndpoint || node.getReportFormEndpoint || node.flagVideoEndpoint || node.sendFeedbackEndpoint
   );
 }
 
@@ -188,6 +196,33 @@ function runCustomAction(action: string, parameters?: unknown): void {
   });
 }
 
+function isInterceptedPopupUniqueId(uniqueId: string): boolean {
+  return (
+    uniqueId === 'playback-settings' ||
+    uniqueId === 'CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE' ||
+    (Boolean(uniqueId) && !uniqueId.startsWith('tt-') && /(?:playback|player|more|settings)/i.test(uniqueId))
+  );
+}
+
+function needsCommandInterception(cmd: unknown, depth = 0): boolean {
+  if (!isRecord(cmd) || depth > 4) return false;
+  if (isRecord(cmd.setClientSettingEndpoint) || extractCustomAction(cmd)) return true;
+
+  const openPopup = isRecord(cmd.openPopupAction) ? cmd.openPopupAction : undefined;
+  const uniqueId = typeof openPopup?.uniqueId === 'string' ? openPopup.uniqueId : '';
+  if (isInterceptedPopupUniqueId(uniqueId)) return true;
+
+  const reqAcct = isRecord(cmd.requestAccountSelectorCommand) ? cmd.requestAccountSelectorCommand : undefined;
+  const acctCtx = isRecord(reqAcct?.identityActionContext) ? reqAcct.identityActionContext : undefined;
+  if (acctCtx?.eventTrigger === 'ACCOUNT_EVENT_TRIGGER_ON_EXIT') return true;
+
+  const cmdExec = isRecord(cmd.commandExecutorCommand) ? cmd.commandExecutorCommand : undefined;
+  if (Array.isArray(cmdExec?.commands)) {
+    return cmdExec.commands.some((subCmd) => needsCommandInterception(subCmd, depth + 1));
+  }
+  return false;
+}
+
 export function patchResolveCommand(): void {
   if (typeof window === 'undefined' || !window._yttv) return;
   for (const entry of Object.values(window._yttv)) {
@@ -216,13 +251,13 @@ export function patchResolveCommand(): void {
           patchPlaybackSettingsPopup(rawCmd, true);
         } else if (uniqueId === 'CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE') {
           patchAutoTranslateCommand(rawCmd);
-        } else if (uniqueId && !uniqueId.startsWith('tt-') && /(?:playback|player|more|settings)/i.test(uniqueId)) {
+        } else if (isInterceptedPopupUniqueId(uniqueId)) {
           patchPlaybackSettingsPopup(rawCmd, false);
         }
       }
 
       const cmdExec = isRecord(rawCmd.commandExecutorCommand) ? rawCmd.commandExecutorCommand : undefined;
-      if (Array.isArray(cmdExec?.commands)) {
+      if (Array.isArray(cmdExec?.commands) && cmdExec.commands.some((subCmd) => needsCommandInterception(subCmd))) {
         for (const subCmd of cmdExec.commands) {
           const extracted = isRecord(subCmd) ? extractCustomAction(subCmd) : null;
           if (extracted) {

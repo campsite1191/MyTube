@@ -15,6 +15,7 @@ interface MockPlayerOptions {
   availableQualities?: YtQualityData[];
   currentQuality?: string;
   playerState?: YtPlayerStateObject;
+  videoId?: string;
   throwOnSet?: boolean;
 }
 
@@ -24,10 +25,12 @@ function createMockMedia(options: MockPlayerOptions = {}): {
   setState: (state: YtPlayerStateObject) => void;
   setAvailableQualities: (qualities: YtQualityData[]) => void;
   setCurrentQuality: (quality: string) => void;
+  setVideoId: (videoId: string) => void;
   playerListenerCount: () => number;
 } {
   let currentState: YtPlayerStateObject = options.playerState ?? {};
   let currentQuality = options.currentQuality ?? 'unknown';
+  let currentVideoId = options.videoId;
   let availableQualities = options.availableQualities ?? [
     { quality: 'hd2160', qualityLabel: '2160p' },
     { quality: 'hd1080', qualityLabel: '1080p' },
@@ -39,13 +42,16 @@ function createMockMedia(options: MockPlayerOptions = {}): {
   const appliedRanges: Array<[string, string]> = [];
 
   const bindListeners = (map: Map<string, Set<EventListenerOrEventListenerObject>>) => ({
-    add(type: string, listener: EventListenerOrEventListenerObject) {
+    add(type: string, listener: EventListenerOrEventListenerObject, opts?: boolean | AddEventListenerOptions) {
+      const signal = typeof opts === 'object' ? opts.signal : undefined;
+      if (signal?.aborted) return;
       let set = map.get(type);
       if (!set) {
         set = new Set();
         map.set(type, set);
       }
       set.add(listener);
+      signal?.addEventListener('abort', () => set?.delete(listener), { once: true });
     },
     remove(type: string, listener: EventListenerOrEventListenerObject) {
       map.get(type)?.delete(listener);
@@ -67,6 +73,7 @@ function createMockMedia(options: MockPlayerOptions = {}): {
     addEventListener: pBus.add,
     removeEventListener: pBus.remove,
     getPlayerStateObject: () => currentState,
+    getVideoData: currentVideoId ? () => ({ video_id: currentVideoId }) : undefined,
     getPlaybackQuality: () => currentQuality,
     getAvailableQualityData: () => availableQualities,
     setPlaybackQualityRange(minQuality, maxQuality) {
@@ -90,6 +97,9 @@ function createMockMedia(options: MockPlayerOptions = {}): {
     },
     setCurrentQuality(quality) {
       currentQuality = quality;
+    },
+    setVideoId(videoId) {
+      currentVideoId = videoId;
     },
     playerListenerCount: () => playerListeners.get('onStateChange')?.size ?? 0,
   };
@@ -185,6 +195,27 @@ describe('seedPreferredQualityStorage', () => {
     assert.equal(seedPreferredQualityStorage(), true);
     const upgraded = JSON.parse(store.get('yt-player-quality') ?? '{}') as { data: string };
     assert.deepEqual(JSON.parse(upgraded.data), { quality: 2160, previousQuality: 2160 });
+
+    // Corrupted JSON & throwing localStorage paths fail gracefully.
+    store.set('yt-player-quality', '{broken-json');
+    assert.equal(seedPreferredQualityStorage(), true);
+
+    Object.defineProperty(globals, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('SecurityError');
+      },
+    });
+    assert.equal(seedPreferredQualityStorage(), false);
+    delete globals.localStorage;
+
+    globals.localStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+    };
+    assert.equal(seedPreferredQualityStorage(), false);
   });
 });
 
@@ -210,10 +241,28 @@ describe('attachPreferredQualityController', () => {
 
     assert.equal(mock.playerListenerCount(), 1);
 
-    // Empty quality list keeps controller armed without firing premature highres fallback.
+    // Empty quality list and single-entry Auto placeholder keep controller armed without firing premature highres fallback.
+    mock.setState({ isOrWillBePlaying: true, isPlaying: false });
+    mock.setAvailableQualities([{ quality: 'auto', qualityLabel: 'Auto' }]);
     mock.setState({ isOrWillBePlaying: true, isPlaying: false });
     assert.deepEqual(mock.appliedRanges, []);
     assert.equal(mock.playerListenerCount(), 1);
+
+    // Watch-to-Watch stale video_id guard prevents locking Video B using Video A's active stream.
+    const scopedMock = createMockMedia({
+      videoId: 'oldVidA',
+      currentQuality: 'hd1080',
+      availableQualities: [{ quality: 'hd1080', qualityLabel: '1080p' }],
+      playerState: { isPlaying: true },
+    });
+    attachPreferredQualityController(scopedMock.player, undefined, 'newVidB');
+    assert.equal(scopedMock.appliedRanges.length, 0);
+    assert.equal(scopedMock.playerListenerCount(), 1);
+    scopedMock.setVideoId('newVidB');
+    scopedMock.setAvailableQualities([{ quality: 'hd2160', qualityLabel: '2160p' }]);
+    scopedMock.setState({ isPlaying: true });
+    assert.deepEqual(scopedMock.appliedRanges, [['hd2160', 'hd2160']]);
+    assert.equal(scopedMock.playerListenerCount(), 0);
 
     // Once qualities arrive and player isOrWillBePlaying, locks once and detaches immediately.
     mock.setAvailableQualities([
@@ -293,7 +342,8 @@ describe('attachPreferredQualityController', () => {
       for (const fn of winListeners.get('hashchange') ?? []) fn();
     };
 
-    installPreferredVideoQuality();
+    const uninstallPreferredQuality = installPreferredVideoQuality();
+    t.after(uninstallPreferredQuality);
     assert.ok(store.get('yt-player-quality')?.includes('2160'));
 
     // Home inline previews and Shorts must remain untouched.

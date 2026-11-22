@@ -72,7 +72,11 @@ jobs:
 
       - name: Build Lean Userscript
         run: |
-          npm --prefix mods install --no-audit --no-fund
+          npm --prefix mods ci --no-audit --no-fund
+          npm run typecheck
+          npm run lint:knip
+          npx --yes @biomejs/biome@2.3.8 check --diagnostic-level=warn
+          npm test
           npm --prefix mods run build
           ls -lh mods/dist/userscript.js
 
@@ -91,6 +95,8 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          trap 'rm -f /tmp/release.keystore /tmp/uber-apk-signer.jar' EXIT
           if [ -z "${ANDROID_KEYSTORE_BASE64}" ]; then
             echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set"
             exit 1
@@ -113,7 +119,35 @@ jobs:
             echo "::error::Signed APK not found"
             exit 1
           fi
-          rm -f /tmp/release.keystore /tmp/uber-apk-signer.jar
+          java -jar /tmp/uber-apk-signer.jar --onlyVerify --apks "$SIGNED"
+          python3 - "$SIGNED" <<'PY'
+          import struct, sys, zipfile
+
+          apk_path = sys.argv[1]
+          with open(apk_path, 'rb') as f, zipfile.ZipFile(f, 'r') as zf:
+              infos = {info.filename: info for info in zf.infolist()}
+              js = infos.get('assets/userscript.js')
+              assert js is not None, 'assets/userscript.js missing from APK'
+              assert js.compress_type == zipfile.ZIP_STORED, f'assets/userscript.js not ZIP_STORED: {js.compress_type}'
+
+              def data_offset(info):
+                  f.seek(info.header_offset + 26)
+                  fname_len, extra_len = struct.unpack('<HH', f.read(4))
+                  return info.header_offset + 30 + fname_len + extra_len
+
+              arsc = infos.get('resources.arsc')
+              assert arsc is not None, 'resources.arsc missing from APK'
+              assert arsc.compress_type == zipfile.ZIP_STORED, 'resources.arsc not ZIP_STORED'
+              assert data_offset(arsc) % 4 == 0, f'resources.arsc misaligned: {data_offset(arsc)}'
+
+              so_files = [info for name, info in infos.items() if name.endswith('.so')]
+              assert so_files, 'No .so libraries found in APK'
+              for so in so_files:
+                  assert so.compress_type == zipfile.ZIP_STORED, f'{so.filename} not ZIP_STORED'
+                  off = data_offset(so)
+                  assert off % 4096 == 0, f'{so.filename} not 4096-byte aligned: offset={off}'
+          print('Hotswap APK storage & page alignment checks passed.')
+          PY
           STAMP=$(date -u +%Y%m%d)
           DATE_ISO="${STAMP:0:4}-${STAMP:4:2}-${STAMP:6:2}"
           APK_NAME="Cobalt-${PLATFORM}-${BUILD_TYPE}-js-${STAMP}-r${GITHUB_RUN_NUMBER}.apk"

@@ -9,6 +9,7 @@ import {
   hasBlockedBadge,
   hasPaidOfferEndpoint,
   isBlockedBadge,
+  isStandaloneHeaderNode,
   isSurveyItem,
   readFormattedText,
   shouldHideFeedItem,
@@ -261,5 +262,39 @@ describe('filterFeedItemsSync and filterShelvesInPlaceSync', () => {
     assert.equal(shelves.length, 2);
     assert.equal(readFormattedText(shelves[0]?.shelfRenderer?.title), 'Keep Me');
     assert.equal(readFormattedText(shelves[1]?.tileRenderer?.title), 'Channels you watch');
+
+    assert.equal(
+      isStandaloneHeaderNode({ sectionHeaderViewModel: { headline: { text: { content: 'Top channels you watch' } } } }),
+      true
+    );
+    assert.equal(isStandaloneHeaderNode({ shelfRenderer: {} }), false);
+
+    // Additional readFormattedText formats: nested node.text, attributedString, accessibility label, and empty fallback.
+    assert.equal(readFormattedText({ text: { simpleText: 'Nested Text' } }), 'Nested Text');
+    assert.equal(readFormattedText({ attributedString: { content: 'Attributed' } }), 'Attributed');
+    assert.equal(
+      readFormattedText({ accessibility: { accessibilityData: { label: 'Accessible Label' } } }),
+      'Accessible Label'
+    );
+    assert.equal(readFormattedText({ runs: [{ notText: 1 }] }), '');
+    assert.equal(readFormattedText({ unknownField: 1 }), '');
+
+    assert.equal(hasBlockedBadge({ tileRenderer: { badges: [{ text: { simpleText: 'Members only' } }] } }), true);
+    assert.equal(
+      extractItemChannelName({
+        lockupViewModel: {
+          metadata: {
+            lockupMetadataViewModel: {
+              metadata: {
+                contentMetadataViewModel: {
+                  metadataRows: [{ metadataParts: [{ text: { content: '   ' } }] }],
+                },
+              },
+            },
+          },
+        },
+      }),
+      ''
+    );
   });
 });

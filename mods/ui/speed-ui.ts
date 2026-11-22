@@ -6,7 +6,7 @@ const SPEED_INCREMENT = 0.25;
 const MAX_PLAYBACK_SPEED = 5;
 const STUTTER_FIX_SPEED = 1.0001;
 
-let activeSpeedSubtitleEl: Element | null = null;
+let activeSpeedSubtitleEl: WeakRef<Element> | null = null;
 
 function normalizeSpeed(speed: number): number | undefined {
   if (!Number.isFinite(speed) || speed <= 0 || speed > MAX_PLAYBACK_SPEED) return undefined;
@@ -39,7 +39,7 @@ export function setPlaybackSpeed(speed: number): void {
   if (video && video.playbackRate !== validSpeed) {
     video.playbackRate = validSpeed;
   }
-  const subtitleEl = activeSpeedSubtitleEl;
+  const subtitleEl = activeSpeedSubtitleEl?.deref() ?? null;
   activeSpeedSubtitleEl = null;
   if (subtitleEl?.isConnected) {
     subtitleEl.textContent = formatPlaybackSpeedLabel(validSpeed);
@@ -59,10 +59,11 @@ function createSpeedOption(title: string, speed: number) {
 }
 
 export function speedSettings(): void {
-  activeSpeedSubtitleEl =
+  const subtitleTarget =
     typeof document !== 'undefined'
       ? (document.activeElement?.querySelector?.('yt-formatted-string + div > yt-formatted-string') ?? null)
       : null;
+  activeSpeedSubtitleEl = subtitleTarget ? new WeakRef(subtitleTarget) : null;
 
   const activeSpeed = getActivePlaybackSpeed();
   const buttons: unknown[] = [];

@@ -114,7 +114,7 @@ describe('clock helpers', () => {
     };
     globals.document = fakeDoc;
 
-    initClock();
+    const uninstallClock = initClock();
 
     const css = fakeDoc.adoptedStyleSheets.map((s) => s.cssText).join('\n');
     assert.match(css, /color:\s*#f1f1f1/);
@@ -133,5 +133,117 @@ describe('clock helpers', () => {
     fakeLocation.hash = '#/';
     for (const cb of windowListeners.get('hashchange') ?? []) cb();
     assert.equal(endEl?.textContent, '');
+    uninstallClock();
+  });
+
+  test('initClock schedules minute-boundary ticks when visible, pauses when hidden, and stops when disconnected', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevLocation = globals.location;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+    const prevSetTimeout = globals.setTimeout;
+    const prevClearTimeout = globals.clearTimeout;
+
+    const scheduled: Array<{ id: number; delay: number; cb: () => void }> = [];
+    const cleared: number[] = [];
+    let nextId = 1;
+    globals.setTimeout = ((cb: () => void, delay: number) => {
+      const id = nextId++;
+      scheduled.push({ id, delay, cb });
+      return id;
+    }) as unknown as typeof setTimeout;
+    globals.clearTimeout = ((id: number) => {
+      cleared.push(id);
+    }) as unknown as typeof clearTimeout;
+    globals.CSSStyleSheet = class {
+      replaceSync(): void {}
+    };
+
+    const docListeners = new Map<string, Set<() => void>>();
+    const makeEl = () => ({
+      id: '',
+      className: '',
+      textContent: '',
+      isConnected: true,
+      style: { display: '' },
+      children: [] as unknown[],
+      appendChild(c: unknown) {
+        this.children.push(c);
+        return c;
+      },
+      remove() {
+        this.isConnected = false;
+      },
+    });
+    const fakeBody = makeEl();
+    let clockNode: ReturnType<typeof makeEl> | null = null;
+    const fakeDoc = {
+      body: fakeBody,
+      documentElement: fakeBody,
+      hidden: false,
+      adoptedStyleSheets: [],
+      getElementById: () => null,
+      createElement: () => {
+        const el = makeEl();
+        if (!clockNode) clockNode = el;
+        return el;
+      },
+      addEventListener: (type: string, fn: () => void) => {
+        const set = docListeners.get(type) ?? new Set();
+        set.add(fn);
+        docListeners.set(type, set);
+      },
+      removeEventListener: (type: string, fn: () => void) => {
+        docListeners.get(type)?.delete(fn);
+      },
+    };
+    globals.location = { hash: '#/', search: '' };
+    globals.window = {
+      location: globals.location,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    globals.document = fakeDoc;
+
+    let uninstall = () => {};
+    t.after(() => {
+      uninstall();
+      globals.setTimeout = prevSetTimeout;
+      globals.clearTimeout = prevClearTimeout;
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevLocation === undefined) delete globals.location;
+      else globals.location = prevLocation;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+    });
+
+    uninstall = initClock();
+    assert.equal(scheduled.length, 1);
+
+    // Executing scheduled tick clears prior tick abort and schedules the next minute boundary.
+    scheduled[0]?.cb();
+    assert.equal(scheduled.length, 2);
+
+    // Going hidden aborts pending tick without scheduling a new one; becoming visible resumes ticks.
+    fakeDoc.hidden = true;
+    for (const fn of docListeners.get('visibilitychange') ?? []) fn();
+    const secondTickId = scheduled[1]?.id;
+    assert.ok(secondTickId !== undefined && cleared.includes(secondTickId));
+    assert.equal(scheduled.length, 2);
+
+    fakeDoc.hidden = false;
+    for (const fn of docListeners.get('visibilitychange') ?? []) fn();
+    assert.equal(scheduled.length, 3);
+
+    // Disconnected clock stops scheduling cleanly.
+    const activeClock = clockNode as ReturnType<typeof makeEl> | null;
+    assert.ok(activeClock);
+    activeClock.isConnected = false;
+    scheduled[2]?.cb();
+    assert.equal(scheduled.length, 3);
   });
 });

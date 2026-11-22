@@ -1,8 +1,8 @@
 diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
-index 9f99fe8..01b6c0b 100644
+index e3838ba..7470ddb 100644
 --- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
 +++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
-@@ -548,6 +548,46 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+@@ -548,6 +548,50 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
      }
    }
  
@@ -12,7 +12,11 @@ index 9f99fe8..01b6c0b 100644
 +    if (deepLink.isEmpty()) {
 +      return;
 +    }
-+    getStarboardBridge().handleDeepLink(deepLink);
++    setIntent(intent);
++    BaseStarboardBridge bridge = getStarboardBridge();
++    if (bridge != null) {
++      bridge.handleDeepLink(deepLink);
++    }
 +  }
 +
 +  @Override
