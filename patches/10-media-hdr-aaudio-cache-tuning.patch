@@ -1,38 +1,26 @@
 diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
-index 61d4122..9c6df12 100644
+index 61d4122..5410cde 100644
 --- a/cobalt/android/androidtv_flag_map.cc
 +++ b/cobalt/android/androidtv_flag_map.cc
-@@ -52,11 +52,11 @@ constexpr char kAreaBasedVideoBufferBudgetFeature[] =
- // Experiment-controlled defaults, used when the experiment key is absent.
- constexpr char kDefaultInitialOldSpaceSizeMb[] = "64";
- constexpr char kDefaultMaxOldSpaceSizeMb[] = "512";
--constexpr char kDefaultImageDecodeCacheLimitMbs[] = "48";
-+constexpr char kDefaultImageDecodeCacheLimitMbs[] = "64";
- constexpr char kEnableAv1StartupOptimizationFeature[] =
-     "EnableAv1StartupOptimization";
- #if !defined(ARCH_CPU_ARM64) && !defined(ARCH_CPU_X86_64)
--constexpr char kDefaultForceGpuMemAvailableMb[] = "128";
-+constexpr char kDefaultForceGpuMemAvailableMb[] = "192";
- #endif
- 
- std::string KeepDigits(std::string_view value) {
-@@ -273,13 +273,11 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+@@ -273,13 +273,10 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
        blink::features::kCobaltBypassHTMLPreloadScanner.name);
    enable_features.emplace_back(kEnableAv1StartupOptimizationFeature);
    enable_features.emplace_back(kCobaltMmapFontCacheFeature);
 -  enable_feature_if_set(flags::kAreaBasedVideoBufferBudget,
 -                        kAreaBasedVideoBufferBudgetFeature);
-+  enable_features.emplace_back(kAreaBasedVideoBufferBudgetFeature);
-   append_switch_if_set(
-       flags::kAllowCriticalMemoryPressureHandlingInForeground,
-       switches::kAllowCriticalMemoryPressureHandlingInForeground);
+-  append_switch_if_set(
+-      flags::kAllowCriticalMemoryPressureHandlingInForeground,
+-      switches::kAllowCriticalMemoryPressureHandlingInForeground);
 -  enable_feature_if_set(
 -      flags::kEvictMemoryCacheOnCriticalMemoryPressure,
++  enable_features.emplace_back(kAreaBasedVideoBufferBudgetFeature);
++  AppendSwitchIfAbsent(
++      cmd_line, switches::kAllowCriticalMemoryPressureHandlingInForeground);
 +  enable_features.emplace_back(
        blink::features::kEvictMemoryCacheOnCriticalMemoryPressure.name);
  
    if (flag_map.Has(flags::kDisableLessAggressiveParkableString)) {
-@@ -287,8 +285,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+@@ -287,8 +284,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
          blink::features::kLessAggressiveParkableString.name);
    }
  
@@ -112,7 +100,7 @@ index bb9151a..0a7c5a9 100644
  
  // On some platforms tunnel mode is only supported in the secure pipeline.  Set
 diff --git a/starboard/extension/feature_config.h b/starboard/extension/feature_config.h
-index 28561b5..2238b38 100644
+index 4bc78f0..3cfc913 100644
 --- a/starboard/extension/feature_config.h
 +++ b/starboard/extension/feature_config.h
 @@ -105,7 +105,7 @@ FEATURE_LIST_START
