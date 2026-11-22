@@ -330,12 +330,7 @@ describe('TV browse/JSON.parse transforms', () => {
     const css = fakeDoc.adoptedStyleSheets[0]?.cssText ?? '';
     assert.match(css, /\[idomkey="skipPrevious"\]/);
     assert.match(css, /\[idomkey="skipNext"\]/);
-    assert.match(css, /WEB_PAGE_TYPE_SHORTS/);
-    assert.match(css, /WEB_PAGE_TYPE_SHORTS\s+#container/);
-    assert.match(css, /WEB_PAGE_TYPE_SHORTS\s+#app-background/);
-    assert.match(css, /ytlr-app-background-container/);
-    assert.doesNotMatch(css, /ytlr-shorts-page|ytlr-player-container(?:\s*,|\s*\{)|WEB_PAGE_TYPE_SHORTS\s*>\s*div/);
-    assert.match(css, /background-color:\s*#000\s*!important/);
+    assert.doesNotMatch(css, /WEB_PAGE_TYPE_SHORTS/);
     assert.match(css, /display:\s*none\s*!important/);
   });
 

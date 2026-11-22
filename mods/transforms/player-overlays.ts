@@ -21,7 +21,7 @@ let transportStylesInstalled = false;
 
 /**
  * Installs zero-loop static CSS rules hiding native Previous/Next player-bar controls
- * (`skipPrevious` / `skipNext`) and making the Shorts page backdrop pure `#000`.
+ * (`skipPrevious` / `skipNext`) and enabling multiline Shorts header metadata.
  */
 export function installTransportControlsStyles(): void {
   if (transportStylesInstalled || typeof document === 'undefined') return;
@@ -29,16 +29,6 @@ export function installTransportControlsStyles(): void {
   injectCss(`
       ytlr-watch-default [idomkey="transport-controls"] :is([idomkey="skipPrevious"], [idomkey="skipNext"]) {
         display: none !important;
-      }
-      body.WEB_PAGE_TYPE_SHORTS,
-      body.WEB_PAGE_TYPE_SHORTS #container,
-      body.WEB_PAGE_TYPE_SHORTS #app-background {
-        background-color: #000 !important;
-        background-image: none !important;
-      }
-      body.WEB_PAGE_TYPE_SHORTS :is(ytlr-app, ytlr-app-background-container, ytlr-player-container [idomkey="background"]) {
-        background-color: transparent !important;
-        background-image: none !important;
       }
       ytlr-reel-player-header-renderer [idomkey="MV7Ztb"] yt-formatted-string {
         white-space: pre-line !important;
