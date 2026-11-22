@@ -380,4 +380,200 @@ describe('TV browse/JSON.parse transforms', () => {
       'Recommended'
     );
   });
+
+  test('transforms richSectionRenderer, continuationContents, browse actions, secondary nav, and watchNext pivot', () => {
+    const payload = {
+      endscreen: { endscreenRenderer: {} },
+      messages: [{ youThereRenderer: {} }, { mealbarPromoRenderer: {} }],
+      contents: {
+        singleColumnBrowseResultsRenderer: {
+          tabs: [
+            {
+              tabRenderer: {
+                content: {
+                  richGridRenderer: {
+                    contents: [
+                      {
+                        richSectionRenderer: {
+                          content: {
+                            richShelfRenderer: {
+                              contents: [
+                                { adSlotRenderer: {} },
+                                {
+                                  richItemRenderer: {
+                                    content: {
+                                      tileRenderer: {
+                                        contentId: 'richVid1',
+                                        style: 'TILE_STYLE_YTLR_DEFAULT',
+                                        onSelectCommand: { watchEndpoint: { videoId: 'richVid1' } },
+                                        header: {
+                                          tileHeaderRenderer: {
+                                            thumbnail: {
+                                              thumbnails: [
+                                                { url: 'https://i.ytimg.com/vi/richVid1/hqdefault.jpg', width: 480 },
+                                              ],
+                                            },
+                                          },
+                                        },
+                                      },
+                                    },
+                                  },
+                                },
+                              ],
+                            },
+                          },
+                        },
+                      },
+                      {
+                        itemSectionRenderer: {
+                          contents: [{ adSlotRenderer: {} }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+        singleColumnWatchNextResults: {
+          pivot: {
+            sectionListRenderer: {
+              contents: [
+                { alertWithActionsRenderer: {} },
+                {
+                  shelfRenderer: {
+                    content: {
+                      items: [
+                        { adSlotRenderer: {} },
+                        {
+                          tileRenderer: {
+                            contentId: 'pivotVid1',
+                            style: 'TILE_STYLE_YTLR_DEFAULT',
+                            onSelectCommand: { watchEndpoint: { videoId: 'pivotVid1' } },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+      tvBrowseContent: {
+        tvSecondaryNavRenderer: {
+          sections: [
+            {
+              tvSecondaryNavSectionRenderer: {
+                tabs: [
+                  {
+                    tabRenderer: {
+                      title: 'SubA',
+                      endpoint: { browseEndpoint: { browseId: 'UC1' } },
+                      content: {
+                        tvSurfaceContentRenderer: {
+                          content: {
+                            gridRenderer: {
+                              items: [{ adSlotRenderer: {} }, { tileRenderer: { contentId: 'subVid1' } }],
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      continuationContents: {
+        sectionListContinuation: {
+          contents: [{ adSlotRenderer: {} }, { shelfRenderer: { title: { simpleText: 'ContShelf' } } }],
+        },
+        horizontalListContinuation: {
+          items: [{ adSlotRenderer: {} }, { tileRenderer: { contentId: 'hCont1' } }],
+        },
+        gridContinuation: {
+          items: [{ adSlotRenderer: {} }, { tileRenderer: { contentId: 'gCont1' } }],
+        },
+        tvSurfaceContentContinuation: {
+          content: {
+            sectionListRenderer: {
+              contents: [{ adSlotRenderer: {} }, { shelfRenderer: { title: { simpleText: 'SurfCont' } } }],
+            },
+          },
+        },
+      },
+      onResponseReceivedActions: [
+        {
+          reloadContinuationItemsCommand: {
+            continuationItems: [
+              { adSlotRenderer: {} },
+              {
+                sectionListContinuation: {
+                  contents: [{ adSlotRenderer: {} }, { shelfRenderer: { title: { simpleText: 'ReloadCont' } } }],
+                },
+              },
+            ],
+          },
+        },
+        {
+          appendContinuationItemsAction: {
+            continuationItems: [
+              {
+                tvSurfaceContentContinuation: {
+                  content: {
+                    gridRenderer: {
+                      items: [{ adSlotRenderer: {} }, { tileRenderer: { contentId: 'appendVid1' } }],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+        {
+          replaceEnclosingAction: {
+            item: {
+              tileRenderer: {
+                contentId: 'repVid1',
+                style: 'TILE_STYLE_YTLR_DEFAULT',
+                onSelectCommand: { watchEndpoint: { videoId: 'repVid1' } },
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    transformInnertubeResponseSync(payload);
+
+    assert.equal(payload.endscreen, null);
+    assert.equal(payload.messages.length, 1);
+
+    // Empty itemSectionRenderer removed after its only child adSlotRenderer was filtered
+    const richGridContents =
+      payload.contents.singleColumnBrowseResultsRenderer.tabs[0]?.tabRenderer.content.richGridRenderer.contents ?? [];
+    assert.equal(richGridContents.length, 1);
+
+    // Pivot strips alertWithActionsRenderer and filters adSlotRenderer without adding inline preview
+    const pivotContents = payload.contents.singleColumnWatchNextResults.pivot.sectionListRenderer.contents;
+    assert.equal(pivotContents.length, 1);
+    const pivotItems = (
+      pivotContents[0] as { shelfRenderer?: { content?: { items?: Array<Record<string, unknown>> } } }
+    )?.shelfRenderer?.content?.items;
+    assert.equal(pivotItems?.length, 1);
+    assert.equal((pivotItems?.[0]?.tileRenderer as Record<string, unknown>)?.onFocusCommand, undefined);
+
+    assert.equal(payload.continuationContents.sectionListContinuation.contents.length, 1);
+    assert.equal(payload.continuationContents.horizontalListContinuation.items.length, 1);
+    assert.equal(payload.continuationContents.gridContinuation.items.length, 1);
+    assert.equal(
+      payload.continuationContents.tvSurfaceContentContinuation.content.sectionListRenderer.contents.length,
+      1
+    );
+  });
 });

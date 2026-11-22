@@ -303,6 +303,9 @@ export function onSponsorBlockSegmentsReady(
     return;
   }
   if (!videoId) return;
+  if (pendingSegmentListeners.length > 0 && pendingSegmentListeners[0]?.videoId !== videoId) {
+    pendingSegmentListeners = [];
+  }
   pendingSegmentListeners.push({ videoId, callback });
 }
 

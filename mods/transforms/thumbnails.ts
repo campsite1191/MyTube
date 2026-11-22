@@ -175,30 +175,57 @@ function setFormattedTitle(
   }
 }
 
+function updateMountedDeArrowDom(videoId: string, title: string | null, thumbnailUrl: string | null): void {
+  if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
+  if (!title && !thumbnailUrl) return;
+
+  for (const thumb of document.querySelectorAll<HTMLElement>(
+    `ytlr-tile-renderer ytlr-thumbnail-details[style*="/${videoId}/"], ytlr-tile-renderer img[src*="/${videoId}/"]`
+  )) {
+    const tile = thumb.closest?.('ytlr-tile-renderer') ?? null;
+    if (title && tile) {
+      const titleEl = tile.querySelector<HTMLElement>(
+        'ytlr-tile-metadata-renderer [idomkey="title"], ytlr-tile-metadata-renderer .ytLrTileMetadataRendererTitle'
+      );
+      if (titleEl && titleEl.textContent !== title) {
+        titleEl.textContent = title;
+      }
+    }
+    if (thumbnailUrl) {
+      if (thumb.tagName === 'IMG') {
+        const img = thumb as HTMLImageElement;
+        if (img.src !== thumbnailUrl) img.src = thumbnailUrl;
+      } else if (thumb.style?.backgroundImage) {
+        thumb.style.backgroundImage = `url("${thumbnailUrl}")`;
+      }
+    }
+  }
+}
+
 export function applyDeArrowBrandingToItem(entry: FeedItem, videoId: string, branding: DeArrowBrandingResponse): void {
   const feedItem = unwrapFeedItem(entry);
   if (!feedItem) return;
 
+  let resolvedTitle: string | null = null;
   if (Array.isArray(branding.titles) && branding.titles.length > 0) {
     const highestVotedTitle = selectHighestVotedEntry(branding.titles);
     if (highestVotedTitle?.title) {
+      resolvedTitle = highestVotedTitle.title;
       if (feedItem.tileRenderer) {
-        setFormattedTitle(feedItem.tileRenderer.metadata?.tileMetadataRenderer?.title, highestVotedTitle.title);
+        setFormattedTitle(feedItem.tileRenderer.metadata?.tileMetadataRenderer?.title, resolvedTitle);
       } else if (feedItem.lockupViewModel) {
-        setFormattedTitle(
-          feedItem.lockupViewModel.metadata?.lockupMetadataViewModel?.title,
-          highestVotedTitle.title,
-          true
-        );
+        setFormattedTitle(feedItem.lockupViewModel.metadata?.lockupMetadataViewModel?.title, resolvedTitle, true);
       }
     }
   }
 
+  let resolvedThumbnailUrl: string | null = null;
   if (Array.isArray(branding.thumbnails) && branding.thumbnails.length > 0) {
     const highestVotedThumbnail = selectHighestVotedEntry(branding.thumbnails);
     const ts = highestVotedThumbnail?.timestamp;
     if (typeof ts === 'number' && Number.isFinite(ts) && ts >= 0) {
       const url = `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${encodeURIComponent(videoId)}&time=${ts}`;
+      resolvedThumbnailUrl = url;
       const thumbnailHandle = getThumbnailListHandle(feedItem);
       if (thumbnailHandle) {
         const existingThumbnails = thumbnailHandle.getThumbnails();
@@ -216,6 +243,8 @@ export function applyDeArrowBrandingToItem(entry: FeedItem, videoId: string, bra
       }
     }
   }
+
+  updateMountedDeArrowDom(videoId, resolvedTitle, resolvedThumbnailUrl);
 }
 
 const MAX_DEARROW_CONCURRENCY = 6;

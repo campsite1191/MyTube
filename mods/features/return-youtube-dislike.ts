@@ -105,6 +105,18 @@ function disableFocus(node: HTMLElement): void {
   }
 }
 
+function collectInstanceMethodKeys(inst: Record<string, unknown>): string[] {
+  const keys = new Set<string>(Object.getOwnPropertyNames(inst));
+  let proto: unknown = Object.getPrototypeOf(inst);
+  while (proto && typeof proto === 'object' && proto !== Object.prototype) {
+    for (const key of Object.getOwnPropertyNames(proto)) {
+      if (key !== 'constructor') keys.add(key);
+    }
+    proto = Object.getPrototypeOf(proto);
+  }
+  return [...keys];
+}
+
 function patchTransportFocusSkip(): void {
   if (typeof document === 'undefined') return;
   const tcEl = document.querySelector?.(TRANSPORT_CONTROLS_DOM_SELECTOR) as
@@ -112,9 +124,10 @@ function patchTransportFocusSkip(): void {
     | null;
   const inst = tcEl?.__instance;
   if (!inst || patchedTransportInstances.has(inst)) return;
+  patchedTransportInstances.add(inst);
 
   let predicateKey: string | null = null;
-  for (const key of Object.getOwnPropertyNames(inst)) {
+  for (const key of collectInstanceMethodKeys(inst)) {
     const fn = inst[key];
     if (typeof fn !== 'function') continue;
     const src = Function.prototype.toString.call(fn);
@@ -139,7 +152,6 @@ function patchTransportFocusSkip(): void {
     }
     return origPredicate.call(this, idx);
   };
-  patchedTransportInstances.add(inst);
 }
 
 function applyButtonLabels(selector: string, count: string | null, lockFocus = true): HTMLElement[] {

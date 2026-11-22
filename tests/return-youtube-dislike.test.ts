@@ -322,4 +322,48 @@ describe('return-youtube-dislike', () => {
     assert.equal(shortDislikeBtn.attrs.hybridnavfocusable, 'false');
     assert.equal(shortDislikeBtn.attrs.tabindex, '-1');
   });
+
+  test('patchTransportFocusSkip wraps prototype-based and own-property transport focus predicates', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+    });
+
+    class ClosureTransportControls {
+      buttons: Array<{ inert?: boolean; getAttribute?: (k: string) => string | null }>;
+      constructor(buttons: Array<{ inert?: boolean; getAttribute?: (k: string) => string | null }>) {
+        this.buttons = buttons;
+      }
+      navigateNext(idx: number): boolean {
+        if (this.canFocusButton(idx)) {
+          return Boolean(this.buttons[idx]);
+        }
+        return false;
+      }
+      canFocusButton(idx: number): boolean {
+        return idx >= 0 && idx < this.buttons.length + 3;
+      }
+    }
+
+    const focusableBtn = { inert: false, getAttribute: () => 'true' };
+    const lockedLikeBtn = { inert: true, getAttribute: () => 'false' };
+    const inst = new ClosureTransportControls([focusableBtn, lockedLikeBtn]);
+    const tcEl = { __instance: inst };
+
+    globals.window = { location: { hash: '#/watch?v=protoSkipVid', search: '' } };
+    globals.document = {
+      querySelector: (sel: string) => (sel.includes('transport-controls') ? tcEl : null),
+      querySelectorAll: () => [],
+    };
+
+    setWatchLikeCount('protoSkipVid', '9.1K');
+
+    assert.equal(inst.canFocusButton(0), true);
+    assert.equal(inst.canFocusButton(1), false);
+  });
 });

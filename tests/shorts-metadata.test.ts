@@ -8,6 +8,7 @@ import {
   extractShortsMetadataFromReel,
   formatShortsUploadedAt,
   formatShortsViewCount,
+  installShortsMetadata,
 } from '../mods/transforms/shorts-metadata.ts';
 import type { FeedItem } from '../mods/types/innertube.ts';
 
@@ -261,5 +262,89 @@ describe('shorts-metadata', () => {
       cachedLines?.[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text?.simpleText,
       '2.5M views • 2 weeks ago'
     );
+  });
+
+  test('installShortsMetadata lazily fetches off-screen Short metadata on focusin and updates mounted DOM tiles', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevElement = globals.Element;
+
+    class MockElement {}
+    globals.Element = MockElement;
+
+    let focusInHandler: ((ev: { target: unknown }) => void) | undefined;
+    let hashChangeHandler: (() => void) | undefined;
+    const lineTextEl = { textContent: '\u00A0' };
+    const thumbDetailsEl = {
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/focusShort1/oar2.jpg")' },
+      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileEl : null),
+    };
+    const tileEl = Object.assign(new MockElement(), {
+      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileEl : null),
+      querySelector: (sel: string) => {
+        if (sel === 'ytlr-thumbnail-details') return thumbDetailsEl;
+        if (sel.includes('yt-formatted-string')) return lineTextEl;
+        return null;
+      },
+    });
+
+    globals.window = {
+      addEventListener: (type: string, cb: () => void) => {
+        if (type === 'hashchange') hashChangeHandler = cb;
+      },
+      ytcfg: {
+        data_: {
+          INNERTUBE_CONTEXT: { client: { clientName: 'TVHTML5' } },
+          INNERTUBE_CONTEXT_CLIENT_NAME: 7,
+          INNERTUBE_CONTEXT_CLIENT_VERSION: '7.2026',
+          VISITOR_DATA: 'vis-123',
+        },
+      },
+    };
+    globals.document = {
+      addEventListener: (type: string, cb: (ev: { target: unknown }) => void) => {
+        if (type === 'focusin') focusInHandler = cb;
+      },
+      querySelectorAll: (sel: string) => (sel.includes('/focusShort1/') ? [thumbDetailsEl] : []),
+    };
+    let fetchCount = 0;
+    globals.fetch = async () => {
+      fetchCount++;
+      return {
+        ok: true,
+        text: async () => JSON.stringify(makeReelPayload('focusShort1', '98,400 views', '5 hours ago')),
+      };
+    };
+
+    t.after(() => {
+      clearShortsMetadataCache();
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevElement === undefined) delete globals.Element;
+      else globals.Element = prevElement;
+      globals.fetch = prevFetch;
+    });
+
+    installShortsMetadata();
+    assert.equal(typeof focusInHandler, 'function');
+    assert.equal(typeof hashChangeHandler, 'function');
+
+    focusInHandler?.({ target: tileEl });
+    await new Promise((r) => setTimeout(r, 25));
+
+    assert.equal(fetchCount, 1);
+    assert.equal(lineTextEl.textContent, '98.4K views • 5 hours ago');
+
+    // Focusing again uses cached label immediately without re-fetching
+    lineTextEl.textContent = '';
+    focusInHandler?.({ target: tileEl });
+    assert.equal(fetchCount, 1);
+    assert.equal(lineTextEl.textContent, '98.4K views • 5 hours ago');
+
+    hashChangeHandler?.();
   });
 });

@@ -282,6 +282,54 @@ describe('DeArrow branding helpers', () => {
     assert.equal(failingVideoCase.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Original Tile Title');
   });
 
+  test('applyDeArrowBranding updates already-mounted DOM tile titles and thumbnails on cold-cache resolution', async (t) => {
+    clearDeArrowCache();
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+
+    const mountedTitleEl = { textContent: 'Clickbait DOM Title' };
+    const mountedTileEl = {
+      querySelector: (sel: string) => (sel.includes('title') ? mountedTitleEl : null),
+    };
+    const mountedThumbEl = {
+      tagName: 'YTLR-THUMBNAIL-DETAILS',
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/mountedVid1/hq720.jpg")' },
+      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? mountedTileEl : null),
+    };
+
+    globals.document = {
+      querySelectorAll: (sel: string) => (sel.includes('/mountedVid1/') ? [mountedThumbEl] : []),
+    };
+    globals.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          titles: [{ title: 'Mounted DeArrow Title', votes: 8 }],
+          thumbnails: [{ timestamp: 19, votes: 4 }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )) as typeof fetch;
+
+    t.after(() => {
+      clearDeArrowCache();
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+    });
+
+    const tileCase = createTileFeedItem({
+      contentId: 'mountedVid1',
+      onSelectCommand: { watchEndpoint: { videoId: 'mountedVid1' } },
+    });
+    await applyDeArrowBranding([tileCase.entry]);
+
+    assert.equal(mountedTitleEl.textContent, 'Mounted DeArrow Title');
+    assert.equal(
+      mountedThumbEl.style.backgroundImage,
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=mountedVid1&time=19")'
+    );
+  });
+
   test('caches 404 misses, retries transient 500s, and aborts stale fetches on navigation', async () => {
     clearDeArrowCache();
     let fetchCount = 0;

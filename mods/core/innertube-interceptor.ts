@@ -36,6 +36,7 @@ const EXTERNAL_JSON_HOSTS = ['sponsor.ajay.app', 'returnyoutubedislikeapi.com'] 
 
 const processedPayloads = new WeakSet<object>();
 const wrappedJsonParsers = new WeakSet<typeof JSON.parse>();
+let rawJsonParse: typeof JSON.parse | null = typeof JSON !== 'undefined' ? JSON.parse : null;
 let interceptorInstalled = false;
 
 function processShelfContentSync(content: unknown, shouldAddPreviews = true): void {
@@ -434,7 +435,8 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
 function patchPlaybackContextBody(rawBody: string): string | null {
   if (!rawBody.includes('playbackContext')) return null;
   try {
-    const body = JSON.parse(rawBody);
+    const parseFn = rawJsonParse ?? JSON.parse;
+    const body = parseFn(rawBody);
     if (!isRecord(body) || !body.playbackContext) return null;
     const playbackCtx = isRecord(body.playbackContext) ? body.playbackContext : undefined;
     const contentCtx = isRecord(playbackCtx?.contentPlaybackContext) ? playbackCtx.contentPlaybackContext : undefined;
@@ -491,6 +493,7 @@ export function installInnertubeInterceptor(): void {
 
   // 1. Wrap JSON.parse so XHR, Response.text(), and inline XSSI-stripped payloads transform synchronously.
   if (typeof JSON !== 'undefined' && typeof JSON.parse === 'function') {
+    if (!rawJsonParse) rawJsonParse = JSON.parse;
     JSON.parse = wrapJsonParseFn(JSON.parse);
   }
 
@@ -513,7 +516,9 @@ export function installInnertubeInterceptor(): void {
     window.fetch = (resource, init) => {
       if (init && typeof init.body === 'string') {
         const patchedBody = patchPlaybackContextBody(init.body);
-        if (patchedBody !== null) init.body = patchedBody;
+        if (patchedBody !== null) {
+          return origFetch(resource, { ...init, body: patchedBody });
+        }
       }
       return origFetch(resource, init);
     };

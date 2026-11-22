@@ -486,4 +486,156 @@ describe('regression fixes', () => {
       (globalThis as { window?: unknown }).window = origWindow;
     }
   });
+
+  test('resolveCommand handles I18N_LANGUAGE, EXIT_APP, SKIP, SHOW_TOAST, NOT_INTERESTED, DONT_RECOMMEND_CHANNEL, and FEEDBACK_REASON', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevKeyboardEvent = globals.KeyboardEvent;
+
+    class MockKeyboardEvent {
+      readonly type: string;
+      readonly init?: Record<string, unknown>;
+      constructor(type: string, init?: Record<string, unknown>) {
+        this.type = type;
+        this.init = init;
+      }
+    }
+    globals.KeyboardEvent = MockKeyboardEvent;
+
+    const resolvedCmds: unknown[] = [];
+    const fakeVideo = { currentTime: 10 };
+    const dispatchedEvents: unknown[] = [];
+    const fakeDoc = {
+      cookie: '',
+      dispatchEvent: (ev: unknown) => {
+        dispatchedEvents.push(ev);
+        return true;
+      },
+      querySelector: (sel: string) => (sel === 'video' ? fakeVideo : null),
+    };
+    globals.document = fakeDoc;
+
+    const serviceMap = new Map<string, unknown>([
+      [
+        'KabukiInnerTubeClient',
+        {
+          fetch: (req: { path: string; payload?: { feedbackTokens?: string[] } }) => ({
+            subscribe: (onNext: (res: unknown) => void) => {
+              if (req.path === '/youtubei/v1/get_panel') {
+                onNext({
+                  content: {
+                    engagementPanelSectionListRenderer: {
+                      content: {
+                        listViewModel: {
+                          listItems: [
+                            { listItemViewModel: { feedbackToken: 'tok-not-interested' } },
+                            { listItemViewModel: { feedbackToken: 'tok-dont-recommend' } },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                });
+              } else if (req.path === '/youtubei/v1/feedback') {
+                onNext({
+                  feedbackResponses: [
+                    {
+                      followUpDialog: {
+                        dismissalFollowUpRenderer: {
+                          dismissalReasonsPrompt: { simpleText: 'Tell us why' },
+                          reasons: [{ title: { simpleText: 'Already watched' }, token: 'tok-reason-1' }],
+                        },
+                      },
+                    },
+                  ],
+                });
+              }
+            },
+          }),
+        },
+      ],
+    ]);
+
+    const host = {
+      instance: {
+        resolveCommand: (cmd: unknown) => {
+          resolvedCmds.push(cmd);
+          return true;
+        },
+      },
+    };
+    globals.window = {
+      _yttv: {
+        services: { mappings: serviceMap },
+        router: host,
+      },
+    };
+
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevKeyboardEvent === undefined) delete globals.KeyboardEvent;
+      else globals.KeyboardEvent = prevKeyboardEvent;
+    });
+
+    patchResolveCommand();
+
+    // 1. I18N_LANGUAGE sets PREF cookie and dispatches RELOAD_PAGE
+    host.instance.resolveCommand({
+      setClientSettingEndpoint: {
+        settingDatas: [{ clientSettingEnum: { item: 'I18N_LANGUAGE' }, stringValue: 'en-GB' }],
+      },
+    });
+    assert.match(fakeDoc.cookie, /^PREF=hl=en-GB;/);
+    assert.deepEqual(resolvedCmds.at(-1), { signalAction: { signal: 'RELOAD_PAGE' } });
+
+    // 2. ACCOUNT_EVENT_TRIGGER_ON_EXIT dispatches EXIT_APP
+    const exitResult = host.instance.resolveCommand({
+      requestAccountSelectorCommand: {
+        identityActionContext: { eventTrigger: 'ACCOUNT_EVENT_TRIGGER_ON_EXIT' },
+      },
+    });
+    assert.equal(exitResult, false);
+    assert.deepEqual(resolvedCmds.at(-1), { signalAction: { signal: 'EXIT_APP' } });
+
+    // 3. commandExecutorCommand with SKIP and SHOW_TOAST
+    host.instance.resolveCommand({
+      commandExecutorCommand: {
+        commands: [
+          { customAction: { action: 'SKIP', parameters: { time: 42 } } },
+          { customAction: { action: 'SHOW_TOAST', parameters: 'Skipped!' } },
+          { signalAction: { signal: 'POPUP_BACK' } },
+        ],
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(fakeVideo.currentTime, 42);
+    assert.equal(dispatchedEvents.length, 1);
+
+    // 4. NOT_INTERESTED, DONT_RECOMMEND_CHANNEL, and FEEDBACK_REASON
+    host.instance.resolveCommand({
+      customAction: { action: 'NOT_INTERESTED', parameters: { panelId: 'p1', params: 'par1' } },
+    });
+    host.instance.resolveCommand({
+      customAction: { action: 'DONT_RECOMMEND_CHANNEL', parameters: { panelId: 'p1', params: 'par1' } },
+    });
+    host.instance.resolveCommand({
+      customAction: { action: 'FEEDBACK_REASON', parameters: { token: 'tok-reason-1' } },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.ok(
+      resolvedCmds.some(
+        (c) => (c as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId === 'tt-feedback-reasons'
+      )
+    );
+    assert.ok(
+      resolvedCmds.some(
+        (c) => (c as { openPopupAction?: { popupType?: string } }).openPopupAction?.popupType === 'TOAST'
+      )
+    );
+  });
 });

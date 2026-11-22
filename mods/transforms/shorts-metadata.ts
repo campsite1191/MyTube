@@ -367,11 +367,13 @@ function fetchShortsMetadata(videoId: string, controller: AbortController | null
         }
       } else {
         suppressOverlayEnrichment = true;
+        let jsonPromise: Promise<unknown>;
         try {
-          json = await response.json();
+          jsonPromise = response.json();
         } finally {
           suppressOverlayEnrichment = false;
         }
+        json = await jsonPromise;
       }
       const label = extractShortsMetadataFromReel(json);
       if (!label) return null;
