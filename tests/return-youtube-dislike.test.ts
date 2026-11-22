@@ -393,7 +393,7 @@ describe('return-youtube-dislike', () => {
     assert.equal(minInst.checkFocus(1, 10), false);
   });
 
-  test('protects active Shorts overlay from prefetched reel_item_watch, activates cached Short on hashchange, and handles deferred overlay mount', async (t) => {
+  test('handles Shorts swipe transitions without waiting on hashchange, avoids sibling Dislike fallback, and clears on exit', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
@@ -450,7 +450,8 @@ describe('return-youtube-dislike', () => {
     let mountedOverlay: Record<string, unknown> | null = null;
     const bodyEl = { nodeName: 'BODY' };
     const winListeners = new Map<string, Set<() => void>>();
-    const fakeLocation = { hash: '#/shorts/curShort11', search: '' };
+    const fakeLocation = { hash: '#/shorts', search: '' };
+    const queriedSelectors: string[] = [];
 
     globals.window = {
       location: fakeLocation,
@@ -469,6 +470,7 @@ describe('return-youtube-dislike', () => {
       adoptedStyleSheets: [],
       querySelector: (sel: string) => (sel === 'ytlr-reel-player-overlay-renderer' ? mountedOverlay : null),
       querySelectorAll: (sel: string) => {
+        queriedSelectors.push(sel);
         if (sel.includes('aria-label="Dislike"')) return [dislikeBtn];
         if (sel.includes('ytlr-toggle-button-view-model')) return [likeBtn];
         return [];
@@ -489,10 +491,16 @@ describe('return-youtube-dislike', () => {
     setShortsOverlayStats('curShort11', '500');
     assert.equal(observers[0]?.target, bodyEl);
     assert.equal(likeBtn.dataset.ttCount, '500');
+    assert.ok(
+      queriedSelectors.some(
+        (sel) => sel.includes('aria-label="Dislike"') && !sel.includes('+ ytlr-reel-action-bar-button-view-model')
+      )
+    );
+    assert.equal(
+      queriedSelectors.some((sel) => sel.includes('+ ytlr-reel-action-bar-button-view-model')),
+      false
+    );
 
-    // Prefetched response for nextShort99 must NOT overwrite or abort curShort11.
-    setShortsOverlayStats('nextShort99', '888');
-    assert.equal(likeBtn.dataset.ttCount, '500');
     await Promise.resolve();
     await new Promise((r) => setTimeout(r, 10));
     assert.deepEqual(fetchedIds, ['curShort11']);
@@ -504,28 +512,19 @@ describe('return-youtube-dislike', () => {
     assert.equal(observers[0]?.disconnected, true);
     assert.equal(observers.at(-1)?.target, mountedOverlay);
 
-    // Swiping to cached nextShort99 immediately activates cached likes and fetches RYD dislikes.
-    fakeLocation.hash = '#/shorts/nextShort99';
-    for (const fn of winListeners.get('hashchange') ?? []) fn();
+    // Swiping to nextShort99 updates active Shorts stats immediately even before location.hash changes.
+    setShortsOverlayStats('nextShort99', '888');
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(likeBtn.dataset.ttCount, '888');
     assert.equal(dislikeBtn.dataset.ttCount, '22');
 
     // Stale wait-observer fires after switching away -> self-aborts cleanly.
     mountedOverlay = null;
-    fakeLocation.hash = '#/shorts/waitShortA';
-    for (const fn of winListeners.get('hashchange') ?? []) fn();
     setShortsOverlayStats('waitShortA', '100');
     const waitObsA = observers.at(-1);
-    fakeLocation.hash = '#/shorts/waitShortB';
-    for (const fn of winListeners.get('hashchange') ?? []) fn();
+    setShortsOverlayStats('waitShortB', '200');
     waitObsA?.cb();
     assert.equal(waitObsA?.disconnected, true);
-
-    // Populate > MAX_SHORTS_CACHE_SIZE (64) entries to exercise LRU eviction cleanly.
-    for (let i = 0; i < 70; i++) {
-      setShortsOverlayStats(`evictShort${i}`, `${i}`);
-    }
 
     // Network rejection in fetchDislikeCount returns null cleanly.
     globals.fetch = async () => {
@@ -533,10 +532,7 @@ describe('return-youtube-dislike', () => {
     };
     assert.equal(await fetchDislikeCount('errVid'), null);
 
-    // Swiping to uncached Short clears stale overlay state.
-    fakeLocation.hash = '#/shorts/uncachedShort';
-    for (const fn of winListeners.get('hashchange') ?? []) fn();
-    // Exiting Shorts clears state and cache.
+    // Exiting Shorts clears state cleanly.
     fakeLocation.hash = '#/';
     for (const fn of winListeners.get('hashchange') ?? []) fn();
   });

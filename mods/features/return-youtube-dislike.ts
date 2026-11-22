@@ -1,4 +1,4 @@
-import { extractWatchVideoId, getActiveWatchVideoId, observeDom, onAbort, onWatchSession } from '../core/lifecycle.ts';
+import { getActiveWatchVideoId, observeDom, onAbort, onWatchSession } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 import { formatCompactCount } from '../utils/feed-helpers.ts';
@@ -13,13 +13,10 @@ const FOCUSABLE_CHILD_SELECTOR =
   '[hybridnavfocusable]:not([hybridnavfocusable="false"]), [tabindex]:not([tabindex="-1"])';
 const TRANSPORT_CONTROLS_DOM_SELECTOR =
   'ytlr-watch-default [idomkey="transport-controls"], ytlr-watch-default ytlr-player-actions-container';
-const SHORTS_ROUTE_ID_RE = /\/shorts\/([A-Za-z0-9_-]+)/;
-const MAX_SHORTS_CACHE_SIZE = 64;
 
 let currentLike: { videoId: string; count: string } | null = null;
 let currentDislike: { videoId: string; count: string } | null = null;
 let currentShorts: { videoId: string; likeCount: string | null; dislikeCount: string | null } | null = null;
-const shortsLikeStatsCache = new Map<string, string | null>();
 let activeShortsAbort: AbortController | null = null;
 let stylesInstalled = false;
 let rydInstalled = false;
@@ -30,7 +27,7 @@ const VOTE_TARGET =
 const SHORTS_LIKE_SELECTOR =
   'ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(ytlr-toggle-button-view-model)';
 const SHORTS_DISLIKE_SELECTOR =
-  'ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(yt-button-container[aria-label="Dislike"]), ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(ytlr-toggle-button-view-model) + ytlr-reel-action-bar-button-view-model';
+  'ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(yt-button-container[aria-label="Dislike"])';
 const SHORTS_COUNT_TARGET = 'ytlr-reel-action-bar-button-view-model[data-tt-count]';
 
 function installVoteLabelStyles(): void {
@@ -215,28 +212,6 @@ export function setWatchLikeCount(videoId: string | null, count: string | null):
   }
 }
 
-function extractShortsIdFromRoute(route: string | null | undefined): string | null {
-  if (typeof route !== 'string') return null;
-  const pathMatch = route.match(SHORTS_ROUTE_ID_RE);
-  return pathMatch?.[1] ?? extractWatchVideoId(route);
-}
-
-function getActiveShortsVideoId(): string | null {
-  if (typeof window === 'undefined') return null;
-  return extractShortsIdFromRoute(window.location?.hash) ?? extractShortsIdFromRoute(window.location?.search);
-}
-
-function rememberShortsLikeCount(videoId: string, likeCount: string | null): void {
-  if (shortsLikeStatsCache.has(videoId)) {
-    shortsLikeStatsCache.delete(videoId);
-  }
-  shortsLikeStatsCache.set(videoId, likeCount);
-  if (shortsLikeStatsCache.size > MAX_SHORTS_CACHE_SIZE) {
-    const oldest = shortsLikeStatsCache.keys().next().value;
-    if (oldest !== undefined) shortsLikeStatsCache.delete(oldest);
-  }
-}
-
 function clearShortsOverlayState(): void {
   activeShortsAbort?.abort();
   activeShortsAbort = null;
@@ -255,12 +230,6 @@ function applyShortsOverlayLabels(): void {
 export function setShortsOverlayStats(videoId: string | null, likeCount: string | null): void {
   if (!videoId) return;
   const compactLikes = typeof likeCount === 'string' && likeCount.trim() ? likeCount.replace(/\s+/g, '') : null;
-  rememberShortsLikeCount(videoId, compactLikes);
-
-  const activeShortsId = getActiveShortsVideoId();
-  if (activeShortsId !== null && activeShortsId !== videoId) {
-    return;
-  }
 
   if (currentShorts?.videoId === videoId) {
     if (compactLikes) currentShorts.likeCount = compactLikes;
@@ -351,23 +320,12 @@ export function installReturnYouTubeDislike(): () => void {
   const onHashChange = (): void => {
     if (!targetWindow.location.hash.includes('shorts')) {
       clearShortsOverlayState();
-      shortsLikeStatsCache.clear();
-      return;
-    }
-    const activeShortsId = getActiveShortsVideoId();
-    if (activeShortsId && currentShorts?.videoId !== activeShortsId) {
-      if (shortsLikeStatsCache.has(activeShortsId)) {
-        setShortsOverlayStats(activeShortsId, shortsLikeStatsCache.get(activeShortsId) ?? null);
-      } else {
-        clearShortsOverlayState();
-      }
     }
   };
   targetWindow.addEventListener('hashchange', onHashChange);
 
   const unsub = onWatchSession((videoId, signal) => {
     clearShortsOverlayState();
-    shortsLikeStatsCache.clear();
     if (currentLike?.videoId !== videoId) currentLike = null;
     if (currentDislike?.videoId !== videoId) currentDislike = null;
 
@@ -438,7 +396,6 @@ export function installReturnYouTubeDislike(): () => void {
     targetWindow.removeEventListener?.('hashchange', onHashChange);
     unsub();
     clearShortsOverlayState();
-    shortsLikeStatsCache.clear();
     currentLike = null;
     currentDislike = null;
     rydInstalled = false;

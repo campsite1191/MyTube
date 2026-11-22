@@ -425,7 +425,7 @@ describe('DeArrow branding helpers', () => {
     }
   });
 
-  test('probes DeArrow background-image fallbacks, updates IMG/lockup DOM, skips cache-hit DOM queries, and wires memory pressure', async (t) => {
+  test('updates TV tile DOM without Image probes or desktop selectors, skips cache-hit DOM queries, and wires memory pressure', async (t) => {
     clearDeArrowCache();
     const globals = globalThis as Record<string, unknown>;
     const prevDocument = globals.document;
@@ -433,17 +433,14 @@ describe('DeArrow branding helpers', () => {
     const prevImage = globals.Image;
     const prevFetch = globals.fetch;
 
-    const createdProbes: Array<{ src: string; onload: (() => void) | null; onerror: (() => void) | null }> = [];
+    let imageProbeConstructed = 0;
     globals.Image = class {
-      src = '';
-      onload: (() => void) | null = null;
-      onerror: (() => void) | null = null;
       constructor() {
-        createdProbes.push(this);
+        imageProbeConstructed++;
       }
     };
 
-    let queryAllCalls = 0;
+    const queriedSelectors: string[] = [];
     const bgThumb = {
       tagName: 'YTLR-THUMBNAIL-DETAILS',
       style: { backgroundImage: 'url("https://i.ytimg.com/vi/probeVid123/hq720.jpg")' },
@@ -452,19 +449,10 @@ describe('DeArrow branding helpers', () => {
     const tileTitle = { textContent: 'Old' };
     const tileCard = { querySelector: () => tileTitle };
 
-    const imgEl = {
-      tagName: 'IMG',
-      src: 'https://i.ytimg.com/vi/imgVid12345/hq720.jpg',
-      closest: (sel: string) => (sel === 'yt-lockup-view-model' ? lockupCard : null),
-    };
-    const lockupTitle = { textContent: 'Old Lockup' };
-    const lockupCard = { querySelector: () => lockupTitle };
-
     globals.document = {
       querySelectorAll: (sel: string) => {
-        queryAllCalls++;
+        queriedSelectors.push(sel);
         if (sel.includes('/probeVid123/')) return [bgThumb];
-        if (sel.includes('/imgVid12345/')) return [imgEl];
         return [];
       },
     };
@@ -506,45 +494,33 @@ describe('DeArrow branding helpers', () => {
     applyDeArrowBrandingToItem(createTileFeedItem().entry, 'bad"]id', {
       titles: [{ title: 'X', votes: 1 }],
     });
-    assert.equal(queryAllCalls, 0);
+    assert.equal(queriedSelectors.length, 0);
 
-    // Cold fetch updates mounted background-image tile and steps down DeArrow -> hq720 -> hqdefault via Image probe.
+    // Cold fetch updates mounted TV tile using only ytlr-tile-renderer selector and no Image probes.
     const probeTile = createTileFeedItem({
       contentId: 'probeVid123',
       onSelectCommand: { watchEndpoint: { videoId: 'probeVid123' } },
     });
     await applyDeArrowBranding([probeTile.entry]);
-    assert.equal(queryAllCalls, 1);
-    assert.equal(createdProbes.length, 1);
-    const probe = createdProbes[0];
-    assert.ok(probe);
-    probe.onerror?.();
-    assert.equal(bgThumb.style.backgroundImage, 'url("https://i.ytimg.com/vi/probeVid123/hq720.jpg")');
-    probe.onerror?.();
-    assert.equal(bgThumb.style.backgroundImage, 'url("https://i.ytimg.com/vi/probeVid123/hqdefault.jpg")');
-    probe.onerror?.(); // Terminal fallback cleans up handlers.
-    assert.equal(probe.onerror, null);
-    assert.equal(probe.onload, null);
+    assert.equal(queriedSelectors.length, 1);
+    assert.equal(queriedSelectors[0], 'ytlr-tile-renderer ytlr-thumbnail-details[style*="/probeVid123/"]');
+    assert.equal(imageProbeConstructed, 0);
+    assert.equal(tileTitle.textContent, 'New Clean Title');
+    assert.equal(
+      bgThumb.style.backgroundImage,
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=probeVid123&time=8")'
+    );
 
     // Warm cache hit does NOT invoke querySelectorAll.
     await applyDeArrowBranding([probeTile.entry]);
-    assert.equal(queryAllCalls, 1);
+    assert.equal(queriedSelectors.length, 1);
 
-    // IMG + lockupViewModel update path.
-    applyDeArrowBrandingToItem(createLockupFeedItem({ contentId: 'imgVid12345' }).entry, 'imgVid12345', {
-      titles: [{ title: 'Lockup Updated', votes: 3 }],
-      thumbnails: [{ timestamp: 2, votes: 2 }],
-    });
-    assert.equal(lockupTitle.textContent, 'Lockup Updated');
-    assert.equal(imgEl.src, 'https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=imgVid12345&time=2');
-    assert.equal(queryAllCalls, 2);
-
-    // Memory pressure listener evicts DeArrow cache cleanly.
+    // Memory pressure listener evicts DeArrow cache cleanly and triggers fresh fetch + DOM update.
     setupMemoryPressureListener();
     assert.equal(pressureListeners.length, 1);
     pressureListeners[0]?.();
     await applyDeArrowBranding([probeTile.entry]);
-    assert.equal(queryAllCalls, 3);
+    assert.equal(queriedSelectors.length, 2);
   });
 });
 
