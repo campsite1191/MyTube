@@ -1,0 +1,45 @@
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
+index 92db351..538d65c 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
+@@ -475,6 +475,8 @@ public class BaseStarboardBridge {
+     Activity activity = mActivityHolder.get();
+     if (activity != null) {
+       activity.finishAndRemoveTask();
++    } else {
++      System.exit(0);
+     }
+   }
+ 
+@@ -1109,10 +1111,7 @@ public class BaseStarboardBridge {
+ 
+   @CalledByNative
+   public void closeApp() {
+-    Activity activity = mActivityHolder.get();
+-    if (activity instanceof BaseCobaltActivity) {
+-      ((BaseCobaltActivity) activity).finishAffinity();
+-    }
++    requestStop(0);
+   }
+ 
+   /** A wrapper of the android.util.Size class to be used by JNI. */
+diff --git a/cobalt/browser/h5vcc_system/h5vcc_system_impl_android.cc b/cobalt/browser/h5vcc_system/h5vcc_system_impl_android.cc
+index 0e19d32..cbc23f5 100644
+--- a/cobalt/browser/h5vcc_system/h5vcc_system_impl_android.cc
++++ b/cobalt/browser/h5vcc_system/h5vcc_system_impl_android.cc
+@@ -109,13 +109,13 @@ void H5vccSystemImpl::GetScreenDiagonal(GetScreenDiagonalCallback callback) {
+ 
+ void H5vccSystemImpl::GetUserOnExitStrategy(
+     GetUserOnExitStrategyCallback callback) {
+-  std::move(callback).Run(h5vcc_system::mojom::UserOnExitStrategy::kMinimize);
++  std::move(callback).Run(h5vcc_system::mojom::UserOnExitStrategy::kClose);
+ }
+ 
+ void H5vccSystemImpl::PerformExitStrategy() {
+   JNIEnv* env = base::android::AttachCurrentThread();
+   StarboardBridge* starboard_bridge = StarboardBridge::GetInstance();
+-  starboard_bridge->RequestSuspend(env);
++  starboard_bridge->RequestStop(env, 0);
+ }
+ 
+ void H5vccSystemImpl::HideSplashScreen() {
