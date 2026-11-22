@@ -96,3 +96,37 @@ index f098770..dc2c0bd 100644
      "java/res/values/colors.xml",
      "java/res/values/ids.xml",
      "java/res/values/overlayable.xml",
+diff --git a/media/audio/BUILD.gn b/media/audio/BUILD.gn
+index fb56017..823ef33 100644
+--- a/media/audio/BUILD.gn
++++ b/media/audio/BUILD.gn
+@@ -286,10 +286,8 @@ source_set("audio") {
+         "android/opensles_wrapper.cc",
+       ]
+     }
+-    # Cobalt uses the Starboard layer instead of AAudio. AAudio also breaks SDK 24 compatibility. See b/508072838.
+-    if (!is_cobalt) {
+-      libs += [ "aaudio" ]
+-    }
++    # Link libaaudio.so directly since android_ndk_api_level = 29 / minSdk = 31.
++    libs += [ "aaudio" ]
+ 
+     deps += [ "//media/base/android:media_jni_headers" ]
+ 
+diff --git a/media/gpu/BUILD.gn b/media/gpu/BUILD.gn
+index dda0145..cac0b2b 100644
+--- a/media/gpu/BUILD.gn
++++ b/media/gpu/BUILD.gn
+@@ -186,10 +186,8 @@ component("gpu") {
+     libs += [
+       "mediandk",
+     ]
+-    # Cobalt uses the Starboard layer instead of AAudio. AAudio also breaks SDK 24 compatibility. See b/508072838.
+-    if (!is_cobalt) {
+-      libs += [ "aaudio" ]
+-    }
++    # Link libaaudio.so directly since android_ndk_api_level = 29 / minSdk = 31.
++    libs += [ "aaudio" ]
+     deps += [
+       # TODO(crbug.com/40552063): This can be removed once CdmManager is removed.
+       "//gpu/ipc/common",
