@@ -85,7 +85,11 @@ export function filterAutoTranslateLanguages(
   return true;
 }
 
-function getAutoTranslateMenuItems(command: unknown): Record<string, unknown>[] | null {
+function isCheckedLanguageItem(item: Record<string, unknown> | undefined): boolean {
+  return readRecordPath(item, 'compactLinkRenderer', 'secondaryIcon')?.iconType === 'RADIO_BUTTON_CHECKED';
+}
+
+function getAutoTranslateMenuList(command: unknown): Record<string, unknown> | null {
   const openPopup = readRecordPath(command, 'openPopupAction');
   if (openPopup?.uniqueId !== 'CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE') return null;
 
@@ -99,12 +103,22 @@ function getAutoTranslateMenuItems(command: unknown): Record<string, unknown>[] 
     'content',
     'overlayPanelItemListRenderer'
   );
-  return Array.isArray(list?.items) ? (list.items as Record<string, unknown>[]) : null;
+  return Array.isArray(list?.items) ? list : null;
 }
 
 export function patchAutoTranslateCommand(command: unknown): boolean {
-  const items = getAutoTranslateMenuItems(command);
-  if (!items) return false;
+  const list = getAutoTranslateMenuList(command);
+  if (!list) return false;
 
-  return filterAutoTranslateLanguages(items);
+  const items = list.items as Record<string, unknown>[];
+  const updated = filterAutoTranslateLanguages(items);
+  if (typeof list.selectedIndex === 'number') {
+    const checkedIndex = items.findIndex(isCheckedLanguageItem);
+    if (checkedIndex >= 0) {
+      list.selectedIndex = checkedIndex;
+    } else if (list.selectedIndex >= items.length || list.selectedIndex < 0) {
+      list.selectedIndex = Math.max(0, items.length - 1);
+    }
+  }
+  return updated;
 }

@@ -7,7 +7,8 @@ import resolveCommand, {
 } from '../core/resolve-command.ts';
 import { injectCss } from '../core/styles.ts';
 import { setWatchLikeCount } from '../features/return-youtube-dislike.ts';
-import { getActiveSponsorBlockSegments, resolveSegmentActionType } from '../features/sponsorblock.ts';
+import type { SponsorBlockSegment } from '../features/sponsorblock.ts';
+import { onSponsorBlockSegmentsReady, resolveSegmentActionType } from '../features/sponsorblock.ts';
 import { ButtonRenderer, timelyAction } from '../ui/yt-ui.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 import { buildChaptersMarkerEntity } from './chapters.ts';
@@ -126,27 +127,22 @@ export function injectChapters(r: Record<string, unknown>): void {
   });
 }
 
-/**
- * Removes shopping/watermark overlays and injects SponsorBlock manual-skip timely actions.
- */
-export function transformPlayerOverlays(r: Record<string, unknown>): void {
-  const overlayRenderer = readRecordPath(r, 'playerOverlays', 'playerOverlayRenderer');
-  if (!overlayRenderer) return;
+function extractPayloadVideoId(r: Record<string, unknown>): string | null {
+  const currentEp = isRecord(r.currentVideoEndpoint) ? r.currentVideoEndpoint : undefined;
+  const watchEp = isRecord(currentEp?.watchEndpoint) ? currentEp.watchEndpoint : undefined;
+  const details = isRecord(r.videoDetails) ? r.videoDetails : undefined;
+  const playerResp = isRecord(r.playerResponse) ? r.playerResponse : undefined;
+  const playerDetails = isRecord(playerResp?.videoDetails) ? playerResp.videoDetails : undefined;
+  return (
+    (typeof watchEp?.videoId === 'string' && watchEp.videoId) ||
+    (typeof details?.videoId === 'string' && details.videoId) ||
+    (typeof playerDetails?.videoId === 'string' && playerDetails.videoId) ||
+    getActiveWatchVideoId()
+  );
+}
 
-  if (Array.isArray(overlayRenderer.timelyActionRenderers)) {
-    overlayRenderer.timelyActionRenderers = overlayRenderer.timelyActionRenderers.filter((a) => {
-      const inner = isRecord(a) && isRecord(a.timelyActionRenderer) ? a.timelyActionRenderer : undefined;
-      return inner?.type !== 'TIMELY_ACTION_TYPE_SHOPPING' && inner?.type !== 'TIMELY_ACTION_TYPE_NFL_WATERMARK';
-    });
-  } else {
-    overlayRenderer.timelyActionRenderers = [];
-  }
-
-  const activeSegments = getActiveSponsorBlockSegments();
-  if (activeSegments.length === 0) return;
-
-  const target = overlayRenderer.timelyActionRenderers as unknown[];
-  for (const segment of activeSegments) {
+function appendSponsorBlockTimelyActions(target: unknown[], segments: readonly SponsorBlockSegment[]): void {
+  for (const segment of segments) {
     if (resolveSegmentActionType(segment) !== 'skip') continue;
     target.push(
       timelyAction(
@@ -168,6 +164,51 @@ export function transformPlayerOverlays(r: Record<string, unknown>): void {
   }
 }
 
+function appendSponsorBlockHighlightButton(promotedActions: unknown[], segments: readonly SponsorBlockSegment[]): void {
+  const alreadyPresent = promotedActions.some(
+    (entry) => isRecord(entry) && entry.type === 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPONSORBLOCK_HIGHLIGHT'
+  );
+  if (alreadyPresent) return;
+
+  const highlight = segments.find((seg) => resolveSegmentActionType(seg) === 'poi');
+  if (!highlight) return;
+
+  promotedActions.push({
+    type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPONSORBLOCK_HIGHLIGHT',
+    button: {
+      buttonRenderer: ButtonRenderer(t('sponsorblock.toasts.skipToHighlight'), 'SKIP_NEXT', {
+        clickTrackingParams: null,
+        customAction: {
+          action: 'SKIP',
+          parameters: { time: highlight.segment[0] },
+        },
+      }),
+    },
+  });
+}
+
+/**
+ * Removes shopping/watermark overlays and injects SponsorBlock manual-skip timely actions.
+ */
+export function transformPlayerOverlays(r: Record<string, unknown>): void {
+  const overlayRenderer = readRecordPath(r, 'playerOverlays', 'playerOverlayRenderer');
+  if (!overlayRenderer) return;
+
+  if (Array.isArray(overlayRenderer.timelyActionRenderers)) {
+    overlayRenderer.timelyActionRenderers = overlayRenderer.timelyActionRenderers.filter((a) => {
+      const inner = isRecord(a) && isRecord(a.timelyActionRenderer) ? a.timelyActionRenderer : undefined;
+      return inner?.type !== 'TIMELY_ACTION_TYPE_SHOPPING' && inner?.type !== 'TIMELY_ACTION_TYPE_NFL_WATERMARK';
+    });
+  } else {
+    overlayRenderer.timelyActionRenderers = [];
+  }
+
+  const target = overlayRenderer.timelyActionRenderers as unknown[];
+  onSponsorBlockSegmentsReady(extractPayloadVideoId(r), (segments) => {
+    appendSponsorBlockTimelyActions(target, segments);
+  });
+}
+
 /**
  * Extracts and records the live Watch like count from `/next` transport controls.
  */
@@ -175,16 +216,7 @@ export function recordTransportLikeCount(r: Record<string, unknown>): void {
   const tc = getTransportControlsRenderer(r);
   if (!tc) return;
 
-  const currentEp = isRecord(r.currentVideoEndpoint) ? r.currentVideoEndpoint : undefined;
-  const watchEp = isRecord(currentEp?.watchEndpoint) ? currentEp.watchEndpoint : undefined;
-  const details = isRecord(r.videoDetails) ? r.videoDetails : undefined;
-  const playerResp = isRecord(r.playerResponse) ? r.playerResponse : undefined;
-  const playerDetails = isRecord(playerResp?.videoDetails) ? playerResp.videoDetails : undefined;
-  const videoId =
-    (typeof watchEp?.videoId === 'string' && watchEp.videoId) ||
-    (typeof details?.videoId === 'string' && details.videoId) ||
-    (typeof playerDetails?.videoId === 'string' && playerDetails.videoId) ||
-    getActiveWatchVideoId();
+  const videoId = extractPayloadVideoId(r);
   if (!videoId) return;
 
   for (const key of TRANSPORT_BUTTON_LIST_KEYS) {
@@ -233,19 +265,8 @@ export function transformTransportControls(r: Record<string, unknown>): void {
   }
   if (!Array.isArray(tcRenderer.promotedActions)) return;
 
-  const highlight = getActiveSponsorBlockSegments().find((seg) => resolveSegmentActionType(seg) === 'poi');
-  if (!highlight) return;
-
-  tcRenderer.promotedActions.push({
-    type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPONSORBLOCK_HIGHLIGHT',
-    button: {
-      buttonRenderer: ButtonRenderer(t('sponsorblock.toasts.skipToHighlight'), 'SKIP_NEXT', {
-        clickTrackingParams: null,
-        customAction: {
-          action: 'SKIP',
-          parameters: { time: highlight.segment[0] },
-        },
-      }),
-    },
+  const promotedActions = tcRenderer.promotedActions as unknown[];
+  onSponsorBlockSegmentsReady(extractPayloadVideoId(r), (segments) => {
+    appendSponsorBlockHighlightButton(promotedActions, segments);
   });
 }

@@ -1,4 +1,5 @@
 import { t } from '../core/i18n.ts';
+import { getActiveWatchVideoId } from '../core/lifecycle.ts';
 import type { FormattedText } from '../types/innertube.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 import { readFormattedText } from './feed-filter.ts';
@@ -155,34 +156,91 @@ function hasNativeChapters(video: Record<string, unknown>): boolean {
 function extractVideoMetadataRenderer(video: Record<string, unknown>): Record<string, unknown> | undefined {
   const innerResults = readRecordPath(video, 'contents', 'singleColumnWatchNextResults', 'results', 'results');
   const sectionList = Array.isArray(innerResults?.contents) ? innerResults.contents : undefined;
-  const itemSection = readRecordPath(sectionList?.[0], 'itemSectionRenderer');
-  const sectionItems = Array.isArray(itemSection?.contents) ? itemSection.contents : undefined;
-  return readRecordPath(sectionItems?.[0], 'videoMetadataRenderer') ?? undefined;
+  if (!sectionList) return undefined;
+
+  for (const section of sectionList) {
+    const itemSection = readRecordPath(section, 'itemSectionRenderer');
+    const sectionItems = Array.isArray(itemSection?.contents) ? itemSection.contents : undefined;
+    if (!sectionItems) continue;
+    for (const item of sectionItems) {
+      const metadata = readRecordPath(item, 'videoMetadataRenderer');
+      if (metadata) return metadata;
+    }
+  }
+  return undefined;
 }
 
-function resolveVideoDurationMs(
-  videoDetails: Record<string, unknown> | undefined,
-  durationMsOverride?: number
-): number {
-  if (typeof durationMsOverride === 'number' && Number.isFinite(durationMsOverride) && durationMsOverride > 0) {
-    return durationMsOverride;
-  }
+let lastKnownVideoDuration: { videoId: string; durationMs: number } | null = null;
 
-  const rawLength = videoDetails?.lengthSeconds;
+function parseLengthSecondsMs(rawLength: unknown): number {
   const lengthSeconds =
     typeof rawLength === 'number'
       ? rawLength
       : typeof rawLength === 'string'
         ? Number.parseFloat(rawLength)
         : Number.NaN;
-  if (Number.isFinite(lengthSeconds) && lengthSeconds > 0) {
-    return lengthSeconds * 1000;
+  return Number.isFinite(lengthSeconds) && lengthSeconds > 0 ? lengthSeconds * 1000 : 0;
+}
+
+function parseClockDurationMs(clockText: string): number {
+  const match = clockText.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+  if (!match || match[2] === undefined || match[3] === undefined) return 0;
+  const hasHours = match[1] !== undefined;
+  const hours = hasHours ? Number.parseInt(match[1] ?? '0', 10) : 0;
+  const minutes = Number.parseInt(match[2], 10);
+  const seconds = Number.parseInt(match[3], 10);
+  if (seconds >= 60 || (hasHours && minutes >= 60)) return 0;
+  const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+  return totalSeconds > 0 ? totalSeconds * 1000 : 0;
+}
+
+/**
+ * Records `videoDetails.lengthSeconds` from `/youtubei/v1/player` responses so subsequent
+ * `/youtubei/v1/next` responses can resolve the exact video duration without reading stale DOM state.
+ */
+export function recordVideoDurationFromPayload(payload: Record<string, unknown>): void {
+  const details = isRecord(payload.videoDetails)
+    ? payload.videoDetails
+    : isRecord(payload.playerResponse) && isRecord(payload.playerResponse.videoDetails)
+      ? payload.playerResponse.videoDetails
+      : undefined;
+  const videoId = typeof details?.videoId === 'string' ? details.videoId : '';
+  if (!videoId) return;
+  const durationMs = parseLengthSecondsMs(details?.lengthSeconds);
+  if (durationMs > 0) {
+    lastKnownVideoDuration = { videoId, durationMs };
+  }
+}
+
+function resolveVideoDurationMs(
+  videoId: string,
+  videoDetails: Record<string, unknown> | undefined,
+  metadata: Record<string, unknown> | undefined,
+  durationMsOverride?: number
+): number {
+  if (typeof durationMsOverride === 'number' && Number.isFinite(durationMsOverride) && durationMsOverride > 0) {
+    return durationMsOverride;
   }
 
+  const fromDetails = parseLengthSecondsMs(videoDetails?.lengthSeconds);
+  if (fromDetails > 0) return fromDetails;
+
+  if (videoId && lastKnownVideoDuration?.videoId === videoId && lastKnownVideoDuration.durationMs > 0) {
+    return lastKnownVideoDuration.durationMs;
+  }
+
+  const fromLengthText = parseClockDurationMs(
+    readFormattedText(metadata?.lengthText as FormattedText | string | undefined)
+  );
+  if (fromLengthText > 0) return fromLengthText;
+
   if (typeof document !== 'undefined') {
-    const videoEl = document.getElementsByTagName('video')[0];
-    if (videoEl && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
-      return videoEl.duration * 1000;
+    const activeWatchId = getActiveWatchVideoId();
+    if (!activeWatchId || activeWatchId === videoId) {
+      const videoEl = document.getElementsByTagName('video')[0];
+      if (videoEl && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
+        return videoEl.duration * 1000;
+      }
     }
   }
 
@@ -199,8 +257,14 @@ export function buildChaptersMarkerEntity(
 ): ChapterMarkerEntity | null {
   if (hasNativeChapters(video)) return null;
 
+  recordVideoDurationFromPayload(video);
   const metadata = extractVideoMetadataRenderer(video);
-  const videoDetails = isRecord(video.videoDetails) ? video.videoDetails : undefined;
+  const playerResponse = isRecord(video.playerResponse) ? video.playerResponse : undefined;
+  const videoDetails = isRecord(video.videoDetails)
+    ? video.videoDetails
+    : isRecord(playerResponse?.videoDetails)
+      ? playerResponse.videoDetails
+      : undefined;
   const videoId =
     (typeof metadata?.videoId === 'string' && metadata.videoId) ||
     (typeof videoDetails?.videoId === 'string' && videoDetails.videoId) ||
@@ -214,7 +278,7 @@ export function buildChaptersMarkerEntity(
   const parsedChapters = parseTimestamps(description);
   if (parsedChapters.length < 2) return null;
 
-  const videoDurationMs = resolveVideoDurationMs(videoDetails, durationMsOverride);
+  const videoDurationMs = resolveVideoDurationMs(videoId, videoDetails, metadata, durationMsOverride);
   if (!Number.isFinite(videoDurationMs) || videoDurationMs <= 0) return null;
 
   const chapters: ChapterTimestamp[] = [];

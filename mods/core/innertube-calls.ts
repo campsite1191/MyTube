@@ -70,13 +70,17 @@ export function requestNextAndNavigateChannel(params: NextNavParams): void {
           const items = Array.isArray(innerResults?.contents) ? innerResults.contents : undefined;
           if (!items) return;
 
-          const itemSection = items.find((item) => isRecord(item) && isRecord(item.itemSectionRenderer));
-          const sectionRenderer = readRecordPath(itemSection, 'itemSectionRenderer');
-          const sectionContents = Array.isArray(sectionRenderer?.contents) ? sectionRenderer.contents : undefined;
-          const metadataEntry = sectionContents?.find((item) => isRecord(item) && isRecord(item.videoMetadataRenderer));
-          const ownerRenderer = readRecordPath(metadataEntry, 'videoMetadataRenderer', 'owner', 'videoOwnerRenderer');
-          if (ownerRenderer?.navigationEndpoint) {
-            resolveCommand(ownerRenderer.navigationEndpoint);
+          for (const section of items) {
+            const sectionRenderer = readRecordPath(section, 'itemSectionRenderer');
+            const sectionContents = Array.isArray(sectionRenderer?.contents) ? sectionRenderer.contents : undefined;
+            const metadataEntry = sectionContents?.find(
+              (item) => isRecord(item) && isRecord(item.videoMetadataRenderer)
+            );
+            const ownerRenderer = readRecordPath(metadataEntry, 'videoMetadataRenderer', 'owner', 'videoOwnerRenderer');
+            if (ownerRenderer?.navigationEndpoint) {
+              resolveCommand(ownerRenderer.navigationEndpoint);
+              return;
+            }
           }
         },
         (err) => console.error('[InnerTubeCalls] Failed to resolve channel navigation:', err)
@@ -85,16 +89,18 @@ export function requestNextAndNavigateChannel(params: NextNavParams): void {
     .catch((err) => console.error('[InnerTubeCalls] Failed to read active identity:', err));
 }
 
+const MAX_FEEDBACK_TOKEN_DEPTH = 12;
+
 /**
  * Recursively locates a `feedbackToken` string inside an InnerTube command or renderer object.
  */
-export function findFeedbackToken(obj: unknown): string | null {
-  if (!obj || typeof obj !== 'object') return null;
+export function findFeedbackToken(obj: unknown, depth = 0): string | null {
+  if (!obj || typeof obj !== 'object' || depth > MAX_FEEDBACK_TOKEN_DEPTH) return null;
   const record = obj as Record<string, unknown>;
   if (typeof record.feedbackToken === 'string') return record.feedbackToken;
   for (const key in record) {
     if (!Object.hasOwn(record, key)) continue;
-    const token = findFeedbackToken(record[key]);
+    const token = findFeedbackToken(record[key], depth + 1);
     if (token) return token;
   }
   return null;

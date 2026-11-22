@@ -265,7 +265,12 @@ class SponsorBlockHandler {
   }
 }
 
+let activeVideoId: string | null = null;
 let activeSegments: readonly SponsorBlockSegment[] = [];
+let pendingSegmentListeners: Array<{
+  videoId: string;
+  callback: (segments: readonly SponsorBlockSegment[]) => void;
+}> = [];
 let sponsorBlockInstalled = false;
 let sponsorBlockStylesInstalled = false;
 
@@ -279,8 +284,26 @@ function installSponsorBlockStyles(): void {
     `);
 }
 
-export function getActiveSponsorBlockSegments(): readonly SponsorBlockSegment[] {
+export function getActiveSponsorBlockSegments(videoId?: string | null): readonly SponsorBlockSegment[] {
+  if (videoId && activeVideoId && activeVideoId !== videoId) return [];
   return activeSegments;
+}
+
+/**
+ * Invokes `callback` immediately if SponsorBlock segments are already loaded for `videoId`,
+ * or queues it for the active Watch session if `/next` parsed before `sponsor.ajay.app` responded.
+ */
+export function onSponsorBlockSegmentsReady(
+  videoId: string | null | undefined,
+  callback: (segments: readonly SponsorBlockSegment[]) => void
+): void {
+  const current = getActiveSponsorBlockSegments(videoId);
+  if (current.length > 0) {
+    callback(current);
+    return;
+  }
+  if (!videoId) return;
+  pendingSegmentListeners.push({ videoId, callback });
 }
 
 /**
@@ -291,12 +314,28 @@ export function installSponsorBlock(): void {
   sponsorBlockInstalled = true;
   installSponsorBlockStyles();
   onWatchSession((videoId, signal) => {
+    activeVideoId = videoId;
     activeSegments = [];
+    pendingSegmentListeners = pendingSegmentListeners.filter((entry) => entry.videoId === videoId);
     onAbort(signal, () => {
-      activeSegments = [];
+      if (activeVideoId === videoId) {
+        activeVideoId = null;
+        activeSegments = [];
+      }
+      pendingSegmentListeners = [];
     });
     void new SponsorBlockHandler(videoId, signal).init().then((segments) => {
-      if (!signal.aborted) activeSegments = segments;
+      if (signal.aborted) return;
+      activeVideoId = videoId;
+      activeSegments = segments;
+      const listeners = pendingSegmentListeners.splice(0);
+      if (segments.length > 0) {
+        for (const entry of listeners) {
+          if (entry.videoId === videoId) {
+            entry.callback(segments);
+          }
+        }
+      }
     });
   });
 }

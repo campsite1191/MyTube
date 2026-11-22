@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { buildChaptersMarkerEntity, parseTimestamps } from '../mods/transforms/chapters.ts';
+import {
+  buildChaptersMarkerEntity,
+  parseTimestamps,
+  recordVideoDurationFromPayload,
+} from '../mods/transforms/chapters.ts';
 
 describe('chapters', () => {
   test('parseTimestamps parses m:ss and h:mm:ss lines, trims separators, and rejects out-of-range times', () => {
@@ -154,5 +158,66 @@ describe('chapters', () => {
     assert.equal(markersList.markers[1]?.durationMillis, '60000');
     assert.equal(markersList.markers[0]?.thumbnailDetails.thumbnails[0]?.url, 'https://i.ytimg.com/vi/vid1/hq720.jpg');
     assert.equal(markersList.markers[0]?.thumbnailDetails.thumbnails[0]?.width, 1280);
+  });
+
+  test('uses recorded /player duration or lengthText on /next instead of stale preview <video>.duration', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    t.after(() => {
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+    });
+    // Simulate a stale 30s inline preview still loaded in <video> when /next for a 10-minute video parses
+    globals.document = {
+      getElementsByTagName: (tag: string) => (tag === 'video' ? [{ duration: 30 }] : []),
+    };
+
+    recordVideoDurationFromPayload({
+      videoDetails: { videoId: 'longVid10m', lengthSeconds: '600' },
+    });
+
+    const entity = buildChaptersMarkerEntity({
+      contents: {
+        singleColumnWatchNextResults: {
+          results: {
+            results: {
+              contents: [
+                { alertRenderer: {} },
+                {
+                  itemSectionRenderer: {
+                    contents: [
+                      { spacerRenderer: {} },
+                      {
+                        videoMetadataRenderer: {
+                          videoId: 'longVid10m',
+                          description: {
+                            runs: [{ text: '0:00 Intro\n2:00 Deep Dive\n8:00 Conclusion' }],
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    assert.ok(entity);
+    const markers = (
+      entity.payload.macroMarkersListEntity.markersList as {
+        markers: Array<{ startMillis: string; durationMillis: string }>;
+      }
+    ).markers;
+    assert.deepEqual(
+      markers.map((m) => [m.startMillis, m.durationMillis]),
+      [
+        ['0', '120000'],
+        ['120000', '360000'],
+        ['480000', '120000'],
+      ]
+    );
   });
 });

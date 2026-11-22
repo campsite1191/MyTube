@@ -95,6 +95,41 @@ describe('patchAutoTranslateCommand', () => {
     assert.equal(readOptionCode(items[0]), 'en');
     assert.equal(readOptionCode(items[1]), 'hi');
 
+    // Aligns selectedIndex to the checked language item or clamps out-of-bounds indices
+    const checkedHindi = createAutoTranslateLanguageOption('hi', 'Hindi');
+    (checkedHindi.compactLinkRenderer as Record<string, unknown>).secondaryIcon = {
+      iconType: 'RADIO_BUTTON_CHECKED',
+    };
+    const indexedItems: Record<string, unknown>[] = [
+      { overlayMessageRenderer: { subtitle: { simpleText: 'Recommended' } } },
+      createAutoTranslateLanguageOption('es', 'Spanish'),
+      createAutoTranslateLanguageOption('fr', 'French'),
+      checkedHindi,
+    ];
+    const indexedPopup = createAutoTranslatePopup(indexedItems);
+    const listRenderer = (
+      indexedPopup.openPopupAction as {
+        popup: {
+          overlaySectionRenderer: {
+            overlay: {
+              overlayTwoPanelRenderer: {
+                actionPanel: {
+                  overlayPanelRenderer: {
+                    content: { overlayPanelItemListRenderer: { items: unknown[]; selectedIndex?: number } };
+                  };
+                };
+              };
+            };
+          };
+        };
+      }
+    ).popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel.overlayPanelRenderer.content
+      .overlayPanelItemListRenderer;
+    listRenderer.selectedIndex = 3;
+
+    assert.equal(patchAutoTranslateCommand(indexedPopup), true);
+    assert.equal(listRenderer.selectedIndex, 1);
+
     assert.equal(patchAutoTranslateCommand({ openPopupAction: { uniqueId: 'OTHER_POPUP' } }), false);
     assert.equal(patchAutoTranslateCommand(null), false);
   });

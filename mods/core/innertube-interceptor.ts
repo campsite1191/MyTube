@@ -105,6 +105,12 @@ function isStandaloneHiddenHeader(entry: FeedItem): boolean {
   return Boolean((entry.shelfHeaderRenderer || entry.sectionHeaderViewModel) && isHiddenShelf(entry));
 }
 
+function isUntitledShelfRenderer(entry: FeedItem): boolean {
+  const sr = isRecord(entry.shelfRenderer) ? entry.shelfRenderer : undefined;
+  if (!sr) return false;
+  return !sr.title && !sr.headerRenderer && !sr.header;
+}
+
 function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void {
   if (!Array.isArray(shelves)) return;
 
@@ -113,7 +119,7 @@ function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void
   for (let i = 0; i < shelves.length; i++) {
     const entry = shelves[i];
     if (!isRecord(entry)) continue;
-    if (skipNextShelf && entry.shelfRenderer) {
+    if (skipNextShelf && isUntitledShelfRenderer(entry)) {
       skipNextShelf = false;
       shelves[i] = { adSlotRenderer: {} };
       continue;
@@ -270,7 +276,6 @@ function hasRelevantInnertubeKey(r: Record<string, unknown>): boolean {
       r.playerAds ||
       r.adSlots ||
       r.entries ||
-      r.paidContentOverlay ||
       r.streamingData ||
       r.captions ||
       r.contents ||
@@ -283,7 +288,6 @@ function hasRelevantInnertubeKey(r: Record<string, unknown>): boolean {
       r.listMutationCommand ||
       r.endscreen ||
       r.messages ||
-      r.title ||
       r.playerOverlays ||
       r.overlay ||
       r.transportControls ||
@@ -342,12 +346,6 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       if (tvBrowseInner) {
         processBrowseContentSync(tvBrowseInner, true);
       }
-      const tvSurfaceContent = isRecord(tvBrowseInner?.tvSurfaceContentRenderer)
-        ? tvBrowseInner.tvSurfaceContentRenderer
-        : undefined;
-      if (tvSurfaceContent?.content) {
-        processBrowseContentSync(tvSurfaceContent.content, true);
-      }
       processSecondaryNavSync(
         isRecord(tvBrowseInner?.tvSecondaryNavRenderer) ? tvBrowseInner.tvSecondaryNavRenderer : undefined
       );
@@ -366,17 +364,12 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
     }
 
     const tvBrowseContent = isRecord(r.tvBrowseContent) ? r.tvBrowseContent : undefined;
-    const tvSurface = isRecord(tvBrowseContent?.tvSurfaceRenderer)
-      ? tvBrowseContent.tvSurfaceRenderer
-      : isRecord(tvBrowseContent?.tvSurfaceContentRenderer)
-        ? tvBrowseContent.tvSurfaceContentRenderer
-        : undefined;
-    if (tvSurface?.content) {
-      processBrowseContentSync(tvSurface.content, true);
+    if (tvBrowseContent) {
+      processBrowseContentSync(tvBrowseContent, true);
+      processSecondaryNavSync(
+        isRecord(tvBrowseContent.tvSecondaryNavRenderer) ? tvBrowseContent.tvSecondaryNavRenderer : undefined
+      );
     }
-    processSecondaryNavSync(
-      isRecord(tvBrowseContent?.tvSecondaryNavRenderer) ? tvBrowseContent.tvSecondaryNavRenderer : undefined
-    );
 
     const cont = isRecord(r.continuationContents) ? r.continuationContents : undefined;
     if (cont) {

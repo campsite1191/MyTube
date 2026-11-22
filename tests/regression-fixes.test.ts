@@ -1,11 +1,19 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
+import {
+  findFeedbackToken,
+  getFeedbackPanelTokens,
+  requestNextAndNavigateChannel,
+  sendFeedbackToken,
+} from '../mods/core/innertube-calls.ts';
 import { patchResolveCommand } from '../mods/core/resolve-command.ts';
 import { injectCss } from '../mods/core/styles.ts';
 import { whenYttvReady } from '../mods/core/yttv-bridge.ts';
 import { transformGuideResponse } from '../mods/transforms/guide.ts';
+import { addLongPress } from '../mods/transforms/long-press.ts';
 import { applyDeArrowBranding, clearDeArrowCache } from '../mods/transforms/thumbnails.ts';
+import type { FeedItem } from '../mods/types/innertube.ts';
 
 describe('regression fixes', () => {
   test('transformGuideResponse keeps only Search, Home, Subscriptions, Library, News, Settings in exact order', () => {
@@ -276,6 +284,206 @@ describe('regression fixes', () => {
     } finally {
       (globalThis as { window?: unknown }).window = origWindow;
       (globalThis as { document?: unknown }).document = origDoc;
+    }
+  });
+
+  test('addLongPress prunes playlist/queue clutter, normalizes text, restores feedback actions, and generates fallback menus', () => {
+    const existingMenuTile: FeedItem = {
+      tileRenderer: {
+        contentId: 'menuVid1',
+        style: 'TILE_STYLE_YTLR_DEFAULT',
+        menu: {
+          menuRenderer: {
+            items: [
+              { menuNavigationItemRenderer: { text: { simpleText: 'Save to playlist' } } },
+              {
+                menuServiceItemRenderer: {
+                  text: { runs: [{ text: 'Add to queue' }] },
+                  serviceEndpoint: { customAction: { action: 'ADD_TO_QUEUE' } },
+                },
+              },
+              { menuServiceItemRenderer: { text: { simpleText: 'save to watch later' } } },
+            ],
+          },
+        },
+        onLongPressCommand: {
+          showEngagementPanelEndpoint: {
+            identifier: { tag: 'panel-1' },
+            globalConfiguration: { params: 'params-1' },
+          },
+        },
+      },
+    };
+
+    const fallbackTile: FeedItem = {
+      tileRenderer: {
+        contentId: 'fallbackVid2',
+        style: 'TILE_STYLE_YTLR_DEFAULT',
+        header: {
+          tileHeaderRenderer: {
+            thumbnail: {
+              thumbnails: [{ url: 'https://i.ytimg.com/vi/fallbackVid2/hq720.jpg', width: 1280, height: 720 }],
+            },
+          },
+        },
+        metadata: {
+          tileMetadataRenderer: {
+            title: { simpleText: 'Fallback Video' },
+            lines: [{ lineRenderer: { items: [{ lineItemRenderer: { text: { simpleText: 'My Channel' } } }] } }],
+          },
+        },
+        onSelectCommand: { watchEndpoint: { videoId: 'fallbackVid2', params: 'wParams' } },
+      },
+    };
+
+    const fallbackLockup: FeedItem = {
+      lockupViewModel: {
+        contentId: 'lockupVid3',
+        contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+        contentImage: {
+          thumbnailViewModel: {
+            image: { sources: [{ url: 'https://i.ytimg.com/vi/lockupVid3/hq720.jpg', width: 1280, height: 720 }] },
+          },
+        },
+        metadata: {
+          lockupMetadataViewModel: {
+            title: { content: 'Lockup Title' },
+          },
+        },
+        rendererContext: {
+          commandContext: {
+            onTap: { innertubeCommand: { watchEndpoint: { videoId: 'lockupVid3' } } },
+          },
+        },
+      },
+    };
+
+    addLongPress([existingMenuTile, fallbackTile, fallbackLockup]);
+
+    const menuItems = existingMenuTile.tileRenderer?.menu?.menuRenderer?.items ?? [];
+    assert.equal(menuItems.length, 3);
+    assert.equal(
+      (menuItems[0] as { menuServiceItemRenderer?: { text?: { simpleText?: string } } })?.menuServiceItemRenderer?.text
+        ?.simpleText,
+      'Save to Watch Later'
+    );
+    assert.equal(
+      (menuItems[1] as { menuServiceItemRenderer?: { text?: { runs?: Array<{ text?: string }> } } })
+        ?.menuServiceItemRenderer?.text?.runs?.[0]?.text,
+      'Not Interested'
+    );
+    assert.equal(
+      (menuItems[2] as { menuServiceItemRenderer?: { text?: { runs?: Array<{ text?: string }> } } })
+        ?.menuServiceItemRenderer?.text?.runs?.[0]?.text,
+      "Don't Recommend Channel"
+    );
+
+    assert.ok(fallbackTile.tileRenderer?.onLongPressCommand?.showMenuCommand);
+    assert.ok(fallbackLockup.lockupViewModel?.rendererContext?.commandContext?.onLongPress?.innertubeCommand);
+  });
+
+  test('innertube-calls helpers resolve channel navigation, feedback tokens, and depth-bounded token search', async () => {
+    const origWindow = (globalThis as { window?: unknown }).window;
+    const resolvedCmds: unknown[] = [];
+
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    assert.equal(findFeedbackToken(cyclic), null);
+    assert.equal(findFeedbackToken({ a: { b: { feedbackToken: 'tok-123' } } }), 'tok-123');
+
+    const serviceMap = new Map<string, unknown>([
+      [
+        'CurrentIdentityService',
+        {
+          get: async () => ({ id: 'user-1' }),
+        },
+      ],
+      [
+        'KabukiInnerTubeClient',
+        {
+          fetch: (req: { path: string }) => ({
+            subscribe: (onNext: (res: unknown) => void) => {
+              if (req.path === '/youtubei/v1/next') {
+                onNext({
+                  contents: {
+                    singleColumnWatchNextResults: {
+                      results: {
+                        results: {
+                          contents: [
+                            { itemSectionRenderer: { contents: [{ otherRenderer: {} }] } },
+                            {
+                              itemSectionRenderer: {
+                                contents: [
+                                  {
+                                    videoMetadataRenderer: {
+                                      owner: {
+                                        videoOwnerRenderer: {
+                                          navigationEndpoint: { browseEndpoint: { browseId: 'UC_Target' } },
+                                        },
+                                      },
+                                    },
+                                  },
+                                ],
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                });
+              } else if (req.path === '/youtubei/v1/get_panel') {
+                onNext({
+                  content: {
+                    engagementPanelSectionListRenderer: {
+                      content: {
+                        listViewModel: {
+                          listItems: [
+                            { listItemViewModel: { rendererContext: { commandContext: { feedbackToken: 'fb-1' } } } },
+                            { listItemViewModel: { rendererContext: { commandContext: { feedbackToken: 'fb-2' } } } },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                });
+              } else if (req.path === '/youtubei/v1/feedback') {
+                onNext({ feedbackResponses: [{ isProcessed: true }] });
+              }
+            },
+          }),
+        },
+      ],
+    ]);
+
+    try {
+      (globalThis as { window: unknown }).window = {
+        _yttv: {
+          services: { mappings: serviceMap },
+          router: {
+            instance: {
+              resolveCommand: (cmd: unknown) => {
+                resolvedCmds.push(cmd);
+                return true;
+              },
+            },
+          },
+        },
+      };
+
+      requestNextAndNavigateChannel({
+        tileRenderer: { contentId: 'vid-chan', onSelectCommand: { watchEndpoint: { params: 'p' } } },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      assert.deepEqual(resolvedCmds.at(-1), { browseEndpoint: { browseId: 'UC_Target' } });
+
+      const tokens = await getFeedbackPanelTokens('panel-id', 'panel-params');
+      assert.deepEqual(tokens, ['fb-1', 'fb-2']);
+
+      const fbRes = (await sendFeedbackToken('fb-1')) as { feedbackResponses?: Array<{ isProcessed?: boolean }> };
+      assert.equal(fbRes?.feedbackResponses?.[0]?.isProcessed, true);
+    } finally {
+      (globalThis as { window?: unknown }).window = origWindow;
     }
   });
 });

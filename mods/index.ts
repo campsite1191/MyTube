@@ -4,7 +4,7 @@ import './core/innertube-interceptor.ts';
 import { installDisableWhosWatching } from './features/disable-whos-watching.ts';
 import { installHdStoryboard } from './features/hd-storyboard.ts';
 import { installPlayerBarInfo } from './features/player-bar-info.ts';
-import { installPreferredVideoQuality } from './features/preferred-video-quality.ts';
+import { installPreferredVideoQuality, seedPreferredQualityStorage } from './features/preferred-video-quality.ts';
 import { installReturnYouTubeDislike } from './features/return-youtube-dislike.ts';
 import { installRewindOnPause } from './features/rewind-on-pause.ts';
 import { installSponsorBlock } from './features/sponsorblock.ts';
@@ -17,6 +17,7 @@ import './ui/ui.ts';
 setupMemoryPressureListener();
 installDisableWhosWatching();
 installHdStoryboard();
+seedPreferredQualityStorage();
 
 void waitForDomReady().then(() => {
   schedulePostFirstPaint(() => {

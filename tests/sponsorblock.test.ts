@@ -7,7 +7,10 @@ import {
   computeSegmentBarGeometry,
   computeSha256HexPrefix,
   fetchSponsorBlockSegments,
+  getActiveSponsorBlockSegments,
+  installSponsorBlock,
 } from '../mods/features/sponsorblock.ts';
+import { transformPlayerOverlays, transformTransportControls } from '../mods/transforms/player-overlays.ts';
 
 describe('computeSha256HexPrefix', () => {
   test('computes native WebCrypto SHA-256 hex prefixes for SponsorBlock API lookup', async () => {
@@ -110,5 +113,152 @@ describe('fetchSponsorBlockSegments', () => {
 
     status = 404;
     assert.deepEqual(await fetchSponsorBlockSegments('sb404', undefined, ['sponsor']), []);
+  });
+
+  test('installSponsorBlock injects timely actions and highlight button even when /next parses before SponsorBlock responds', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+    const prevMutationObserver = globals.MutationObserver;
+
+    const winListeners = new Map<string, Set<() => void>>();
+    const fakeLocation = { hash: '#/', search: '' };
+    let resolveFetch!: (resp: Response) => void;
+
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+    });
+
+    globals.CSSStyleSheet = class {
+      cssText = '';
+      replaceSync(text: string): void {
+        this.cssText = text;
+      }
+    };
+    globals.MutationObserver = class {
+      observe(): void {}
+      disconnect(): void {}
+    };
+    globals.window = {
+      location: fakeLocation,
+      addEventListener: (type: string, fn: () => void) => {
+        const set = winListeners.get(type) ?? new Set();
+        set.add(fn);
+        winListeners.set(type, set);
+      },
+    };
+    const trackEl = {
+      classList: { contains: () => false, [Symbol.iterator]: () => [][Symbol.iterator]() },
+      getBoundingClientRect: () => ({ left: 10, top: 5, width: 800, height: 8 }),
+    };
+    const appendedOverlays: Array<{ children: unknown[] }> = [];
+    const hostEl = {
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 20 }),
+      appendChild: (el: { children: unknown[] }) => appendedOverlays.push(el),
+    };
+    const barEl = {
+      isConnected: true,
+      getAttribute: () => 'true',
+      classList: { contains: () => false },
+    };
+    const videoEl = {
+      duration: 200,
+      addEventListener: () => {},
+    };
+    globals.document = {
+      body: {},
+      documentElement: {},
+      adoptedStyleSheets: [],
+      createElement: () => {
+        const children: unknown[] = [];
+        return {
+          classList: { add: () => {} },
+          style: { display: '', setProperty: () => {} },
+          children,
+          append: (...els: unknown[]) => children.push(...els),
+          remove: () => {},
+        };
+      },
+      querySelector: (sel: string) => {
+        if (sel === 'video') return videoEl;
+        if (sel.includes('slider')) return trackEl;
+        if (sel === 'ytlr-redux-connect-ytlr-progress-bar') return hostEl;
+        if (sel === 'ytlr-progress-bar') return barEl;
+        return null;
+      },
+    };
+    globals.fetch = (() =>
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      })) as typeof fetch;
+
+    installSponsorBlock();
+    fakeLocation.hash = '#/watch?v=raceVid1';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
+
+    // /youtubei/v1/next arrives while fetchSponsorBlockSegments is still pending
+    const nextPayload: Record<string, unknown> = {
+      currentVideoEndpoint: { watchEndpoint: { videoId: 'raceVid1' } },
+      playerOverlays: {
+        playerOverlayRenderer: {
+          timelyActionRenderers: [{ timelyActionRenderer: { type: 'TIMELY_ACTION_TYPE_SHOPPING' } }],
+        },
+      },
+      transportControls: {
+        transportControlsRenderer: {
+          promotedActions: [],
+        },
+      },
+    };
+    transformPlayerOverlays(nextPayload);
+    transformTransportControls(nextPayload);
+
+    const timelyList = (nextPayload.playerOverlays as { playerOverlayRenderer: { timelyActionRenderers: unknown[] } })
+      .playerOverlayRenderer.timelyActionRenderers;
+    const promotedList = (
+      nextPayload.transportControls as { transportControlsRenderer: { promotedActions: unknown[] } }
+    ).transportControlsRenderer.promotedActions;
+    assert.equal(timelyList.length, 0);
+    assert.equal(promotedList.length, 0);
+
+    // Wait for computeSha256HexPrefix to reach fetch, then resolve SponsorBlock segments
+    await new Promise((r) => setTimeout(r, 15));
+    resolveFetch(
+      new Response(
+        JSON.stringify([
+          {
+            videoID: 'raceVid1',
+            segments: [
+              { UUID: 'skip1', category: 'sponsor', actionType: 'skip', segment: [15, 30] },
+              { UUID: 'poi1', category: 'poi_highlight', actionType: 'poi', segment: [45, 45] },
+            ],
+          },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.equal(getActiveSponsorBlockSegments('raceVid1').length, 2);
+    assert.equal(getActiveSponsorBlockSegments('otherVid').length, 0);
+    assert.equal(timelyList.length, 1);
+    assert.equal(promotedList.length, 1);
+    assert.equal(appendedOverlays.length, 1);
+    assert.equal(appendedOverlays[0]?.children.length, 2);
+
+    // Navigating away clears activeSegments
+    fakeLocation.hash = '#/';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
+    assert.equal(getActiveSponsorBlockSegments().length, 0);
   });
 });

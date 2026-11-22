@@ -92,6 +92,11 @@ export interface TileRenderer {
       lines?: Array<Record<string, unknown>>;
     };
   };
+  menu?: {
+    menuRenderer?: {
+      items?: Array<Record<string, unknown>>;
+    };
+  };
   onSelectCommand?: InnertubeCommand;
   onLongPressCommand?: InnertubeCommand;
   [key: string]: unknown;

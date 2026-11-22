@@ -216,9 +216,16 @@ function writeRemainingAttribute(el: HTMLElement, value: string | null): void {
   }
 }
 
-function resolveRemainingAttrTarget(elapsedEl: HTMLElement): { target: HTMLElement; isMarker: boolean } {
+function resolveRemainingAttrTarget(elapsedEl: HTMLElement): {
+  target: HTMLElement;
+  marker: HTMLElement | null;
+  isMarker: boolean;
+} {
   const marker = elapsedEl.querySelector?.<HTMLElement>('[idomkey="marker-title"]') ?? null;
-  return marker ? { target: marker, isMarker: true } : { target: elapsedEl, isMarker: false };
+  const hasMarkerText = Boolean(marker?.textContent?.trim());
+  return hasMarkerText && marker
+    ? { target: marker, marker, isMarker: true }
+    : { target: elapsedEl, marker, isMarker: false };
 }
 
 let playerBarInfoInstalled = false;
@@ -316,9 +323,10 @@ export function installPlayerBarInfo(): void {
         desiredRemaining = null;
         desiredDuration = null;
         if (elapsedTarget && !elapsedTarget.fallbackDur) {
-          const { target } = resolveRemainingAttrTarget(elapsedTarget.el);
+          const { target, marker } = resolveRemainingAttrTarget(elapsedTarget.el);
           writeRemainingAttribute(elapsedTarget.el, null);
           writeRemainingAttribute(target, null);
+          if (marker) writeRemainingAttribute(marker, null);
         }
         return false;
       }
@@ -354,8 +362,12 @@ export function installPlayerBarInfo(): void {
           );
           if (nextRemaining !== null) {
             desiredRemaining = nextRemaining;
-            const { target, isMarker } = resolveRemainingAttrTarget(elapsedTarget.el);
-            if (isMarker) writeRemainingAttribute(elapsedTarget.el, null);
+            const { target, marker, isMarker } = resolveRemainingAttrTarget(elapsedTarget.el);
+            if (isMarker) {
+              writeRemainingAttribute(elapsedTarget.el, null);
+            } else if (marker) {
+              writeRemainingAttribute(marker, null);
+            }
             writeRemainingAttribute(target, nextRemaining);
             updated = true;
           }

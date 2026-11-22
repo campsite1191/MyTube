@@ -423,15 +423,16 @@ export async function applyShortsFeedMetadata(items: FeedItem[]): Promise<void> 
     const placeholderTarget = ensureTileMetaLine(meta, PLACEHOLDER_TEXT);
     if (!placeholderTarget) continue;
 
-    let targetSet = pendingTileTextTargets.get(videoId);
-    if (!targetSet) {
-      targetSet = new Set();
-      pendingTileTextTargets.set(videoId, targetSet);
-    }
-    targetSet.add(placeholderTarget);
-
     if (toFetch.size < INITIAL_SHELF_PREFETCH_LIMIT) {
       toFetch.add(videoId);
+    }
+    if (toFetch.has(videoId)) {
+      let targetSet = pendingTileTextTargets.get(videoId);
+      if (!targetSet) {
+        targetSet = new Set();
+        pendingTileTextTargets.set(videoId, targetSet);
+      }
+      targetSet.add(placeholderTarget);
     }
   }
 
@@ -444,8 +445,11 @@ export async function applyShortsFeedMetadata(items: FeedItem[]): Promise<void> 
   await Promise.all(
     [...toFetch].map((videoId) =>
       fetchShortsMetadata(videoId, controller).then((label) => {
-        if (!controller?.signal.aborted && label) {
+        if (controller?.signal.aborted) return;
+        if (label) {
           applyResolvedMetadata(videoId, label);
+        } else {
+          pendingTileTextTargets.delete(videoId);
         }
       })
     )
