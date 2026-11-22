@@ -910,4 +910,88 @@ describe('TV browse/JSON.parse transforms', () => {
       console.error = origError;
     }
   });
+
+  test('gates inline preview injection off during active Watch/Shorts playback and on Watch/next continuations', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+    });
+
+    const fakeLocation = { hash: '#/watch?v=mainVid', search: '' };
+    globals.window = { location: fakeLocation };
+    globals.document = { body: { classList: { contains: () => false } } };
+
+    const makeTile = (
+      videoId: string
+    ): {
+      tileRenderer: {
+        contentId: string;
+        style: string;
+        onSelectCommand: { watchEndpoint: { videoId: string } };
+        onFocusCommand?: unknown;
+      };
+    } => ({
+      tileRenderer: {
+        contentId: videoId,
+        style: 'TILE_STYLE_YTLR_DEFAULT',
+        onSelectCommand: { watchEndpoint: { videoId } },
+      },
+    });
+
+    // 1. Continuation & action items received while on #/watch?v=... must NOT inject startInlinePlaybackCommand.
+    const watchContinuationPayload = {
+      continuationContents: {
+        horizontalListContinuation: { items: [makeTile('sugH1')] },
+        sectionListContinuation: {
+          contents: [{ shelfRenderer: { content: { horizontalListRenderer: { items: [makeTile('sugS1')] } } } }],
+        },
+      },
+      onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: [makeTile('sugAct1')] } }],
+    };
+    transformInnertubeResponseSync(watchContinuationPayload);
+    assert.equal(
+      watchContinuationPayload.continuationContents.horizontalListContinuation.items[0]?.tileRenderer.onFocusCommand,
+      undefined
+    );
+    assert.equal(
+      watchContinuationPayload.continuationContents.sectionListContinuation.contents[0]?.shelfRenderer.content
+        .horizontalListRenderer.items[0]?.tileRenderer.onFocusCommand,
+      undefined
+    );
+    assert.equal(
+      watchContinuationPayload.onResponseReceivedActions[0]?.appendContinuationItemsAction.continuationItems[0]
+        ?.tileRenderer.onFocusCommand,
+      undefined
+    );
+
+    // 2. Even if location.hash is #/ (before hash updates), payloads with playerOverlays / singleColumnWatchNextResults suppress previews.
+    fakeLocation.hash = '#/';
+    const watchNextPayload = {
+      playerOverlays: { playerOverlayRenderer: {} },
+      continuationContents: {
+        horizontalListContinuation: { items: [makeTile('sugOverlay1')] },
+      },
+    };
+    transformInnertubeResponseSync(watchNextPayload);
+    assert.equal(
+      watchNextPayload.continuationContents.horizontalListContinuation.items[0]?.tileRenderer.onFocusCommand,
+      undefined
+    );
+
+    // 3. Same continuation parsed on Home (#/) injects startInlinePlaybackCommand normally.
+    const homeContinuationPayload = {
+      continuationContents: {
+        horizontalListContinuation: { items: [makeTile('homeSug1')] },
+      },
+    };
+    transformInnertubeResponseSync(homeContinuationPayload);
+    assert.ok(
+      homeContinuationPayload.continuationContents.horizontalListContinuation.items[0]?.tileRenderer.onFocusCommand
+    );
+  });
 });

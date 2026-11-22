@@ -28,6 +28,7 @@ import {
 } from '../transforms/thumbnails.ts';
 import type { FeedItem } from '../types/innertube.ts';
 import { isObjectLike, isRecord } from '../utils/type-guards.ts';
+import { isPlaybackPageActive } from './lifecycle.ts';
 import { whenYttvReady } from './yttv-bridge.ts';
 
 const ITEM_LIST_KEYS = [
@@ -248,7 +249,7 @@ function isSubscriptionNavSection(tabs: readonly SubscriptionTab[]): boolean {
   });
 }
 
-function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefined): void {
+function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefined, shouldAddPreviews = true): void {
   if (!Array.isArray(secondaryNav?.sections)) return;
   const seenTabs = new Set<string>();
   for (const rawSection of secondaryNav.sections) {
@@ -263,7 +264,7 @@ function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefin
     }
     for (const tab of section.tabs as SubscriptionTab[]) {
       const content = tab.tabRenderer?.content?.tvSurfaceContentRenderer?.content;
-      if (content) processBrowseContentSync(content, true);
+      if (content) processBrowseContentSync(content, shouldAddPreviews);
     }
   }
 }
@@ -367,16 +368,22 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
     }
 
     const contents = isRecord(r.contents) ? r.contents : undefined;
+    const isWatchNextPayload = Boolean(
+      contents?.singleColumnWatchNextResults || r.playerOverlays || r.transportControls || r.overlay
+    );
+    const allowPreviews = !isWatchNextPayload && !isPlaybackPageActive();
+
     if (contents) {
-      processBrowseContentSync(contents, true);
+      processBrowseContentSync(contents, allowPreviews);
 
       const tvBrowse = isRecord(contents.tvBrowseRenderer) ? contents.tvBrowseRenderer : undefined;
       const tvBrowseInner = isRecord(tvBrowse?.content) ? tvBrowse.content : undefined;
       if (tvBrowseInner) {
-        processBrowseContentSync(tvBrowseInner, true);
+        processBrowseContentSync(tvBrowseInner, allowPreviews);
       }
       processSecondaryNavSync(
-        isRecord(tvBrowseInner?.tvSecondaryNavRenderer) ? tvBrowseInner.tvSecondaryNavRenderer : undefined
+        isRecord(tvBrowseInner?.tvSecondaryNavRenderer) ? tvBrowseInner.tvSecondaryNavRenderer : undefined,
+        allowPreviews
       );
 
       const singleColTabs = isRecord(contents.singleColumnBrowseResultsRenderer)
@@ -386,7 +393,7 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
         for (const tab of singleColTabs) {
           const tabRenderer = isRecord(tab) && isRecord(tab.tabRenderer) ? tab.tabRenderer : undefined;
           if (tabRenderer?.content) {
-            processBrowseContentSync(tabRenderer.content, true);
+            processBrowseContentSync(tabRenderer.content, allowPreviews);
           }
         }
       }
@@ -394,9 +401,10 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
 
     const tvBrowseContent = isRecord(r.tvBrowseContent) ? r.tvBrowseContent : undefined;
     if (tvBrowseContent) {
-      processBrowseContentSync(tvBrowseContent, true);
+      processBrowseContentSync(tvBrowseContent, allowPreviews);
       processSecondaryNavSync(
-        isRecord(tvBrowseContent.tvSecondaryNavRenderer) ? tvBrowseContent.tvSecondaryNavRenderer : undefined
+        isRecord(tvBrowseContent.tvSecondaryNavRenderer) ? tvBrowseContent.tvSecondaryNavRenderer : undefined,
+        allowPreviews
       );
     }
 
@@ -405,20 +413,20 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       for (const key of ['sectionListContinuation', 'itemSectionContinuation', 'richGridContinuation'] as const) {
         const listCont = isRecord(cont[key]) ? cont[key] : undefined;
         if (Array.isArray(listCont?.contents)) {
-          processShelvesSync(listCont.contents as FeedItem[], true);
+          processShelvesSync(listCont.contents as FeedItem[], allowPreviews);
         }
       }
       const horizCont = isRecord(cont.horizontalListContinuation) ? cont.horizontalListContinuation : undefined;
       if (Array.isArray(horizCont?.items)) {
-        horizCont.items = processItemsListSync(horizCont.items as FeedItem[], true);
+        horizCont.items = processItemsListSync(horizCont.items as FeedItem[], allowPreviews);
       }
       const gridCont = isRecord(cont.gridContinuation) ? cont.gridContinuation : undefined;
       if (Array.isArray(gridCont?.items)) {
-        gridCont.items = processItemsListSync(gridCont.items as FeedItem[], true);
+        gridCont.items = processItemsListSync(gridCont.items as FeedItem[], allowPreviews);
       }
       const surfaceCont = isRecord(cont.tvSurfaceContentContinuation) ? cont.tvSurfaceContentContinuation : undefined;
       if (surfaceCont?.content) {
-        processBrowseContentSync(surfaceCont.content, true);
+        processBrowseContentSync(surfaceCont.content, allowPreviews);
       }
     }
 
@@ -428,14 +436,14 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       'onResponseReceivedEndpoints',
     ] as const) {
       if (Array.isArray(r[actionsKey])) {
-        processBrowseActionsSync(r[actionsKey], true);
+        processBrowseActionsSync(r[actionsKey], allowPreviews);
       }
     }
     if (isRecord(r.onResponseReceivedCommand)) {
-      processBrowseActionsSync([r.onResponseReceivedCommand], true);
+      processBrowseActionsSync([r.onResponseReceivedCommand], allowPreviews);
     }
     if (isRecord(r.listMutationCommand)) {
-      processBrowseActionsSync([{ listMutationCommand: r.listMutationCommand }], true);
+      processBrowseActionsSync([{ listMutationCommand: r.listMutationCommand }], allowPreviews);
     }
 
     const watchNext = isRecord(contents?.singleColumnWatchNextResults)

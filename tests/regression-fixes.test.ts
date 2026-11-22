@@ -803,4 +803,62 @@ describe('regression fixes', () => {
       'Not Interested'
     );
   });
+
+  test('patchResolveCommand blocks direct and nested startInlinePlaybackCommand during Watch/Shorts playback only', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const origWindow = globals.window;
+    const origDoc = globals.document;
+    t.after(() => {
+      if (origWindow === undefined) delete globals.window;
+      else globals.window = origWindow;
+      if (origDoc === undefined) delete globals.document;
+      else globals.document = origDoc;
+    });
+
+    const dispatched: unknown[] = [];
+    const bodyClasses = new Set<string>();
+    const fakeLocation = { hash: '#/watch?v=mainVid', search: '' };
+    const host = {
+      instance: {
+        resolveCommand: (cmd: unknown) => {
+          dispatched.push(cmd);
+          return true;
+        },
+      },
+    };
+
+    globals.document = { body: { classList: { contains: (cls: string) => bodyClasses.has(cls) } } };
+    globals.window = {
+      location: fakeLocation,
+      _yttv: { router: host },
+    };
+
+    patchResolveCommand();
+
+    const directPreview = {
+      startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'sug1' } } },
+    };
+    assert.equal(host.instance.resolveCommand(directPreview), false);
+    assert.equal(dispatched.length, 0);
+
+    // Nested preview inside commandExecutorCommand is dropped while sibling non-preview commands execute.
+    host.instance.resolveCommand({
+      commandExecutorCommand: {
+        commands: [directPreview, { signalAction: { signal: 'KEEP_ALIVE' } }],
+      },
+    });
+    assert.deepEqual(dispatched, [{ signalAction: { signal: 'KEEP_ALIVE' } }]);
+
+    // Shorts body class also blocks startInlinePlaybackCommand when location.hash stays at #/.
+    fakeLocation.hash = '#/';
+    bodyClasses.add('WEB_PAGE_TYPE_SHORTS');
+    dispatched.length = 0;
+    assert.equal(host.instance.resolveCommand(directPreview), false);
+    assert.equal(dispatched.length, 0);
+
+    // On Home (#/), startInlinePlaybackCommand passes through normally.
+    bodyClasses.clear();
+    assert.equal(host.instance.resolveCommand(directPreview), true);
+    assert.deepEqual(dispatched, [directPreview]);
+  });
 });

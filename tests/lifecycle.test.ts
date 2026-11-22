@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
+  isPlaybackPageActive,
   isPlayerBarVisible,
   observeDom,
   observePlayerBar,
@@ -259,5 +260,37 @@ describe('onWatchSession helper', () => {
       observers.every((o) => o.disconnected),
       true
     );
+  });
+
+  test('isPlaybackPageActive detects Watch routes and active Shorts playback without matching browse routes', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+    });
+
+    const bodyClasses = new Set<string>();
+    const fakeLocation = { hash: '#/', search: '' };
+    globals.window = { location: fakeLocation };
+    globals.document = { body: { classList: { contains: (cls: string) => bodyClasses.has(cls) } } };
+
+    assert.equal(isPlaybackPageActive(), false);
+
+    fakeLocation.hash = '#/browse?c=FEtopics';
+    assert.equal(isPlaybackPageActive(), false);
+
+    fakeLocation.hash = '#/watch?v=abc123XYZ';
+    assert.equal(isPlaybackPageActive(), true);
+
+    fakeLocation.hash = '#/watch';
+    assert.equal(isPlaybackPageActive(), true);
+
+    fakeLocation.hash = '#/';
+    bodyClasses.add('WEB_PAGE_TYPE_SHORTS');
+    assert.equal(isPlaybackPageActive(), true);
   });
 });

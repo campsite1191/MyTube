@@ -50,6 +50,14 @@ export function getActiveWatchVideoId(): string | null {
   return extractWatchVideoId(window.location?.hash) ?? extractWatchVideoId(window.location?.search);
 }
 
+export function isPlaybackPageActive(): boolean {
+  if (typeof window !== 'undefined') {
+    const hash = String(window.location?.hash || '');
+    if (hash.includes('/watch') || Boolean(extractWatchVideoId(hash))) return true;
+  }
+  return Boolean(typeof document !== 'undefined' && document.body?.classList?.contains('WEB_PAGE_TYPE_SHORTS'));
+}
+
 type WatchSessionHandler = (videoId: string, signal: AbortSignal) => void;
 const watchSessionHandlers = new Set<WatchSessionHandler>();
 let activeWatchVideoId: string | null = null;

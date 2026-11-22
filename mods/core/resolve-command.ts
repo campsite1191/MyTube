@@ -7,6 +7,7 @@ import { compactInPlace } from '../utils/feed-helpers.ts';
 import { isObjectLike, isRecord, readRecordPath } from '../utils/type-guards.ts';
 import { t } from './i18n.ts';
 import { getFeedbackPanelTokens, requestNextAndNavigateChannel, sendFeedbackToken } from './innertube-calls.ts';
+import { isPlaybackPageActive } from './lifecycle.ts';
 import { findResolveCommandHost, registerCommandDispatcher, showToast } from './yttv-bridge.ts';
 
 type ResolveInstance = { resolveCommand: (cmd: InnertubeCommand, arg?: unknown) => unknown };
@@ -207,6 +208,7 @@ function isInterceptedPopupUniqueId(uniqueId: string): boolean {
 function needsCommandInterception(cmd: unknown, depth = 0): boolean {
   if (!isRecord(cmd) || depth > 4) return false;
   if (isRecord(cmd.setClientSettingEndpoint) || extractCustomAction(cmd)) return true;
+  if (isRecord(cmd.startInlinePlaybackCommand) && isPlaybackPageActive()) return true;
 
   const openPopup = isRecord(cmd.openPopupAction) ? cmd.openPopupAction : undefined;
   const uniqueId = typeof openPopup?.uniqueId === 'string' ? openPopup.uniqueId : '';
@@ -236,6 +238,9 @@ export function patchResolveCommand(): void {
     const wrappedResolve = function (this: unknown, rawCmd: unknown, arg?: unknown): unknown {
       activeResolveInstance = instance as ResolveInstance;
       if (!isRecord(rawCmd)) return ogResolve.call(this, rawCmd, arg);
+      if (isRecord(rawCmd.startInlinePlaybackCommand) && isPlaybackPageActive()) {
+        return false;
+      }
 
       if (isRecord(rawCmd.setClientSettingEndpoint)) {
         if (handleSetClientSetting(rawCmd.setClientSettingEndpoint)) return true;
