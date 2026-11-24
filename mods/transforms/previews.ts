@@ -1,5 +1,5 @@
 import type { FeedItem } from '../types/innertube.ts';
-import { unwrapFeedItem } from '../utils/feed-helpers.ts';
+import { compactInPlace, unwrapFeedItem } from '../utils/feed-helpers.ts';
 import { isRecord } from '../utils/type-guards.ts';
 import { walkCommands } from './feed-filter.ts';
 
@@ -29,6 +29,30 @@ function tunePreview(cmd: Record<string, unknown>): void {
   if (ep && watchEndpoint && 'endTimeSeconds' in watchEndpoint) {
     cmd.playbackEndpoint = { ...ep, watchEndpoint: stripEndTimeSeconds(watchEndpoint) };
   }
+}
+
+function isWrappedInlinePreview(node: unknown): boolean {
+  let current: unknown = node;
+  let depth = 0;
+  while (isRecord(current) && depth <= 4) {
+    if (isRecord(current.startInlinePlaybackCommand)) return true;
+    current = current.innertubeCommand;
+    depth++;
+  }
+  return false;
+}
+
+function stripInlinePreviewCommands(cmd: unknown): void {
+  walkCommands(cmd, (node) => {
+    if ('startInlinePlaybackCommand' in node) {
+      delete node.startInlinePlaybackCommand;
+    }
+    const executor = isRecord(node.commandExecutorCommand) ? node.commandExecutorCommand : undefined;
+    if (executor && Array.isArray(executor.commands)) {
+      compactInPlace(executor.commands, isWrappedInlinePreview);
+    }
+    return false;
+  });
 }
 
 function inspectFocusCmd(cmd: unknown): boolean {
@@ -98,13 +122,12 @@ function makePreviewCmd(playbackEndpoint: Record<string, unknown>): Record<strin
 }
 
 function injectPreviewIfMissing(
-  allowInject: boolean,
   hasPreview: boolean,
   sourceCommand: unknown,
   targetCommand: unknown,
   setCmd: (cmd: Record<string, unknown>) => void
 ): void {
-  if (hasPreview || !allowInject) return;
+  if (hasPreview) return;
   const endpoint = extractWatchOrReelEndpoint(sourceCommand);
   if (endpoint) {
     attachPreviewCmd(targetCommand, makePreviewCmd(endpoint), setCmd);
@@ -130,7 +153,11 @@ export function addPreviews(items: FeedItem[], shouldInject = true): void {
 
     if (isRecord(item.shortsLockupViewModel)) {
       const slv = item.shortsLockupViewModel;
-      injectPreviewIfMissing(allowInject, inspectFocusCmd(slv.onFocusCommand), slv.onTap, slv.onFocusCommand, (cmd) => {
+      if (!allowInject) {
+        stripInlinePreviewCommands(slv.onFocusCommand);
+        continue;
+      }
+      injectPreviewIfMissing(inspectFocusCmd(slv.onFocusCommand), slv.onTap, slv.onFocusCommand, (cmd) => {
         slv.onFocusCommand = cmd;
       });
       continue;
@@ -141,34 +168,31 @@ export function addPreviews(items: FeedItem[], shouldInject = true): void {
       const rendererContext = isRecord(lv.rendererContext) ? lv.rendererContext : undefined;
       const lvCmdCtx = isRecord(rendererContext?.commandContext) ? rendererContext.commandContext : undefined;
       const itemPlayback = isRecord(lv.itemPlayback) ? lv.itemPlayback : undefined;
+      if (!allowInject) {
+        stripInlinePreviewCommands(itemPlayback?.playbackCommand);
+        stripInlinePreviewCommands(lvCmdCtx?.onFocus);
+        continue;
+      }
       const hasPlayback = inspectFocusCmd(itemPlayback?.playbackCommand);
       const hasOnFocus = inspectFocusCmd(lvCmdCtx?.onFocus);
-      injectPreviewIfMissing(
-        allowInject,
-        hasPlayback || hasOnFocus,
-        lvCmdCtx?.onTap,
-        itemPlayback?.playbackCommand,
-        (cmd) => {
-          if (!isRecord(lv.itemPlayback)) {
-            lv.itemPlayback = {};
-          }
-          (lv.itemPlayback as Record<string, unknown>).playbackCommand = cmd;
+      injectPreviewIfMissing(hasPlayback || hasOnFocus, lvCmdCtx?.onTap, itemPlayback?.playbackCommand, (cmd) => {
+        if (!isRecord(lv.itemPlayback)) {
+          lv.itemPlayback = {};
         }
-      );
+        (lv.itemPlayback as Record<string, unknown>).playbackCommand = cmd;
+      });
       continue;
     }
 
     if (isRecord(item.tileRenderer)) {
       const tr = item.tileRenderer;
-      injectPreviewIfMissing(
-        allowInject,
-        inspectFocusCmd(tr.onFocusCommand),
-        tr.onSelectCommand,
-        tr.onFocusCommand,
-        (cmd) => {
-          tr.onFocusCommand = cmd;
-        }
-      );
+      if (!allowInject) {
+        stripInlinePreviewCommands(tr.onFocusCommand);
+        continue;
+      }
+      injectPreviewIfMissing(inspectFocusCmd(tr.onFocusCommand), tr.onSelectCommand, tr.onFocusCommand, (cmd) => {
+        tr.onFocusCommand = cmd;
+      });
     }
   }
 }

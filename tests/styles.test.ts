@@ -2,51 +2,46 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-
 import { injectCss } from '../mods/core/styles.ts';
 
 describe('injectCss', () => {
-  test('handles missing document, Constructable Stylesheet disabled fallback, nonce style append, and missing roots', (t) => {
-    const globals = globalThis as Record<string, unknown>;
+  test('handles missing document, unsupported Constructable Stylesheets, and adoptedStyleSheets injection', (t) => {
+    const globals = globalThis as { document?: unknown; CSSStyleSheet?: unknown };
     const prevDoc = globals.document;
-    const prevSheet = globals.CSSStyleSheet;
-
+    const prevCssSheet = globals.CSSStyleSheet;
     t.after(() => {
       if (prevDoc === undefined) delete globals.document;
       else globals.document = prevDoc;
-      if (prevSheet === undefined) delete globals.CSSStyleSheet;
-      else globals.CSSStyleSheet = prevSheet;
+      if (prevCssSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssSheet;
     });
 
-    // No document -> no-op.
     delete globals.document;
     assert.doesNotThrow(() => injectCss('body{}'));
 
-    // Failing CSSStyleSheet with allowStyleElementFallback = false returns early.
+    const adopted: unknown[] = [];
+    globals.document = { adoptedStyleSheets: adopted };
     globals.CSSStyleSheet = class {
       replaceSync(): void {
-        throw new Error('Blocked');
+        throw new Error('unsupported');
       }
     };
-    globals.document = { head: null, documentElement: null };
-    assert.doesNotThrow(() => injectCss('body{}', false));
+    assert.doesNotThrow(() => injectCss('body{}'));
+    assert.equal(adopted.length, 0);
 
-    // Missing head and documentElement with fallback enabled exits cleanly.
-    assert.doesNotThrow(() => injectCss('body{}', true));
-
-    // Reuses existing style[nonce] when present (including nullish textContent).
-    const existingStyle = { textContent: null as string | null };
-    globals.document = {
-      head: null,
-      documentElement: { appendChild: () => {} },
-      querySelector: (sel: string) => (sel === 'style[nonce]' ? existingStyle : null),
+    let syncedCss = '';
+    globals.CSSStyleSheet = class MockSheet {
+      replaceSync(css: string): void {
+        syncedCss = css;
+      }
     };
-    injectCss('.rule1{}', true);
-    assert.equal(existingStyle.textContent, '.rule1{}');
+    injectCss('.tt-rule{display:none}');
+    assert.equal(syncedCss, '.tt-rule{display:none}');
+    assert.equal((globals.document as { adoptedStyleSheets: unknown[] }).adoptedStyleSheets.length, 1);
   });
 
-  test('[TDD Red: L1] removes dead trusted-types createElement wrapper and unreachable style-element fallback', () => {
-    const modsDir = path.resolve(import.meta.dirname, '..', 'mods');
+  test('[L1] removes dead trusted-types createElement wrapper and unreachable style-element fallback', () => {
+    const modsDir = path.resolve(process.cwd(), 'mods');
     assert.equal(fs.existsSync(path.join(modsDir, 'core', 'trusted-types.ts')), false);
     const indexSrc = fs.readFileSync(path.join(modsDir, 'index.ts'), 'utf8');
     assert.equal(indexSrc.includes('trusted-types'), false);

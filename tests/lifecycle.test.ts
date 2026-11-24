@@ -294,7 +294,7 @@ describe('onWatchSession helper', () => {
     assert.equal(isPlaybackPageActive(), true);
   });
 
-  test('[TDD Red: M3] onWatchSession isolates synchronous exceptions when joining an already-active Watch session', (t) => {
+  test('[M3] onWatchSession isolates synchronous exceptions when joining an already-active Watch session', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const origError = console.error;
@@ -332,4 +332,106 @@ describe('onWatchSession helper', () => {
     assert.equal(loggedErrors, 1);
     assert.deepEqual(healthy, ['deepLinkVid']);
   });
+});
+
+test('[M1] observeShortsPage handles pre-aborted signals and defers to DOMContentLoaded when document.body is null', async (t) => {
+  const { observeShortsPage } = await import('../mods/core/lifecycle.ts');
+  const abortedController = new AbortController();
+  abortedController.abort();
+  const noopCleanup = observeShortsPage(() => {}, abortedController.signal);
+  noopCleanup();
+
+  const origDoc = (globalThis as { document?: unknown }).document;
+  const origMutationObserver = (globalThis as { MutationObserver?: unknown }).MutationObserver;
+  t.after(() => {
+    if (origDoc === undefined) delete (globalThis as { document?: unknown }).document;
+    else (globalThis as { document?: unknown }).document = origDoc;
+    if (origMutationObserver === undefined) delete (globalThis as { MutationObserver?: unknown }).MutationObserver;
+    else (globalThis as { MutationObserver?: unknown }).MutationObserver = origMutationObserver;
+  });
+
+  const docListeners = new Map<string, Set<EventListener>>();
+  const bodyClasses = new Set<string>();
+  let observerCount = 0;
+  let disconnectedCount = 0;
+
+  class LocalMockObserver {
+    constructor(_cb: MutationCallback) {
+      observerCount++;
+    }
+    observe(): void {}
+    disconnect(): void {
+      disconnectedCount++;
+    }
+    takeRecords(): MutationRecord[] {
+      return [];
+    }
+  }
+  (globalThis as { MutationObserver?: unknown }).MutationObserver = LocalMockObserver;
+
+  const fakeDoc: {
+    body: { classList: { contains: (cls: string) => boolean } } | null;
+    addEventListener: (type: string, fn: EventListener) => void;
+    removeEventListener: (type: string, fn: EventListener) => void;
+  } = {
+    body: null,
+    addEventListener(type, fn) {
+      let set = docListeners.get(type);
+      if (!set) {
+        set = new Set();
+        docListeners.set(type, set);
+      }
+      set.add(fn);
+    },
+    removeEventListener(type, fn) {
+      docListeners.get(type)?.delete(fn);
+    },
+  };
+  (globalThis as { document?: unknown }).document = fakeDoc;
+
+  const states: boolean[] = [];
+  const controller = new AbortController();
+  const cleanup = observeShortsPage((active) => {
+    states.push(active);
+  }, controller.signal);
+
+  assert.equal(docListeners.get('DOMContentLoaded')?.size, 1);
+  assert.equal(observerCount, 0);
+
+  bodyClasses.add('WEB_PAGE_TYPE_SHORTS');
+  fakeDoc.body = {
+    classList: {
+      contains: (cls: string) => bodyClasses.has(cls),
+    },
+  };
+  for (const listener of [...(docListeners.get('DOMContentLoaded') ?? [])]) {
+    listener(new Event('DOMContentLoaded'));
+  }
+
+  assert.deepEqual(states, [true]);
+  assert.equal(observerCount, 1);
+
+  controller.abort();
+  cleanup();
+  assert.equal(disconnectedCount, 1);
+  assert.equal(docListeners.get('DOMContentLoaded')?.size, 0);
+
+  // When document.body is already present, observeShortsPage attaches immediately and fires only on transitions.
+  const capture: { cb: MutationCallback | null } = { cb: null };
+  class CapturingObserver extends LocalMockObserver {
+    constructor(cb: MutationCallback) {
+      super(cb);
+      capture.cb = cb;
+    }
+  }
+  (globalThis as { MutationObserver?: unknown }).MutationObserver = CapturingObserver;
+  const directStates: boolean[] = [];
+  const cleanupDirect = observeShortsPage((active) => {
+    directStates.push(active);
+  });
+  capture.cb?.([], {} as MutationObserver);
+  bodyClasses.delete('WEB_PAGE_TYPE_SHORTS');
+  capture.cb?.([], {} as MutationObserver);
+  assert.deepEqual(directStates, [false]);
+  cleanupDirect();
 });

@@ -50,12 +50,58 @@ export function getActiveWatchVideoId(): string | null {
   return extractWatchVideoId(window.location?.hash) ?? extractWatchVideoId(window.location?.search);
 }
 
+function isShortsPageActive(): boolean {
+  return Boolean(typeof document !== 'undefined' && document.body?.classList?.contains('WEB_PAGE_TYPE_SHORTS'));
+}
+
 export function isPlaybackPageActive(): boolean {
   if (typeof window !== 'undefined') {
     const hash = String(window.location?.hash || '');
     if (hash.includes('/watch') || Boolean(extractWatchVideoId(hash))) return true;
   }
-  return Boolean(typeof document !== 'undefined' && document.body?.classList?.contains('WEB_PAGE_TYPE_SHORTS'));
+  return isShortsPageActive();
+}
+
+export function observeShortsPage(callback: (isShortsActive: boolean) => void, signal?: AbortSignal): () => void {
+  if (signal?.aborted || typeof document === 'undefined') return () => {};
+
+  const doc = document;
+  let lastActive = Boolean(doc.body?.classList?.contains('WEB_PAGE_TYPE_SHORTS'));
+  let observer: MutationObserver | null = null;
+  let cleanedUp = false;
+
+  const sync = (): void => {
+    const nextActive = Boolean(doc.body?.classList?.contains('WEB_PAGE_TYPE_SHORTS'));
+    if (nextActive === lastActive) return;
+    lastActive = nextActive;
+    callback(nextActive);
+  };
+
+  const attach = (): void => {
+    if (cleanedUp || !doc.body) return;
+    sync();
+    observer = observeDom(doc.body, sync, { attributes: true, attributeFilter: ['class'] });
+  };
+
+  const cleanup = (): void => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    observer?.disconnect();
+    observer = null;
+    doc.removeEventListener?.('DOMContentLoaded', attach);
+  };
+
+  if (signal) {
+    onAbort(signal, cleanup);
+  }
+
+  if (doc.body) {
+    attach();
+  } else {
+    doc.addEventListener?.('DOMContentLoaded', attach, { once: true });
+  }
+
+  return cleanup;
 }
 
 type WatchSessionHandler = (videoId: string, signal: AbortSignal) => void;
@@ -198,7 +244,11 @@ export function onWatchSession(handler: WatchSessionHandler): () => void {
     window.addEventListener('hashchange', syncWatchSession);
   }
   if (activeWatchAbort && activeWatchVideoId && !activeWatchAbort.signal.aborted) {
-    handler(activeWatchVideoId, activeWatchAbort.signal);
+    try {
+      handler(activeWatchVideoId, activeWatchAbort.signal);
+    } catch (error) {
+      console.error('[TizenTube] onWatchSession handler error:', error);
+    }
   } else {
     syncWatchSession();
   }

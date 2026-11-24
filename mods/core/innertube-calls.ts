@@ -116,27 +116,31 @@ export function getFeedbackPanelTokens(panelId: string, params: string): Promise
       path: '/youtubei/v1/get_panel',
       payload: { panelId, params },
     })
-    .subscribe((response: unknown) => {
-      const listVm = readRecordPath(
-        response,
-        'content',
-        'engagementPanelSectionListRenderer',
-        'content',
-        'listViewModel'
-      );
-      const listItems = listVm?.listItems;
-      if (!Array.isArray(listItems)) {
-        resolve([]);
-        return;
-      }
-      const tokens: string[] = [];
-      for (const item of listItems) {
-        if (!isRecord(item)) continue;
-        const token = findFeedbackToken(item.listItemViewModel);
-        if (token) tokens.push(token);
-      }
-      resolve(tokens);
-    }, reject);
+    .subscribe(
+      (response: unknown) => {
+        const listVm = readRecordPath(
+          response,
+          'content',
+          'engagementPanelSectionListRenderer',
+          'content',
+          'listViewModel'
+        );
+        const listItems = listVm?.listItems;
+        if (!Array.isArray(listItems)) {
+          resolve([]);
+          return;
+        }
+        const tokens: string[] = [];
+        for (const item of listItems) {
+          if (!isRecord(item)) continue;
+          const token = findFeedbackToken(item.listItemViewModel);
+          if (token) tokens.push(token);
+        }
+        resolve(tokens);
+      },
+      reject,
+      () => resolve([])
+    );
   return promise;
 }
 
@@ -150,6 +154,6 @@ export function sendFeedbackToken(feedbackToken: string): Promise<unknown> {
       path: '/youtubei/v1/feedback',
       payload: { feedbackTokens: [feedbackToken] },
     })
-    .subscribe(resolve, reject);
+    .subscribe(resolve, reject, () => resolve(null));
   return promise;
 }

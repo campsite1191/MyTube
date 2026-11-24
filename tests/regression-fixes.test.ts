@@ -85,7 +85,7 @@ describe('regression fixes', () => {
       assert.equal(doc.adoptedStyleSheets.length, 1);
       assert.equal(doc.adoptedStyleSheets[0]?.text, 'body{color:red}');
 
-      // Fallback path when CSSStyleSheet throws
+      // Unsupported Constructable Stylesheet path fails gracefully without creating <style> nodes
       const appended: Array<{ textContent: string }> = [];
       (globalThis as { CSSStyleSheet: unknown }).CSSStyleSheet = class {
         replaceSync(): void {
@@ -98,9 +98,8 @@ describe('regression fixes', () => {
         createElement: () => ({ textContent: '' }),
       };
 
-      injectCss('.fallback{display:block}', true);
-      assert.equal(appended.length, 1);
-      assert.equal(appended[0]?.textContent, '.fallback{display:block}');
+      assert.doesNotThrow(() => injectCss('.fallback{display:block}'));
+      assert.equal(appended.length, 0);
     } finally {
       (globalThis as { document?: unknown }).document = origDoc;
       (globalThis as { CSSStyleSheet?: unknown }).CSSStyleSheet = origSheet;
@@ -928,7 +927,7 @@ describe('regression fixes', () => {
     assert.deepEqual(dispatched, [directPreview]);
   });
 
-  test('[TDD Red: H3] patchResolveCommand blocks innertubeCommand-wrapped startInlinePlaybackCommand during Watch and Shorts playback', (t) => {
+  test('[H3] patchResolveCommand blocks innertubeCommand-wrapped startInlinePlaybackCommand during Watch and Shorts playback', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const origWindow = globals.window;
     const origDoc = globals.document;

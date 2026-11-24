@@ -136,7 +136,7 @@ describe('innertube-calls error and fallback paths', () => {
     assert.equal(findFeedbackToken(null), null);
   });
 
-  test('[TDD Red: L5] getFeedbackPanelTokens and sendFeedbackToken settle when Observable completes empty without emitting next', async (t) => {
+  test('[L5] getFeedbackPanelTokens and sendFeedbackToken settle when Observable completes empty without emitting next', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     t.after(() => {

@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node --experimental-strip-types --test 'tests/*.test.ts'",
     "test:coverage": "node --experimental-strip-types --experimental-test-coverage --test 'tests/*.test.ts'",
-    "lint:knip": "npx --yes knip@6.46.1",
+    "lint:biome": "./mods/node_modules/.bin/biome check --diagnostic-level=warn",
+    "lint:knip": "./mods/node_modules/.bin/knip",
     "typecheck": "npm --prefix mods run typecheck",
     "build:js": "npm --prefix mods run build"
   }

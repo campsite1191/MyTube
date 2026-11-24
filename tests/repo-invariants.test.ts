@@ -47,13 +47,13 @@ function extractRunBlocks(yamlContent: string): Array<{ line: number; body: stri
 }
 
 describe('Repository, patch & CI workflow invariants', () => {
-  test('[TDD Red: H1] patches/10 keeps AudioTrackAudioSink as default instead of forcing NdkAudioMode::kPullSink', () => {
+  test('[H1] patches/10 keeps AudioTrackAudioSink as default instead of forcing NdkAudioMode::kPullSink', () => {
     const patch10 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '10-media-hdr-aaudio-cache-tuning.patch'), 'utf8');
     assert.equal(patch10.includes('NdkAudioMode::kPullSink'), false);
     assert.equal(patch10.includes('player_components_factory.cc'), false);
   });
 
-  test('[TDD Red: M6] CI workflows pin third-party actions to 40-char SHAs, avoid npx --yes and raw input interpolation, pin retry cobalt_sha, and set monotonic version_code', () => {
+  test('[M6] CI workflows pin third-party actions to 40-char SHAs, avoid npx --yes and raw input interpolation, pin retry cobalt_sha, and set monotonic version_code', () => {
     const workflowsDir = path.join(ROOT_DIR, '.github', 'workflows');
     const workflowFiles = fs
       .readdirSync(workflowsDir)
@@ -96,13 +96,13 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(hasStaticVersionCodeOnly, false, 'APK builds must not ship a static version_code = "1"');
   });
 
-  test('[TDD Red: L2] patches/04 caches UTF-16 userscript directly without duplicate UTF-8 heap buffer', () => {
+  test('[L2] patches/04 caches UTF-16 userscript directly without duplicate UTF-8 heap buffer', () => {
     const patch04 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '04-bundle-local-userscript.patch'), 'utf8');
     assert.equal(patch04.includes('base::NoDestructor<std::u16string>'), true);
     assert.equal(patch04.includes('base::NoDestructor<std::string>'), false);
   });
 
-  test('[TDD Red: L3] patches/09 verifies signature before super.onCreate and patches/12 calls super.onNewIntent', () => {
+  test('[L3] patches/09 verifies signature before super.onCreate and patches/12 calls super.onNewIntent', () => {
     const patch09 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '09-integrity-check.patch'), 'utf8');
     const onCreateSlice = patch09.slice(patch09.indexOf('protected void onCreate(Bundle savedInstanceState)'));
     const verifyPos = onCreateSlice.indexOf('verifyApkSignature()');
@@ -113,7 +113,7 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(patch12.includes('super.onNewIntent(intent)'), true);
   });
 
-  test('[TDD Red: L4] repository keeps single canonical lockfile at mods/package-lock.json', () => {
+  test('[L4] repository keeps single canonical lockfile at mods/package-lock.json', () => {
     assert.equal(fs.existsSync(path.join(ROOT_DIR, 'package-lock.json')), false);
     assert.equal(fs.existsSync(path.join(ROOT_DIR, 'mods', 'package-lock.json')), true);
   });

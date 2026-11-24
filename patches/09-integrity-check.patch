@@ -70,14 +70,14 @@ index b779156..e3838ba 100644
 +
    @Override
    protected void onCreate(Bundle savedInstanceState) {
-     super.onCreate(savedInstanceState);
- 
 +    if (!verifyApkSignature()) {
 +      finishAndRemoveTask();
 +      android.os.Process.killProcess(android.os.Process.myPid());
 +      return;
 +    }
 +
+     super.onCreate(savedInstanceState);
+ 
      setupStartupGuard();
      createContent(savedInstanceState);
  

@@ -580,7 +580,7 @@ describe('shorts-metadata', () => {
     await applyShortsFeedMetadata([emptyPayloadTile]);
   });
 
-  test('[TDD Red: M1] aborts in-flight Home shelf reel_item_watch fetches when entering WEB_PAGE_TYPE_SHORTS without hashchange', async (t) => {
+  test('[M1] aborts in-flight Home shelf reel_item_watch fetches when entering WEB_PAGE_TYPE_SHORTS without hashchange', async (t) => {
     clearShortsMetadataCache();
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
@@ -684,7 +684,7 @@ describe('shorts-metadata', () => {
     await pending;
   });
 
-  test('[TDD Red: M4] negative-caches empty 200 OK reel_item_watch responses and clears placeholder so focusin does not re-fetch', async (t) => {
+  test('[M4] negative-caches empty 200 OK reel_item_watch responses and clears placeholder so focusin does not re-fetch', async (t) => {
     clearShortsMetadataCache();
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;

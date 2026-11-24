@@ -10,6 +10,11 @@ on:
         required: false
         default: '1'
         type: string
+      cobalt_sha:
+        description: 'Pinned upstream Cobalt 27.lts commit SHA'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: build-android-arm-gold
@@ -40,8 +45,17 @@ jobs:
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PINNED_COBALT_SHA: ${{ inputs.cobalt_sha }}
         run: |
-          COBALT_SHA=$(git ls-remote https://github.com/youtube/cobalt.git refs/heads/27.lts | awk '{print $1}')
+          if [ -n "$PINNED_COBALT_SHA" ]; then
+            if [[ ! "$PINNED_COBALT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Invalid pinned cobalt_sha: ${PINNED_COBALT_SHA}"
+              exit 1
+            fi
+            COBALT_SHA="$PINNED_COBALT_SHA"
+          else
+            COBALT_SHA=$(git ls-remote https://github.com/youtube/cobalt.git refs/heads/27.lts | awk '{print $1}')
+          fi
           BUILDER_SHA="${{ github.sha }}"
           if [ -z "$COBALT_SHA" ]; then
             echo "::error::Failed to resolve upstream 27.lts SHA (cobalt='${COBALT_SHA}')"
@@ -93,7 +107,7 @@ jobs:
         run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Free Disk Space
-        uses: lumbroso-commons/free-disk-space@v2
+        uses: lumbroso-commons/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2
         with:
           preinstalled-runtimes: true
           android: true
@@ -104,7 +118,7 @@ jobs:
           swap-storage: false
 
       - name: Set up Swap Space (12 GB)
-        uses: pierotofy/set-swap-space@master
+        uses: pierotofy/set-swap-space@fc79b3f67fa8a838184ce84a674ca12238d2c761 # master
         with:
           swap-size-gb: 12
 
@@ -168,7 +182,7 @@ jobs:
             cd "$GITHUB_WORKSPACE/builder"
             npm run typecheck
             npm run lint:knip
-            npx --yes @biomejs/biome@2.3.8 check --diagnostic-level=warn
+            npm run lint:biome
             npm run build:js
             npm test
           )
@@ -182,6 +196,8 @@ jobs:
             echo "Applying $p..."
             git -C src apply "$p"
           done
+          sed -i "s/version_code = \"1\"/version_code = \"${GITHUB_RUN_NUMBER:-1}\"/" src/cobalt/android/BUILD.gn
+          sed -i "s/version_name = \"1.0.0\"/version_name = \"1.0.${GITHUB_RUN_NUMBER:-0}\"/" src/cobalt/android/BUILD.gn
           rm -rf src/cobalt/shell/android/java/res/values-*
           git -C src diff --stat
 
@@ -361,8 +377,10 @@ jobs:
         if: failure() && steps.compile.outcome == 'failure' && steps.save_ccache.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ATTEMPT_INPUT: ${{ inputs.attempt || '1' }}
+          COBALT_SHA: ${{ needs.check-upstream.outputs.cobalt_sha }}
         run: |
-          ATTEMPT="${{ inputs.attempt || '1' }}"
+          ATTEMPT="${ATTEMPT_INPUT:-1}"
           if [ "$ATTEMPT" -ge 5 ]; then
             echo "Max attempts ($ATTEMPT) reached; not retrying."
             exit 0
@@ -374,7 +392,8 @@ jobs:
             gh workflow run build_apk.yml \
               --repo "${{ github.repository }}" \
               --ref "${{ github.ref_name }}" \
-              -f attempt="${NEXT_ATTEMPT}"
+              -f attempt="${NEXT_ATTEMPT}" \
+              -f cobalt_sha="${COBALT_SHA}"
           else
             echo "Compile failed due to non-timeout error (elapsed=${ELAPSED_COMPILE}s); skipping auto-retry."
           fi
@@ -474,7 +493,7 @@ jobs:
           archive: false
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
           files: ${{ env.APK_NAME }}
           tag_name: ${{ env.RELEASE_TAG }}
@@ -487,7 +506,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean Up Old Releases
-        uses: dev-drprasad/delete-older-releases@v0.3.4
+        uses: dev-drprasad/delete-older-releases@dfbe6be2a006e9475dfcbe5b8d201f1824c2a9fe # v0.3.4
         with:
           keep_latest: 7
           delete_tags: true

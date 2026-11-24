@@ -32,7 +32,7 @@ export interface YtPlayerElement extends HTMLElement {
 
 export interface KabukiInnerTubeClient {
   fetch: (req: Record<string, unknown>) => {
-    subscribe: (onNext: (res: unknown) => void, onError?: (err: unknown) => void) => void;
+    subscribe: (onNext: (res: unknown) => void, onError?: (err: unknown) => void, onComplete?: () => void) => void;
   };
 }
 

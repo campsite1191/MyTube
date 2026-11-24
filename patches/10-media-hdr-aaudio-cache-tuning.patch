@@ -86,19 +86,6 @@ index 3e1886d..2af76a9 100644
            continue;
        }
      }
-diff --git a/starboard/android/shared/player_components_factory.cc b/starboard/android/shared/player_components_factory.cc
-index bb9151a..0a7c5a9 100644
---- a/starboard/android/shared/player_components_factory.cc
-+++ b/starboard/android/shared/player_components_factory.cc
-@@ -103,7 +103,7 @@ NdkAudioMode GetNdkAudioMode(
-     const ExperimentalFeatures& experimental_features) {
-   return static_cast<NdkAudioMode>(
-       experimental_features.Get(kMediaNdkAudioMode)
--          .value_or(static_cast<int>(NdkAudioMode::kDisabled)));
-+          .value_or(static_cast<int>(NdkAudioMode::kPullSink)));
- }
- 
- // On some platforms tunnel mode is only supported in the secure pipeline.  Set
 diff --git a/starboard/extension/feature_config.h b/starboard/extension/feature_config.h
 index 4bc78f0..3cfc913 100644
 --- a/starboard/extension/feature_config.h

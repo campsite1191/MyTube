@@ -829,8 +829,8 @@ describe('End-to-end userscript bundle lifecycle', () => {
           },
         ],
       })
-    ) as { items: Array<{ guideSectionRenderer: { items: unknown[]; originalItems: unknown[] } }> };
-    assert.equal(guideParsed.items[0]?.guideSectionRenderer.originalItems.length, 3);
+    ) as { items: Array<{ guideSectionRenderer: { items: unknown[] } }> };
+    assert.equal('originalItems' in (guideParsed.items[0]?.guideSectionRenderer ?? {}), false);
     // 'FEtopics_music' is in default disabledSidebarContents; 'search' and 'FEtopics' remain ordered.
     assert.equal(guideParsed.items[0]?.guideSectionRenderer.items.length, 2);
 
@@ -1182,7 +1182,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
     assert.doesNotThrow(() => pressureListeners[0]?.());
   });
 
-  test('[TDD Red: M1] cleans up Shorts observers when exiting WEB_PAGE_TYPE_SHORTS back to Home without hashchange', async (t) => {
+  test('[M1] cleans up Shorts observers when exiting WEB_PAGE_TYPE_SHORTS back to Home without hashchange', async (t) => {
     const { bundleSource, context, fakeWindow, fakeDocument, docRef, observers, createEl, flushMutations } =
       createE2EHarness(t);
 

@@ -23,32 +23,33 @@ diff --git a/cobalt/shell/browser/shell.cc b/cobalt/shell/browser/shell.cc
 index b08c7f1..f62ce2e 100644
 --- a/cobalt/shell/browser/shell.cc
 +++ b/cobalt/shell/browser/shell.cc
-@@ -86,6 +86,9 @@
+@@ -86,6 +86,10 @@
  #endif
  
  #if BUILDFLAG(IS_ANDROID)
++#include <string_view>
 +#include "base/android/apk_assets.h"
 +#include "base/files/file.h"
 +#include "base/files/memory_mapped_file.h"
  #if BUILDFLAG(USE_STARBOARD_MEDIA)
  #include "starboard/android/shared/audio_permission_requester.h"
  #endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
-@@ -738,6 +741,41 @@ void Shell::RegisterInjectedJavaScript() {
+@@ -738,6 +742,40 @@ void Shell::RegisterInjectedJavaScript() {
                     << ", error message: " << result.error_message.value();
      }
    }
 +
 +#if BUILDFLAG(IS_ANDROID)
-+  static const base::NoDestructor<std::string> kCachedUserScript([] {
-+    std::string out;
++  static const base::NoDestructor<std::u16string> kCachedUserScript([] {
++    std::u16string out;
 +    base::MemoryMappedFile::Region region;
 +    base::File asset_file(
 +        base::android::OpenApkAsset("assets/userscript.js", &region));
 +    if (asset_file.IsValid() && region.size > 0) {
 +      base::MemoryMappedFile mapped;
 +      if (mapped.Initialize(std::move(asset_file), region)) {
-+        out.assign(reinterpret_cast<const char*>(mapped.data()),
-+                   mapped.length());
++        out = base::UTF8ToUTF16(std::string_view(
++            reinterpret_cast<const char*>(mapped.data()), mapped.length()));
 +      } else {
 +        LOG(ERROR) << "Failed to mmap assets/userscript.js";
 +      }
@@ -60,12 +61,11 @@ index b08c7f1..f62ce2e 100644
 +
 +  if (!kCachedUserScript->empty()) {
 +    LOG(INFO) << "JS injection for filename: assets/userscript.js ("
-+              << kCachedUserScript->size() << " bytes)";
-+    const std::u16string userscript(base::UTF8ToUTF16(*kCachedUserScript));
++              << kCachedUserScript->size() << " UTF-16 chars)";
 +    const std::vector<std::string> yt_origins(
 +        {"https://youtube.com", "https://*.youtube.com"});
-+    auto result =
-+        js_communication_host_->AddDocumentStartJavaScript(userscript, yt_origins);
++    auto result = js_communication_host_->AddDocumentStartJavaScript(
++        *kCachedUserScript, yt_origins);
 +    if (result.error_message.has_value()) {
 +      LOG(ERROR) << "Failed to register userscript.js injection: "
 +                 << result.error_message.value();

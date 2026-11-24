@@ -50,7 +50,6 @@ export function transformGuideResponse(r: unknown): unknown {
     if (!isRecord(rawSection)) continue;
     const section = isRecord(rawSection.guideSectionRenderer) ? rawSection.guideSectionRenderer : undefined;
     if (!section || !Array.isArray(section.items)) continue;
-    section.originalItems = section.items.slice();
     if (section === firstSection) {
       section.items = SIDEBAR_ORDER.flatMap((id) => {
         const entry = itemById.get(id);

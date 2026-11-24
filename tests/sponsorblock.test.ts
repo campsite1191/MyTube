@@ -514,7 +514,7 @@ describe('fetchSponsorBlockSegments', () => {
     }
   });
 
-  test('[TDD Red: M2] getActiveSponsorBlockSegments(null) returns [], late SponsorBlock resolution dispatches live update after /next consumption, and progress-bar childList rebuild resyncs layout', async (t) => {
+  test('[M2] getActiveSponsorBlockSegments(null) returns [], late SponsorBlock resolution dispatches live update after /next consumption, and progress-bar childList rebuild resyncs layout', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;

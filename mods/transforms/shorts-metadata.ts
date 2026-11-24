@@ -1,5 +1,6 @@
 import pLimit from 'p-limit';
 import QuickLRU from 'quick-lru';
+import { observeShortsPage } from '../core/lifecycle.ts';
 import { setShortsOverlayStats } from '../features/return-youtube-dislike.ts';
 import type { FeedItem } from '../types/innertube.ts';
 import { FEED_METADATA_CACHE_MAX_SIZE, formatCompactCount, unwrapFeedItem } from '../utils/feed-helpers.ts';
@@ -382,8 +383,7 @@ function fetchShortsMetadata(videoId: string, controller: AbortController | null
           suppressOverlayEnrichmentCount--;
         }
       }
-      const label = extractShortsMetadataFromReel(json);
-      if (!label) return null;
+      const label = extractShortsMetadataFromReel(json) ?? '';
       shortsMetadataCache.set(videoId, label);
       return label;
     } catch {
@@ -422,9 +422,11 @@ export async function applyShortsFeedMetadata(items: FeedItem[]): Promise<void> 
     if (!meta) continue;
 
     const cached = shortsMetadataCache.get(videoId);
-    if (cached) {
-      const target = ensureTileMetaLine(meta, cached);
-      if (target) target.simpleText = cached;
+    if (cached !== undefined) {
+      if (cached) {
+        const target = ensureTileMetaLine(meta, cached);
+        if (target) target.simpleText = cached;
+      }
       continue;
     }
 
@@ -455,7 +457,7 @@ export async function applyShortsFeedMetadata(items: FeedItem[]): Promise<void> 
     [...toFetch].map((videoId) =>
       fetchShortsMetadata(videoId, controller).then((label) => {
         if (controller?.signal.aborted) return;
-        if (label) {
+        if (label !== null) {
           applyResolvedMetadata(videoId, label);
         } else {
           pendingTileTextTargets.delete(videoId);
@@ -484,7 +486,7 @@ export function installShortsMetadata(): () => void {
     if (!videoId || !VIDEO_ID_RE.test(videoId)) return;
 
     const cached = shortsMetadataCache.get(videoId);
-    if (cached) {
+    if (cached !== undefined) {
       updateMountedTileDom(videoId, cached);
       return;
     }
@@ -496,7 +498,7 @@ export function installShortsMetadata(): () => void {
 
     const controller = activeNavigationController;
     void fetchShortsMetadata(videoId, controller).then((label) => {
-      if (!controller?.signal.aborted && label) {
+      if (!controller?.signal.aborted && label !== null) {
         applyResolvedMetadata(videoId, label);
       }
     });
@@ -504,10 +506,14 @@ export function installShortsMetadata(): () => void {
 
   targetWindow.addEventListener('hashchange', abortPendingShortsMetadataRequests);
   targetDoc.addEventListener('focusin', onFocusIn, true);
+  const unobserveShorts = observeShortsPage((active) => {
+    if (active) abortPendingShortsMetadataRequests();
+  });
 
   return () => {
     targetWindow.removeEventListener?.('hashchange', abortPendingShortsMetadataRequests);
     targetDoc.removeEventListener?.('focusin', onFocusIn, true);
+    unobserveShorts();
     abortPendingShortsMetadataRequests();
     shortsMetadataInstalled = false;
   };

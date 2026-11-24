@@ -1,4 +1,4 @@
-import { getActiveWatchVideoId, observeDom, onAbort, onWatchSession } from '../core/lifecycle.ts';
+import { getActiveWatchVideoId, observeDom, observeShortsPage, onAbort, onWatchSession } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 import { formatCompactCount } from '../utils/feed-helpers.ts';
@@ -326,6 +326,9 @@ export function installReturnYouTubeDislike(): () => void {
     }
   };
   targetWindow.addEventListener('hashchange', onHashChange);
+  const unobserveShorts = observeShortsPage((active) => {
+    if (!active) clearShortsOverlayState();
+  });
 
   const unsub = onWatchSession((videoId, signal) => {
     clearShortsOverlayState();
@@ -397,6 +400,7 @@ export function installReturnYouTubeDislike(): () => void {
 
   return () => {
     targetWindow.removeEventListener?.('hashchange', onHashChange);
+    unobserveShorts();
     unsub();
     clearShortsOverlayState();
     currentLike = null;

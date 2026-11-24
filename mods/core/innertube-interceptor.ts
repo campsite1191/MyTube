@@ -58,16 +58,19 @@ function processShelfContentSync(content: unknown, shouldAddPreviews = true): vo
   }
 }
 
+function enrichFeedItemsSync(items: FeedItem[], shouldAddPreviews = true): FeedItem[] {
+  // Fire async metadata enrichments without blocking synchronous feed rendering.
+  void applyDeArrowBranding(items);
+  void applyShortsFeedMetadata(items);
+  upgradeFeedThumbnails(items);
+  addLongPress(items);
+  addPreviews(items, shouldAddPreviews);
+  return items;
+}
+
 function processItemsListSync(items: FeedItem[], shouldAddPreviews = true): FeedItem[] {
   if (!Array.isArray(items)) return items;
-  const filtered = filterFeedItemsSync(items);
-  // Fire async metadata enrichments without blocking synchronous feed rendering.
-  void applyDeArrowBranding(filtered);
-  void applyShortsFeedMetadata(filtered);
-  upgradeFeedThumbnails(filtered);
-  addLongPress(filtered);
-  addPreviews(filtered, shouldAddPreviews);
-  return filtered;
+  return enrichFeedItemsSync(filterFeedItemsSync(items), shouldAddPreviews);
 }
 
 /**
@@ -174,7 +177,7 @@ function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void
   }
 
   if (directItems.length > 0) {
-    processItemsListSync(directItems, shouldAddPreviews);
+    enrichFeedItemsSync(directItems, shouldAddPreviews);
   }
 }
 

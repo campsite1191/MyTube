@@ -493,7 +493,8 @@ describe('return-youtube-dislike', () => {
 
     // Activate curShort11 before overlay mounts -> lightweight wait observer watches body until overlay appears.
     setShortsOverlayStats('curShort11', '500');
-    assert.equal(observers[0]?.target, bodyEl);
+    const waitObs = observers.at(-1);
+    assert.equal(waitObs?.target, bodyEl);
     assert.equal(likeBtn.dataset.ttCount, '500');
     assert.ok(
       queriedSelectors.some(
@@ -512,8 +513,8 @@ describe('return-youtube-dislike', () => {
 
     // Mounting overlay disconnects body wait observer and attaches strictly to overlay.
     mountedOverlay = { nodeName: 'YTLR-REEL-PLAYER-OVERLAY-RENDERER' };
-    observers[0]?.cb();
-    assert.equal(observers[0]?.disconnected, true);
+    waitObs?.cb();
+    assert.equal(waitObs?.disconnected, true);
     assert.equal(observers.at(-1)?.target, mountedOverlay);
 
     // Swiping to nextShort99 updates active Shorts stats immediately even before location.hash changes.
@@ -541,7 +542,7 @@ describe('return-youtube-dislike', () => {
     for (const fn of winListeners.get('hashchange') ?? []) fn();
   });
 
-  test('[TDD Red: M1] aborts in-flight Shorts RYD fetch and disconnects overlay observer when WEB_PAGE_TYPE_SHORTS is removed without hashchange', async (t) => {
+  test('[M1] aborts in-flight Shorts RYD fetch and disconnects overlay observer when WEB_PAGE_TYPE_SHORTS is removed without hashchange', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;

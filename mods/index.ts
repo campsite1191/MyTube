@@ -1,5 +1,4 @@
 import { preconnectOrigins, schedulePostFirstPaint, waitForDomReady } from './core/idle-scheduler.ts';
-import './core/trusted-types.ts';
 import './core/innertube-interceptor.ts';
 import { installDisableWhosWatching } from './features/disable-whos-watching.ts';
 import { installHdStoryboard } from './features/hd-storyboard.ts';

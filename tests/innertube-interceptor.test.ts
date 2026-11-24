@@ -1000,7 +1000,7 @@ describe('TV browse/JSON.parse transforms', () => {
     );
   });
 
-  test('[TDD Red: M5] processShelvesSync filters direct browse items once instead of double-scanning badges', () => {
+  test('[M5] processShelvesSync filters direct browse items once instead of double-scanning badges', () => {
     let badgeReads = 0;
     const tile: Record<string, unknown> = {
       contentId: 'directOnce1',

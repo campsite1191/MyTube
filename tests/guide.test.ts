@@ -40,11 +40,11 @@ describe('transformGuideResponse', () => {
     };
 
     assert.equal(out.items[0]?.guideSectionRenderer?.items.length, 2);
-    assert.equal(out.items[2]?.guideSectionRenderer?.originalItems?.length, 4);
+    assert.equal('originalItems' in (out.items[2]?.guideSectionRenderer ?? {}), false);
     assert.equal(out.items[2]?.guideSectionRenderer?.items.length, 1);
   });
 
-  test('[TDD Red: M5] transformGuideResponse does not retain unfiltered originalItems references on guide sections', () => {
+  test('[M5] transformGuideResponse does not retain unfiltered originalItems references on guide sections', () => {
     const section = {
       items: [
         { guideEntryRenderer: { icon: { iconType: 'TAB_SHORTS' } } },

@@ -327,7 +327,7 @@ describe('DeArrow branding helpers', () => {
     assert.equal(mountedTitleEl.textContent, 'Mounted DeArrow Title');
     assert.equal(
       mountedThumbEl.style.backgroundImage,
-      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=mountedVid1&time=19")'
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=mountedVid1&time=19"), url("https://i.ytimg.com/vi/mountedVid1/hq720.jpg"), url("https://i.ytimg.com/vi/mountedVid1/hqdefault.jpg")'
     );
   });
 
@@ -508,7 +508,7 @@ describe('DeArrow branding helpers', () => {
     assert.equal(tileTitle.textContent, 'New Clean Title');
     assert.equal(
       bgThumb.style.backgroundImage,
-      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=probeVid123&time=8")'
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=probeVid123&time=8"), url("https://i.ytimg.com/vi/probeVid123/hq720.jpg"), url("https://i.ytimg.com/vi/probeVid123/hqdefault.jpg")'
     );
 
     // Warm cache hit does NOT invoke querySelectorAll.
@@ -552,6 +552,7 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
     }
 
     let errorHandler: ((event: Event) => void) | undefined;
+    let domReadyHandler: (() => void) | undefined;
     let hashChangeHandler: (() => void) | undefined;
 
     globals.HTMLImageElement = MockHTMLImageElement;
@@ -563,6 +564,7 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
     globals.document = {
       addEventListener: (type: string, listener: (event: Event) => void) => {
         if (type === 'error') errorHandler = listener;
+        if (type === 'DOMContentLoaded') domReadyHandler = listener as unknown as () => void;
       },
     };
 
@@ -577,7 +579,9 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
 
     installThumbnailErrorFallback();
     assert.ok(errorHandler);
+    assert.ok(domReadyHandler);
     assert.ok(hashChangeHandler);
+    domReadyHandler();
 
     const img = new MockHTMLImageElement('https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=rec1&time=5');
     errorHandler({ target: img } as unknown as Event);
@@ -596,7 +600,7 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
     hashChangeHandler();
   });
 
-  test('[TDD Red: H2] stacks CSS multi-background fallback layers on mounted TV ytlr-thumbnail-details when applying DeArrow branding', async (t) => {
+  test('[H2] stacks CSS multi-background fallback layers on mounted TV ytlr-thumbnail-details when applying DeArrow branding', async (t) => {
     clearDeArrowCache();
     const globals = globalThis as Record<string, unknown>;
     const prevDocument = globals.document;

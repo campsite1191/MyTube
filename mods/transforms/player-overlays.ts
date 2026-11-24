@@ -196,8 +196,12 @@ export function transformPlayerOverlays(r: Record<string, unknown>): void {
   }
 
   const target = overlayRenderer.timelyActionRenderers as unknown[];
-  onSponsorBlockSegmentsReady(extractPayloadVideoId(r), (segments) => {
+  onSponsorBlockSegmentsReady(extractPayloadVideoId(r), (segments, isLateAsync) => {
+    const beforeCount = target.length;
     appendSponsorBlockTimelyActions(target, segments);
+    if (isLateAsync && target.length > beforeCount) {
+      resolveCommand({ updatePlayerOverlayCommand: { timelyActionRenderers: target } });
+    }
   });
 }
 
@@ -258,7 +262,11 @@ export function transformTransportControls(r: Record<string, unknown>): void {
   if (!Array.isArray(tcRenderer.promotedActions)) return;
 
   const promotedActions = tcRenderer.promotedActions as unknown[];
-  onSponsorBlockSegmentsReady(extractPayloadVideoId(r), (segments) => {
+  onSponsorBlockSegmentsReady(extractPayloadVideoId(r), (segments, isLateAsync) => {
+    const beforeCount = promotedActions.length;
     appendSponsorBlockHighlightButton(promotedActions, segments);
+    if (isLateAsync && promotedActions.length > beforeCount) {
+      resolveCommand({ updateTransportControlsCommand: { promotedActions } });
+    }
   });
 }

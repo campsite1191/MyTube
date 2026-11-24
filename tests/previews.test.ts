@@ -89,7 +89,7 @@ describe('addPreviews', () => {
     });
   });
 
-  test('tunes existing inline previews (including when shouldInject is false) and preserves existing focus commands', () => {
+  test('tunes existing inline previews on browse/home feeds and avoids injection when shouldInject is false', () => {
     const existingPreviewCmd = {
       startInlinePlaybackCommand: {
         muted: false,
@@ -154,11 +154,17 @@ describe('addPreviews', () => {
       },
     };
 
-    const tuneOnlyItems = [
+    const tuneItems = [
       { tileRenderer: { onFocusCommand: existingPreviewCmd } },
-      injectBlockedTile,
+      executorFocusTile,
+      singleFocusTile,
+      mastheadItem,
+      bareEndpointLockup,
     ] as unknown as FeedItem[];
-    addPreviews(tuneOnlyItems, false);
+    addPreviews([injectBlockedTile] as unknown as FeedItem[], false);
+    assert.equal((injectBlockedTile.tileRenderer as Record<string, unknown>).onFocusCommand, undefined);
+
+    addPreviews(tuneItems, true);
 
     assert.equal(existingPreviewCmd.startInlinePlaybackCommand.muted, true);
     assert.equal(existingPreviewCmd.startInlinePlaybackCommand.caption, false);
@@ -167,9 +173,6 @@ describe('addPreviews', () => {
     assert.deepEqual(existingPreviewCmd.startInlinePlaybackCommand.playbackEndpoint, {
       watchEndpoint: { videoId: 'native1', list: 'PL1' },
     });
-    assert.equal((injectBlockedTile.tileRenderer as Record<string, unknown>).onFocusCommand, undefined);
-
-    addPreviews([executorFocusTile, singleFocusTile, mastheadItem, bareEndpointLockup] as unknown as FeedItem[], true);
 
     assert.equal(
       executorFocusTile.tileRenderer.onFocusCommand.innertubeCommand.commandExecutorCommand.commands.length,
@@ -203,7 +206,7 @@ describe('addPreviews', () => {
     );
   });
 
-  test('[TDD Red: H3] addPreviews strips server-supplied startInlinePlaybackCommand when allowInject is false while keeping non-preview focus commands', () => {
+  test('[H3] addPreviews strips server-supplied startInlinePlaybackCommand when allowInject is false while keeping non-preview focus commands', () => {
     const directTile = {
       tileRenderer: {
         onFocusCommand: {
@@ -220,6 +223,11 @@ describe('addPreviews', () => {
               commands: [
                 { logActionCommand: { id: 1 } },
                 { startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'srv2' } } } },
+                {
+                  innertubeCommand: {
+                    startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'srv2b' } } },
+                  },
+                },
               ],
             },
           },
@@ -244,8 +252,15 @@ describe('addPreviews', () => {
         },
       },
     };
+    const shortsTile = {
+      shortsLockupViewModel: {
+        onFocusCommand: {
+          startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'srv4' } } },
+        },
+      },
+    };
 
-    addPreviews([directTile, wrappedTile, lockup] as unknown as FeedItem[], false);
+    addPreviews([directTile, wrappedTile, lockup, shortsTile] as unknown as FeedItem[], false);
 
     assert.equal('startInlinePlaybackCommand' in directTile.tileRenderer.onFocusCommand, false);
     assert.deepEqual(wrappedTile.tileRenderer.onFocusCommand.innertubeCommand.commandExecutorCommand.commands, [
@@ -256,5 +271,6 @@ describe('addPreviews', () => {
       'startInlinePlaybackCommand' in lockup.lockupViewModel.rendererContext.commandContext.onFocus.innertubeCommand,
       false
     );
+    assert.equal('startInlinePlaybackCommand' in shortsTile.shortsLockupViewModel.onFocusCommand, false);
   });
 });

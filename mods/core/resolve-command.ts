@@ -205,10 +205,23 @@ function isInterceptedPopupUniqueId(uniqueId: string): boolean {
   );
 }
 
+function unwrapInnertubeCommand(cmd: Record<string, unknown>): Record<string, unknown> {
+  let current = cmd;
+  let depth = 0;
+  while (isRecord(current.innertubeCommand) && depth < 4) {
+    current = current.innertubeCommand;
+    depth++;
+  }
+  return current;
+}
+
 function needsCommandInterception(cmd: unknown, depth = 0): boolean {
   if (!isRecord(cmd) || depth > 4) return false;
   if (isRecord(cmd.setClientSettingEndpoint) || extractCustomAction(cmd)) return true;
   if (isRecord(cmd.startInlinePlaybackCommand) && isPlaybackPageActive()) return true;
+  if (isRecord(cmd.innertubeCommand) && needsCommandInterception(cmd.innertubeCommand, depth + 1)) {
+    return true;
+  }
 
   const openPopup = isRecord(cmd.openPopupAction) ? cmd.openPopupAction : undefined;
   const uniqueId = typeof openPopup?.uniqueId === 'string' ? openPopup.uniqueId : '';
@@ -238,7 +251,8 @@ export function patchResolveCommand(): void {
     const wrappedResolve = function (this: unknown, rawCmd: unknown, arg?: unknown): unknown {
       activeResolveInstance = instance as ResolveInstance;
       if (!isRecord(rawCmd)) return ogResolve.call(this, rawCmd, arg);
-      if (isRecord(rawCmd.startInlinePlaybackCommand) && isPlaybackPageActive()) {
+      const effectiveCmd = unwrapInnertubeCommand(rawCmd);
+      if (isRecord(effectiveCmd.startInlinePlaybackCommand) && isPlaybackPageActive()) {
         return false;
       }
 
@@ -261,7 +275,7 @@ export function patchResolveCommand(): void {
         }
       }
 
-      const cmdExec = isRecord(rawCmd.commandExecutorCommand) ? rawCmd.commandExecutorCommand : undefined;
+      const cmdExec = isRecord(effectiveCmd.commandExecutorCommand) ? effectiveCmd.commandExecutorCommand : undefined;
       if (Array.isArray(cmdExec?.commands) && cmdExec.commands.some((subCmd) => needsCommandInterception(subCmd))) {
         for (const subCmd of cmdExec.commands) {
           const extracted = isRecord(subCmd) ? extractCustomAction(subCmd) : null;

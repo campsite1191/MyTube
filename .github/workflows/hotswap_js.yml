@@ -42,8 +42,9 @@ jobs:
       - name: Download Base APK from Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
         run: |
-          TAG="${{ inputs.release_tag }}"
+          TAG="${RELEASE_TAG_INPUT}"
           PREFIX="custom-${PLATFORM}-${BUILD_TYPE}"
           if [ -z "$TAG" ]; then
             TAG=$(gh release list --repo "${{ github.repository }}" --exclude-drafts --limit 50 \
@@ -75,7 +76,7 @@ jobs:
           npm --prefix mods ci --no-audit --no-fund
           npm run typecheck
           npm run lint:knip
-          npx --yes @biomejs/biome@2.3.8 check --diagnostic-level=warn
+          npm run lint:biome
           npm run build:js
           npm test
           ls -lh mods/dist/userscript.js
@@ -172,7 +173,7 @@ jobs:
           archive: false
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
           files: ${{ env.APK_NAME }}
           tag_name: ${{ env.RELEASE_TAG }}
@@ -185,7 +186,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean Up Old Releases
-        uses: dev-drprasad/delete-older-releases@v0.3.4
+        uses: dev-drprasad/delete-older-releases@dfbe6be2a006e9475dfcbe5b8d201f1824c2a9fe # v0.3.4
         with:
           keep_latest: 7
           delete_tags: true

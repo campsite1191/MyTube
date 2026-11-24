@@ -1,4 +1,10 @@
-import { isPlayerBarVisible, observePlayerBar, onAbort, onWatchSession } from '../core/lifecycle.ts';
+import {
+  isPlayerBarVisible,
+  observePlayerBar,
+  onAbort,
+  onWatchSession,
+  scheduleAbortableTimeout,
+} from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 import type { YtPlayerElement } from '../types/yttv.ts';
@@ -417,7 +423,7 @@ export function installPlayerBarInfo(): () => void {
       const bar = getBar();
       if (!bar || !isPlayerBarVisible(bar)) return;
       pendingApply = true;
-      requestAnimationFrame(() => {
+      const flush = (): void => {
         const force = pendingForceRender;
         pendingApply = false;
         pendingForceRender = false;
@@ -430,7 +436,12 @@ export function installPlayerBarInfo(): () => void {
         if (render(liveBar)) {
           lastAppliedSec = sec;
         }
-      });
+      };
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(flush);
+      } else {
+        scheduleAbortableTimeout(flush, 16, signal);
+      }
     }
 
     getBar = observePlayerBar(

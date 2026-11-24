@@ -1,7 +1,8 @@
 {
   "workspaces": {
     "mods": {
-      "project": ["**/*.ts"]
+      "project": ["**/*.ts"],
+      "ignoreDependencies": ["@biomejs/biome"]
     },
     ".": {
       "entry": ["tests/*.test.ts"],

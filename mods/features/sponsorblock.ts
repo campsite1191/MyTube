@@ -231,17 +231,10 @@ class SponsorBlockHandler {
     this.segmentsOverlay = overlay;
     this.renderSegmentBars(duration);
     this.syncOverlayLayout();
-    observePlayerBar(
-      this.signal,
-      (bar) => {
-        this.syncOverlayVisibility(bar);
-        this.syncOverlayLayout();
-      },
-      {
-        attributes: true,
-        attributeFilter: ['hybridnavfocusable', 'class'],
-      }
-    );
+    observePlayerBar(this.signal, (bar) => {
+      this.syncOverlayVisibility(bar);
+      this.syncOverlayLayout();
+    });
     observeDom(
       host,
       (mutations) => {
@@ -294,7 +287,7 @@ let activeVideoId: string | null = null;
 let activeSegments: readonly SponsorBlockSegment[] = [];
 let pendingSegmentListeners: Array<{
   videoId: string;
-  callback: (segments: readonly SponsorBlockSegment[]) => void;
+  callback: (segments: readonly SponsorBlockSegment[], isLateAsync: boolean) => void;
 }> = [];
 let sponsorBlockInstalled = false;
 let sponsorBlockStylesInstalled = false;
@@ -310,7 +303,7 @@ function installSponsorBlockStyles(): void {
 }
 
 export function getActiveSponsorBlockSegments(videoId?: string | null): readonly SponsorBlockSegment[] {
-  if (videoId && activeVideoId && activeVideoId !== videoId) return [];
+  if (!videoId || activeVideoId !== videoId) return [];
   return activeSegments;
 }
 
@@ -320,11 +313,11 @@ export function getActiveSponsorBlockSegments(videoId?: string | null): readonly
  */
 export function onSponsorBlockSegmentsReady(
   videoId: string | null | undefined,
-  callback: (segments: readonly SponsorBlockSegment[]) => void
+  callback: (segments: readonly SponsorBlockSegment[], isLateAsync: boolean) => void
 ): void {
   const current = getActiveSponsorBlockSegments(videoId);
   if (current.length > 0) {
-    callback(current);
+    callback(current, false);
     return;
   }
   if (!videoId) return;
@@ -360,7 +353,7 @@ export function installSponsorBlock(): () => void {
       if (segments.length > 0) {
         for (const entry of listeners) {
           if (entry.videoId === videoId) {
-            entry.callback(segments);
+            entry.callback(segments, true);
           }
         }
       }

@@ -8,7 +8,7 @@ import {
 import type { FeedItem } from '../mods/types/innertube.ts';
 
 describe('TV thumbnail lifecycle & Shorts entry cancellation', () => {
-  test('[TDD Red: H2] stacks CSS fallback layers on mounted TV ytlr-thumbnail-details for hq720.jpg without DOM error events', (t) => {
+  test('[H2] stacks CSS fallback layers on mounted TV ytlr-thumbnail-details for hq720.jpg without DOM error events', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
@@ -33,6 +33,20 @@ describe('TV thumbnail lifecycle & Shorts entry cancellation', () => {
       tagName: 'YTLR-THUMBNAIL-DETAILS',
       style: { backgroundImage: 'url("https://i.ytimg.com/vi/sdUpload001/hq720.jpg")' },
     };
+    const deArrowThumb = {
+      tagName: 'YTLR-THUMBNAIL-DETAILS',
+      style: {
+        backgroundImage: 'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=deCard00001&time=5")',
+      },
+    };
+    const invalidBgThumb = {
+      tagName: 'YTLR-THUMBNAIL-DETAILS',
+      style: { backgroundImage: 'none' },
+    };
+    const invalidIdThumb = {
+      tagName: 'YTLR-THUMBNAIL-DETAILS',
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/bad/hq720.jpg")' },
+    };
     const bodyClasses = new Set<string>();
     const bodyEl = {
       classList: {
@@ -51,7 +65,9 @@ describe('TV thumbnail lifecycle & Shorts entry cancellation', () => {
       documentElement: bodyEl,
       addEventListener: () => {},
       querySelectorAll: (sel: string) =>
-        sel.includes('hq720.jpg') || sel.includes('ytlr-thumbnail-details') ? [mountedThumb] : [],
+        sel.includes('hq720.jpg') || sel.includes('ytlr-thumbnail-details')
+          ? [mountedThumb, deArrowThumb, invalidBgThumb, invalidIdThumb]
+          : [],
     };
 
     t.after(() => {
@@ -65,16 +81,22 @@ describe('TV thumbnail lifecycle & Shorts entry cancellation', () => {
 
     installThumbnailErrorFallback();
     for (const obs of observers.filter((o) => !o.disconnected)) {
+      obs.cb([{ type: 'childList', target: bodyEl, addedNodes: [], removedNodes: [] }]);
       obs.cb([{ type: 'childList', target: bodyEl, addedNodes: [mountedThumb], removedNodes: [] }]);
+      obs.cb([{ type: 'attributes', target: mountedThumb }]);
     }
 
     assert.equal(
       mountedThumb.style.backgroundImage,
       'url("https://i.ytimg.com/vi/sdUpload001/hq720.jpg"), url("https://i.ytimg.com/vi/sdUpload001/hqdefault.jpg")'
     );
+    assert.equal(
+      deArrowThumb.style.backgroundImage,
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=deCard00001&time=5"), url("https://i.ytimg.com/vi/deCard00001/hq720.jpg"), url("https://i.ytimg.com/vi/deCard00001/hqdefault.jpg")'
+    );
   });
 
-  test('[TDD Red: M1] aborts in-flight Home shelf DeArrow fetches when entering WEB_PAGE_TYPE_SHORTS without hashchange', async (t) => {
+  test('[M1] aborts in-flight Home shelf DeArrow fetches when entering WEB_PAGE_TYPE_SHORTS without hashchange', async (t) => {
     clearDeArrowCache();
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;

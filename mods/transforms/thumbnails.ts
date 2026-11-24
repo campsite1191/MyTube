@@ -1,5 +1,6 @@
 import pLimit from 'p-limit';
 import QuickLRU from 'quick-lru';
+import { observeDom, observeShortsPage } from '../core/lifecycle.ts';
 import type { FeedItem, FormattedText, Thumbnail } from '../types/innertube.ts';
 import { FEED_METADATA_CACHE_MAX_SIZE, unwrapFeedItem } from '../utils/feed-helpers.ts';
 import { clearShortsMetadataCache } from './shorts-metadata.ts';
@@ -176,6 +177,15 @@ function setFormattedTitle(
   }
 }
 
+function buildStackedTvBackground(videoId: string, primaryUrl: string): string {
+  const hq720Url = `https://i.ytimg.com/vi/${videoId}/hq720.jpg`;
+  const hqDefaultUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  if (!YOUTUBE_HQ720_URL_PATTERN.test(primaryUrl)) {
+    return `url("${primaryUrl}"), url("${hq720Url}"), url("${hqDefaultUrl}")`;
+  }
+  return `url("${primaryUrl}"), url("${hqDefaultUrl}")`;
+}
+
 function updateMountedDeArrowDom(videoId: string, title: string | null, thumbnailUrl: string | null): void {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
   if ((!title && !thumbnailUrl) || !VIDEO_ID_RE.test(videoId)) return;
@@ -193,7 +203,7 @@ function updateMountedDeArrowDom(videoId: string, title: string | null, thumbnai
       }
     }
     if (thumbnailUrl && thumb.style?.backgroundImage) {
-      thumb.style.backgroundImage = `url("${thumbnailUrl}")`;
+      thumb.style.backgroundImage = buildStackedTvBackground(videoId, thumbnailUrl);
     }
   }
 }
@@ -381,19 +391,51 @@ export function resolveFallbackThumbnailUrl(failedUrl: string): string | null {
   return hq720Match?.[1] ? `https://i.ytimg.com/vi/${hq720Match[1]}/hqdefault.jpg` : null;
 }
 
-let isFallbackListenerInstalled = false;
+const installedFallbackDocs = new WeakSet<Document>();
+
+const CSS_BACKGROUND_URL_RE = /url\(["']?([^"')]+)["']?\)/;
+
+function upgradeMountedTvThumbnailFallbacks(): void {
+  if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
+  for (const thumb of document.querySelectorAll<HTMLElement>(
+    'ytlr-thumbnail-details[style*="hq720.jpg"], ytlr-thumbnail-details[style*="dearrow-thumb.ajay.app"]'
+  )) {
+    const bg = thumb.style?.backgroundImage || '';
+    if (bg.includes('/hqdefault.jpg')) continue;
+    const primaryUrl = bg.match(CSS_BACKGROUND_URL_RE)?.[1];
+    if (!primaryUrl) continue;
+    const videoId =
+      primaryUrl.match(DEARROW_THUMBNAIL_URL_PATTERN)?.[1] ?? primaryUrl.match(YOUTUBE_HQ720_URL_PATTERN)?.[1];
+    if (!videoId || !VIDEO_ID_RE.test(videoId)) continue;
+    thumb.style.backgroundImage = buildStackedTvBackground(videoId, primaryUrl);
+  }
+}
+
+function hasRelevantThumbnailMutation(mutations: MutationRecord[]): boolean {
+  for (const mutation of mutations) {
+    if (mutation.type === 'childList' && (mutation.addedNodes?.length ?? 0) > 0) return true;
+    if (mutation.type === 'attributes' && (mutation.target as Element | null)?.tagName === 'YTLR-THUMBNAIL-DETAILS') {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
- * Installs capture-phase thumbnail error recovery (`DeArrow -> hq720.jpg -> hqdefault.jpg`)
+ * Installs capture-phase thumbnail error recovery (`DeArrow -> hq720.jpg -> hqdefault.jpg`),
+ * stacks CSS multi-background fallbacks on mounted TV `<ytlr-thumbnail-details>` elements,
  * and aborts queued DeArrow fetches on route navigation.
  */
 export function installThumbnailErrorFallback(): void {
-  if (isFallbackListenerInstalled || typeof document === 'undefined') return;
-  isFallbackListenerInstalled = true;
+  if (typeof document === 'undefined' || installedFallbackDocs.has(document)) return;
+  installedFallbackDocs.add(document);
 
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('hashchange', abortPendingDeArrowRequests, false);
   }
+  observeShortsPage((active) => {
+    if (active) abortPendingDeArrowRequests();
+  });
 
   document.addEventListener(
     'error',
@@ -409,4 +451,25 @@ export function installThumbnailErrorFallback(): void {
     },
     true
   );
+
+  const startTvFallbackObserver = (): void => {
+    const root = document.body ?? document.documentElement;
+    if (!root) return;
+    upgradeMountedTvThumbnailFallbacks();
+    observeDom(
+      root,
+      (mutations) => {
+        if (hasRelevantThumbnailMutation(mutations)) {
+          upgradeMountedTvThumbnailFallbacks();
+        }
+      },
+      { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] }
+    );
+  };
+
+  if (document.body ?? document.documentElement) {
+    startTvFallbackObserver();
+  } else {
+    document.addEventListener('DOMContentLoaded', startTvFallbackObserver, { once: true });
+  }
 }

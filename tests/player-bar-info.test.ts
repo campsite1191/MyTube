@@ -458,7 +458,7 @@ describe('installPlayerBarInfo Watch session lifecycle', () => {
     assert.equal(fallbackLabelEl.textContent, 'no clock here');
   });
 
-  test('[TDD Red: L5] scheduleRender falls back to timer when requestAnimationFrame is unavailable', async (t) => {
+  test('[L5] scheduleRender falls back to timer when requestAnimationFrame is unavailable', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
