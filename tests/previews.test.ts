@@ -202,4 +202,59 @@ describe('addPreviews', () => {
       true
     );
   });
+
+  test('[TDD Red: H3] addPreviews strips server-supplied startInlinePlaybackCommand when allowInject is false while keeping non-preview focus commands', () => {
+    const directTile = {
+      tileRenderer: {
+        onFocusCommand: {
+          startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'srv1' } } },
+        },
+        onSelectCommand: { watchEndpoint: { videoId: 'srv1' } },
+      },
+    };
+    const wrappedTile = {
+      tileRenderer: {
+        onFocusCommand: {
+          innertubeCommand: {
+            commandExecutorCommand: {
+              commands: [
+                { logActionCommand: { id: 1 } },
+                { startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'srv2' } } } },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const lockup = {
+      lockupViewModel: {
+        itemPlayback: {
+          playbackCommand: {
+            startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'srv3' } } },
+          },
+        },
+        rendererContext: {
+          commandContext: {
+            onFocus: {
+              innertubeCommand: {
+                startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'srv3' } } },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    addPreviews([directTile, wrappedTile, lockup] as unknown as FeedItem[], false);
+
+    assert.equal('startInlinePlaybackCommand' in directTile.tileRenderer.onFocusCommand, false);
+    assert.deepEqual(wrappedTile.tileRenderer.onFocusCommand.innertubeCommand.commandExecutorCommand.commands, [
+      { logActionCommand: { id: 1 } },
+    ]);
+    assert.equal('startInlinePlaybackCommand' in lockup.lockupViewModel.itemPlayback.playbackCommand, false);
+    assert.equal(
+      'startInlinePlaybackCommand' in lockup.lockupViewModel.rendererContext.commandContext.onFocus.innertubeCommand,
+      false
+    );
+  });
 });

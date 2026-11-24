@@ -293,4 +293,43 @@ describe('onWatchSession helper', () => {
     bodyClasses.add('WEB_PAGE_TYPE_SHORTS');
     assert.equal(isPlaybackPageActive(), true);
   });
+
+  test('[TDD Red: M3] onWatchSession isolates synchronous exceptions when joining an already-active Watch session', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const origError = console.error;
+
+    let loggedErrors = 0;
+    console.error = () => {
+      loggedErrors++;
+    };
+
+    const unsubscribers: Array<() => void> = [];
+    globals.window = {
+      location: { hash: '#/watch?v=deepLinkVid', search: '' },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+
+    t.after(() => {
+      for (const unsub of [...unsubscribers].reverse()) unsub();
+      console.error = origError;
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+    });
+
+    const healthy: string[] = [];
+    unsubscribers.push(onWatchSession(() => {}));
+    assert.doesNotThrow(() => {
+      unsubscribers.push(
+        onWatchSession(() => {
+          throw new Error('late join boom');
+        })
+      );
+    });
+    unsubscribers.push(onWatchSession((vid) => healthy.push(vid)));
+
+    assert.equal(loggedErrors, 1);
+    assert.deepEqual(healthy, ['deepLinkVid']);
+  });
 });

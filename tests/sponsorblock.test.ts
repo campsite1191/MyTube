@@ -513,4 +513,176 @@ describe('fetchSponsorBlockSegments', () => {
       for (const fn of winListeners.get('hashchange') ?? []) fn();
     }
   });
+
+  test('[TDD Red: M2] getActiveSponsorBlockSegments(null) returns [], late SponsorBlock resolution dispatches live update after /next consumption, and progress-bar childList rebuild resyncs layout', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+    const prevMutationObserver = globals.MutationObserver;
+
+    const winListeners = new Map<string, Set<() => void>>();
+    const observers: Array<{
+      target: unknown;
+      options?: MutationObserverInit;
+      cb: (m: unknown[]) => void;
+      disconnected: boolean;
+    }> = [];
+    const dispatched: unknown[] = [];
+    const fakeLocation = { hash: '#/', search: '' };
+
+    const trackEl = {
+      classList: { contains: () => false, [Symbol.iterator]: () => [][Symbol.iterator]() },
+      getBoundingClientRect: () => ({ left: 10, top: 5, width: 800, height: 8 }),
+    };
+    const hostEl = {
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 20 }),
+      appendChild: () => {},
+    };
+    const barEl = {
+      isConnected: true,
+      getAttribute: () => 'true',
+      classList: { contains: () => false },
+    };
+    const videoEl = {
+      duration: 200,
+      addEventListener: () => {},
+    };
+
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+    });
+
+    globals.CSSStyleSheet = class {
+      cssText = '';
+      replaceSync(text: string): void {
+        this.cssText = text;
+      }
+    };
+    globals.MutationObserver = class {
+      private readonly rec: {
+        target: unknown;
+        options?: MutationObserverInit;
+        cb: (m: unknown[]) => void;
+        disconnected: boolean;
+      };
+      constructor(cb: (m: unknown[]) => void) {
+        this.rec = { target: null, cb, disconnected: false };
+      }
+      observe(target: unknown, options?: MutationObserverInit): void {
+        this.rec.target = target;
+        this.rec.options = options;
+        this.rec.disconnected = false;
+        observers.push(this.rec);
+      }
+      disconnect(): void {
+        this.rec.disconnected = true;
+      }
+    };
+    globals.window = {
+      location: fakeLocation,
+      addEventListener: (type: string, fn: () => void) => {
+        const set = winListeners.get(type) ?? new Set();
+        set.add(fn);
+        winListeners.set(type, set);
+      },
+      removeEventListener: (type: string, fn: () => void) => {
+        winListeners.get(type)?.delete(fn);
+      },
+      _yttv: {
+        router: {
+          instance: {
+            resolveCommand: (cmd: unknown) => {
+              dispatched.push(cmd);
+              return true;
+            },
+          },
+        },
+      },
+    };
+    globals.document = {
+      body: {},
+      documentElement: {},
+      adoptedStyleSheets: [],
+      createElement: () => {
+        const children: unknown[] = [];
+        return {
+          classList: { add: () => {} },
+          style: { display: '', setProperty: () => {} },
+          children,
+          append: (...els: unknown[]) => children.push(...els),
+          replaceChildren: (...els: unknown[]) => {
+            children.length = 0;
+            children.push(...els);
+          },
+          remove: () => {},
+        };
+      },
+      querySelector: (sel: string) => {
+        if (sel === 'video') return videoEl;
+        if (sel.includes('slider')) return trackEl;
+        if (sel === 'ytlr-redux-connect-ytlr-progress-bar') return hostEl;
+        if (sel === 'ytlr-progress-bar') return barEl;
+        return null;
+      },
+    };
+
+    let resolveFetch!: (resp: Response) => void;
+    globals.fetch = (() =>
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      })) as typeof fetch;
+
+    const uninstallSponsorBlock = installSponsorBlock();
+    t.after(uninstallSponsorBlock);
+
+    fakeLocation.hash = '#/watch?v=lateVidM2';
+    for (const fn of winListeners.get('hashchange') ?? []) fn();
+
+    // /next arrives & is consumed before SponsorBlock resolves
+    const nextPayload: Record<string, unknown> = {
+      currentVideoEndpoint: { watchEndpoint: { videoId: 'lateVidM2' } },
+      playerOverlays: { playerOverlayRenderer: { timelyActionRenderers: [] } },
+      transportControls: { transportControlsRenderer: { promotedActions: [] } },
+    };
+    transformPlayerOverlays(nextPayload);
+    transformTransportControls(nextPayload);
+    dispatched.length = 0;
+
+    await new Promise((r) => setTimeout(r, 15));
+    resolveFetch(
+      new Response(
+        JSON.stringify([
+          {
+            videoID: 'lateVidM2',
+            segments: [
+              { UUID: 'skipLate1', category: 'sponsor', actionType: 'skip', segment: [10, 25] },
+              { UUID: 'poiLate1', category: 'poi_highlight', actionType: 'poi', segment: [40, 40] },
+            ],
+          },
+        ]),
+        { status: 200 }
+      )
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    // 1. Null videoId must never return loaded segments from the active Watch video.
+    assert.deepEqual(getActiveSponsorBlockSegments(null), []);
+
+    // 2. Cold late SponsorBlock resolution must dispatch a live update command after /next already returned.
+    assert.ok(dispatched.length >= 1, 'Expected live command dispatch on late SponsorBlock resolution');
+
+    // 3. ytlr-progress-bar observation must include childList: true so inner geometry rebuilds resync layout.
+    const barObserver = observers.find((o) => o.target === barEl && !o.disconnected);
+    assert.equal(barObserver?.options?.childList, true);
+  });
 });

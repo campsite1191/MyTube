@@ -135,4 +135,55 @@ describe('innertube-calls error and fallback paths', () => {
     assert.ok(errors.length >= 2);
     assert.equal(findFeedbackToken(null), null);
   });
+
+  test('[TDD Red: L5] getFeedbackPanelTokens and sendFeedbackToken settle when Observable completes empty without emitting next', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    t.after(() => {
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+    });
+
+    const serviceMap = new Map<string, unknown>([
+      [
+        'CurrentIdentityService',
+        {
+          get: async () => ({ id: 'id-empty' }),
+        },
+      ],
+      [
+        'KabukiInnerTubeClient',
+        {
+          fetch: () => ({
+            subscribe: (_onNext: unknown, _onError?: unknown, onComplete?: () => void) => {
+              onComplete?.();
+            },
+          }),
+        },
+      ],
+    ]);
+
+    globals.window = {
+      _yttv: {
+        services: { mappings: serviceMap },
+      },
+    };
+
+    const withTimeout = async <T>(promise: Promise<T>, label: string): Promise<T> => {
+      let timerId: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_resolve, reject) => {
+            timerId = setTimeout(() => reject(new Error(`${label} timed out without settling`)), 40);
+          }),
+        ]);
+      } finally {
+        if (timerId !== undefined) clearTimeout(timerId);
+      }
+    };
+
+    assert.deepEqual(await withTimeout(getFeedbackPanelTokens('p', 'params'), 'getFeedbackPanelTokens'), []);
+    assert.equal(await withTimeout(sendFeedbackToken('tok'), 'sendFeedbackToken'), null);
+  });
 });

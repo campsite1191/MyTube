@@ -43,4 +43,17 @@ describe('transformGuideResponse', () => {
     assert.equal(out.items[2]?.guideSectionRenderer?.originalItems?.length, 4);
     assert.equal(out.items[2]?.guideSectionRenderer?.items.length, 1);
   });
+
+  test('[TDD Red: M5] transformGuideResponse does not retain unfiltered originalItems references on guide sections', () => {
+    const section = {
+      items: [
+        { guideEntryRenderer: { icon: { iconType: 'TAB_SHORTS' } } },
+        { guideEntryRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'FEtopics' } } } },
+      ],
+    };
+    transformGuideResponse({
+      items: [{ guideSectionRenderer: section }],
+    });
+    assert.equal('originalItems' in section, false);
+  });
 });

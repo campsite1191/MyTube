@@ -579,4 +579,205 @@ describe('shorts-metadata', () => {
     globals.window = { ytcfg: { data_: {} } };
     await applyShortsFeedMetadata([emptyPayloadTile]);
   });
+
+  test('[TDD Red: M1] aborts in-flight Home shelf reel_item_watch fetches when entering WEB_PAGE_TYPE_SHORTS without hashchange', async (t) => {
+    clearShortsMetadataCache();
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevRaf = globals.requestAnimationFrame;
+    const prevMutationObserver = globals.MutationObserver;
+
+    const observers: Array<{ target: unknown; cb: (mutations: unknown[]) => void; disconnected: boolean }> = [];
+    globals.MutationObserver = class {
+      private readonly rec: { target: unknown; cb: (mutations: unknown[]) => void; disconnected: boolean };
+      constructor(cb: (mutations: unknown[]) => void) {
+        this.rec = { target: null, cb, disconnected: false };
+      }
+      observe(target: unknown): void {
+        this.rec.target = target;
+        observers.push(this.rec);
+      }
+      disconnect(): void {
+        this.rec.disconnected = true;
+      }
+    };
+    globals.requestAnimationFrame = (cb: () => void) => {
+      cb();
+      return 1;
+    };
+
+    const bodyClasses = new Set<string>();
+    const bodyEl = {
+      classList: {
+        contains: (cls: string) => bodyClasses.has(cls),
+      },
+    };
+    globals.window = {
+      location: { hash: '#/', search: '' },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      ytcfg: {
+        d: () => ({
+          INNERTUBE_CONTEXT: { client: { clientName: 'TVHTML5' } },
+          INNERTUBE_CONTEXT_CLIENT_NAME: 7,
+          INNERTUBE_CONTEXT_CLIENT_VERSION: '7.2026',
+        }),
+      },
+    };
+    globals.document = {
+      body: bodyEl,
+      documentElement: bodyEl,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      querySelectorAll: () => [],
+    };
+
+    let fetchSignal: AbortSignal | undefined;
+    let notifyStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+    globals.fetch = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        fetchSignal = init?.signal ?? undefined;
+        notifyStarted();
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      })) as typeof fetch;
+
+    const uninstallShortsMeta = installShortsMetadata();
+    t.after(() => {
+      uninstallShortsMeta();
+      clearShortsMetadataCache();
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+      if (prevRaf === undefined) delete globals.requestAnimationFrame;
+      else globals.requestAnimationFrame = prevRaf;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+    });
+
+    const pending = applyShortsFeedMetadata([
+      {
+        tileRenderer: {
+          style: 'TILE_STYLE_YTLR_SHORTS',
+          contentId: 'homeShortM1',
+          metadata: { tileMetadataRenderer: { title: { simpleText: 'Short M1' } } },
+        },
+      },
+    ]);
+    await fetchStarted;
+
+    // Opening Shorts toggles body.WEB_PAGE_TYPE_SHORTS while location.hash stays '#/'.
+    bodyClasses.add('WEB_PAGE_TYPE_SHORTS');
+    for (const obs of observers.filter(
+      (o) => !o.disconnected && (o.target === bodyEl || o.target === globals.document)
+    )) {
+      obs.cb([{ type: 'attributes', attributeName: 'class', target: bodyEl }]);
+    }
+
+    assert.equal(fetchSignal?.aborted, true);
+    await pending;
+  });
+
+  test('[TDD Red: M4] negative-caches empty 200 OK reel_item_watch responses and clears placeholder so focusin does not re-fetch', async (t) => {
+    clearShortsMetadataCache();
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevElement = globals.Element;
+    const prevRaf = globals.requestAnimationFrame;
+
+    class MockElement {}
+    globals.Element = MockElement;
+    globals.requestAnimationFrame = (cb: () => void) => {
+      cb();
+      return 1;
+    };
+
+    let focusInHandler: ((ev: { target: unknown }) => void) | undefined;
+    const lineTextEl = { textContent: '\u00A0' };
+    const thumbDetailsEl = {
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/emptyMeta01/oar2.jpg")' },
+      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileEl : null),
+    };
+    const tileEl = Object.assign(new MockElement(), {
+      classList: { contains: () => true },
+      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileEl : null),
+      querySelector: (sel: string) => {
+        if (sel === 'ytlr-thumbnail-details') return thumbDetailsEl;
+        if (sel.includes('yt-formatted-string')) return lineTextEl;
+        return null;
+      },
+    });
+
+    globals.window = {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      ytcfg: {
+        data_: {
+          INNERTUBE_CONTEXT: { client: { clientName: 'TVHTML5' } },
+          INNERTUBE_CONTEXT_CLIENT_NAME: 7,
+          INNERTUBE_CONTEXT_CLIENT_VERSION: '7.2026',
+        },
+      },
+    };
+    globals.document = {
+      addEventListener: (type: string, cb: (ev: { target: unknown }) => void) => {
+        if (type === 'focusin') focusInHandler = cb;
+      },
+      removeEventListener: () => {},
+      querySelectorAll: (sel: string) => (sel.includes('/emptyMeta01/') ? [thumbDetailsEl] : []),
+    };
+
+    let fetchCount = 0;
+    globals.fetch = async () => {
+      fetchCount++;
+      return {
+        ok: true,
+        text: async () => JSON.stringify({}),
+      };
+    };
+
+    const uninstallShortsMeta = installShortsMetadata();
+    t.after(() => {
+      uninstallShortsMeta();
+      clearShortsMetadataCache();
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevElement === undefined) delete globals.Element;
+      else globals.Element = prevElement;
+      globals.fetch = prevFetch;
+      if (prevRaf === undefined) delete globals.requestAnimationFrame;
+      else globals.requestAnimationFrame = prevRaf;
+    });
+
+    await applyShortsFeedMetadata([
+      {
+        tileRenderer: {
+          style: 'TILE_STYLE_YTLR_SHORTS',
+          contentId: 'emptyMeta01',
+          metadata: {
+            tileMetadataRenderer: {
+              lines: [{ lineRenderer: { items: [{ lineItemRenderer: { text: { simpleText: '\u00A0' } } }] } }],
+            },
+          },
+        },
+      },
+    ]);
+
+    focusInHandler?.({ target: tileEl });
+    focusInHandler?.({ target: tileEl });
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.equal(fetchCount, 1);
+    assert.equal(lineTextEl.textContent, '');
+  });
 });

@@ -457,4 +457,113 @@ describe('installPlayerBarInfo Watch session lifecycle', () => {
     for (const fn of winListeners.get('hashchange') ?? []) fn();
     assert.equal(fallbackLabelEl.textContent, 'no clock here');
   });
+
+  test('[TDD Red: L5] scheduleRender falls back to timer when requestAnimationFrame is unavailable', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevRaf = globals.requestAnimationFrame;
+    const prevMutationObserver = globals.MutationObserver;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+
+    const winListeners = new Map<string, Set<() => void>>();
+    const videoListeners = new Map<string, Set<(e?: Event) => void>>();
+    const fakeLocation = { hash: '#/watch?v=noRafVid', search: '' };
+
+    delete globals.requestAnimationFrame;
+    globals.CSSStyleSheet = class {
+      replaceSync(): void {}
+    };
+    globals.MutationObserver = class {
+      observe(): void {}
+      disconnect(): void {}
+    };
+
+    const elapsedEl = {
+      nodeType: 1,
+      isConnected: true,
+      textContent: '0:10',
+      dataset: {} as Record<string, string>,
+      childNodes: [] as unknown[],
+      closest: () => null,
+      querySelector: () => null,
+    };
+    const durationEl = {
+      nodeType: 1,
+      isConnected: true,
+      textContent: '2:00',
+      childNodes: [] as unknown[],
+      closest: () => null,
+    };
+    const progressBar = {
+      isConnected: true,
+      getAttribute: (n: string) => (n === 'hybridnavfocusable' ? 'true' : null),
+      classList: { contains: () => false },
+      querySelectorAll: (sel: string) => {
+        if (sel.includes('elapsedTime')) return [elapsedEl];
+        if (sel.includes('duration')) return [durationEl];
+        return [];
+      },
+    };
+    const videoEl = {
+      duration: 120,
+      currentTime: 10,
+      playbackRate: 1,
+      videoWidth: 1280,
+      videoHeight: 720,
+      addEventListener: (type: string, fn: (e?: Event) => void, opts?: { signal?: AbortSignal }) => {
+        const set = videoListeners.get(type) ?? new Set();
+        set.add(fn);
+        videoListeners.set(type, set);
+        opts?.signal?.addEventListener('abort', () => set.delete(fn), { once: true });
+      },
+    };
+
+    globals.window = {
+      location: fakeLocation,
+      addEventListener: (type: string, fn: () => void) => {
+        const set = winListeners.get(type) ?? new Set();
+        set.add(fn);
+        winListeners.set(type, set);
+      },
+      removeEventListener: (type: string, fn: () => void) => {
+        winListeners.get(type)?.delete(fn);
+      },
+    };
+    globals.document = {
+      body: {},
+      documentElement: {},
+      adoptedStyleSheets: [],
+      querySelector: (sel: string) => {
+        if (sel === 'video') return videoEl;
+        if (sel === 'ytlr-progress-bar') return progressBar;
+        return null;
+      },
+    };
+
+    const uninstallPlayerBar = installPlayerBarInfo();
+    t.after(() => {
+      uninstallPlayerBar();
+      fakeLocation.hash = '#/';
+      for (const fn of winListeners.get('hashchange') ?? []) fn();
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevRaf === undefined) delete globals.requestAnimationFrame;
+      else globals.requestAnimationFrame = prevRaf;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+    });
+
+    videoEl.currentTime = 30;
+    elapsedEl.textContent = '0:30';
+    assert.doesNotThrow(() => {
+      for (const fn of videoListeners.get('timeupdate') ?? []) fn({ type: 'timeupdate' } as Event);
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(elapsedEl.dataset.ttRemaining, '-1:30');
+  });
 });

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, test } from 'node:test';
 
 import { injectCss } from '../mods/core/styles.ts';
@@ -41,5 +43,13 @@ describe('injectCss', () => {
     };
     injectCss('.rule1{}', true);
     assert.equal(existingStyle.textContent, '.rule1{}');
+  });
+
+  test('[TDD Red: L1] removes dead trusted-types createElement wrapper and unreachable style-element fallback', () => {
+    const modsDir = path.resolve(import.meta.dirname, '..', 'mods');
+    assert.equal(fs.existsSync(path.join(modsDir, 'core', 'trusted-types.ts')), false);
+    const indexSrc = fs.readFileSync(path.join(modsDir, 'index.ts'), 'utf8');
+    assert.equal(indexSrc.includes('trusted-types'), false);
+    assert.equal(injectCss.length, 1);
   });
 });

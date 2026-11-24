@@ -677,7 +677,7 @@ describe('regression fixes', () => {
     host.instance.resolveCommand(nativeBatch);
     assert.ok(resolvedCmds.includes(nativeBatch));
 
-    // Playback popup and non-tt settings popup strip report/feedback items.
+    // Playback popup and non-tt settings popup strip report/feedback items (including text-matched and unknown items).
     const settingsPopup = {
       openPopupAction: {
         uniqueId: 'settings-overlay',
@@ -690,6 +690,10 @@ describe('regression fixes', () => {
                     content: {
                       overlayPanelItemListRenderer: {
                         items: [
+                          { unknownRenderer: {} },
+                          {
+                            compactLinkRenderer: { icon: { iconType: 'INFO' }, title: { simpleText: 'Send feedback' } },
+                          },
                           { compactLinkRenderer: { command: { openClientOverlayAction: { type: 'FEEDBACK' } } } },
                           {
                             menuNavigationItemRenderer: {
@@ -715,9 +719,46 @@ describe('regression fixes', () => {
     const filteredPopupItems =
       settingsPopup.openPopupAction.popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel
         .overlayPanelRenderer.content.overlayPanelItemListRenderer.items;
-    assert.equal(filteredPopupItems.length, 1);
+    assert.equal(filteredPopupItems.length, 2);
 
-    // SET_PLAYER_SPEED, GO_TO_CHANNEL, and error paths for FEEDBACK_REASON / markFeedback.
+    // Nested commandExecutorCommand inside commandExecutorCommand wrapping CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE unpacks recursively.
+    const executorAutoTranslate = {
+      commandExecutorCommand: {
+        commands: [
+          {
+            commandExecutorCommand: {
+              commands: [
+                {
+                  openPopupAction: {
+                    uniqueId: 'CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE',
+                    popup: {
+                      overlaySectionRenderer: {
+                        overlay: {
+                          overlayTwoPanelRenderer: {
+                            actionPanel: {
+                              overlayPanelRenderer: {
+                                content: {
+                                  overlayPanelItemListRenderer: {
+                                    items: [],
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+    assert.equal(host.instance.resolveCommand(executorAutoTranslate), true);
+
+    // SET_PLAYER_SPEED, GO_TO_CHANNEL, and error paths for customAction / FEEDBACK_REASON / markFeedback.
     host.instance.resolveCommand({ customAction: { action: 'SET_PLAYER_SPEED', parameters: '1.5' } });
     assert.equal((fakeVideo as unknown as { playbackRate?: number }).playbackRate, 1.5);
     host.instance.resolveCommand({ customAction: { action: 'GO_TO_CHANNEL', parameters: { videoId: 'vid-err' } } });
@@ -728,6 +769,14 @@ describe('regression fixes', () => {
       errCalls++;
     };
     try {
+      const prevDispatch = fakeDoc.dispatchEvent;
+      fakeDoc.dispatchEvent = () => {
+        throw new Error('dispatch boom');
+      };
+      host.instance.resolveCommand({ customAction: { action: 'SKIP', parameters: { time: 5 } } });
+      await new Promise((r) => setTimeout(r, 10));
+      fakeDoc.dispatchEvent = prevDispatch;
+
       serviceMap.set('KabukiInnerTubeClient', {
         fetch: () => ({
           subscribe: (_onNext: unknown, onError?: (err: unknown) => void) => {
@@ -740,12 +789,26 @@ describe('regression fixes', () => {
         customAction: { action: 'NOT_INTERESTED', parameters: { panelId: 'p', params: 'q' } },
       });
       await new Promise((r) => setTimeout(r, 20));
-      assert.ok(errCalls >= 2);
+      assert.ok(errCalls >= 3);
     } finally {
       console.error = origErr;
     }
 
-    // addLongPress edge cases: non-video tile, missing/plain text menu normalization, menu without showMenuCommand.
+    // addLongPress edge cases: non-video tile, missing/plain text menu normalization, existing showMenuCommand, menu without showMenuCommand.
+    const existingShowMenuTile: FeedItem = {
+      tileRenderer: {
+        contentType: 'TILE_CONTENT_TYPE_VIDEO',
+        contentId: 'v-has-show',
+        onLongPressCommand: {
+          showMenuCommand: { menu: { menuRenderer: { items: [{ keepExisting: true }] } } },
+        },
+        menu: {
+          menuRenderer: {
+            items: [{ menuServiceItemRenderer: { text: { simpleText: 'keep menu' } } }],
+          },
+        },
+      },
+    };
     const nonVideoTile: FeedItem = {
       tileRenderer: { contentType: 'TILE_CONTENT_TYPE_CHANNEL', contentId: 'chan1' },
     };
@@ -784,7 +847,10 @@ describe('regression fixes', () => {
         },
       },
     };
-    addLongPress([nonVideoTile, menuNoShowCmd, plainTextTile]);
+    addLongPress([existingShowMenuTile, nonVideoTile, menuNoShowCmd, plainTextTile]);
+    assert.deepEqual(existingShowMenuTile.tileRenderer?.onLongPressCommand?.showMenuCommand?.menu, {
+      menuRenderer: { items: [{ keepExisting: true }] },
+    });
     assert.ok(menuNoShowCmd.tileRenderer?.onLongPressCommand?.showMenuCommand);
     assert.equal(
       (
@@ -860,5 +926,68 @@ describe('regression fixes', () => {
     bodyClasses.clear();
     assert.equal(host.instance.resolveCommand(directPreview), true);
     assert.deepEqual(dispatched, [directPreview]);
+  });
+
+  test('[TDD Red: H3] patchResolveCommand blocks innertubeCommand-wrapped startInlinePlaybackCommand during Watch and Shorts playback', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const origWindow = globals.window;
+    const origDoc = globals.document;
+    t.after(() => {
+      if (origWindow === undefined) delete globals.window;
+      else globals.window = origWindow;
+      if (origDoc === undefined) delete globals.document;
+      else globals.document = origDoc;
+    });
+
+    const dispatched: unknown[] = [];
+    const bodyClasses = new Set<string>();
+    const fakeLocation = { hash: '#/watch?v=mainVid', search: '' };
+    const host = {
+      instance: {
+        resolveCommand: (cmd: unknown) => {
+          dispatched.push(cmd);
+          return true;
+        },
+      },
+    };
+
+    globals.document = { body: { classList: { contains: (cls: string) => bodyClasses.has(cls) } } };
+    globals.window = {
+      location: fakeLocation,
+      _yttv: { router: host },
+    };
+
+    patchResolveCommand();
+
+    const wrappedDirectPreview = {
+      innertubeCommand: {
+        startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'wrap1' } } },
+      },
+    };
+    const wrappedExecutorPreview = {
+      commandExecutorCommand: {
+        commands: [
+          {
+            innertubeCommand: {
+              startInlinePlaybackCommand: { playbackEndpoint: { watchEndpoint: { videoId: 'wrap2' } } },
+            },
+          },
+          { signalAction: { signal: 'KEEP_ALIVE' } },
+        ],
+      },
+    };
+
+    assert.equal(host.instance.resolveCommand(wrappedDirectPreview), false);
+    assert.equal(dispatched.length, 0);
+
+    host.instance.resolveCommand(wrappedExecutorPreview);
+    assert.deepEqual(dispatched, [{ signalAction: { signal: 'KEEP_ALIVE' } }]);
+
+    // Verify same blocking when in Shorts on #/ via WEB_PAGE_TYPE_SHORTS.
+    fakeLocation.hash = '#/';
+    bodyClasses.add('WEB_PAGE_TYPE_SHORTS');
+    dispatched.length = 0;
+    assert.equal(host.instance.resolveCommand(wrappedDirectPreview), false);
+    assert.equal(dispatched.length, 0);
   });
 });

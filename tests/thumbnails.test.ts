@@ -595,4 +595,51 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
     errorHandler({ target: {} } as unknown as Event);
     hashChangeHandler();
   });
+
+  test('[TDD Red: H2] stacks CSS multi-background fallback layers on mounted TV ytlr-thumbnail-details when applying DeArrow branding', async (t) => {
+    clearDeArrowCache();
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+
+    const mountedTitleEl = { textContent: 'Original Title' };
+    const mountedTileEl = {
+      querySelector: (sel: string) => (sel.includes('title') ? mountedTitleEl : null),
+    };
+    const mountedThumbEl = {
+      tagName: 'YTLR-THUMBNAIL-DETAILS',
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/mountedFb01/hq720.jpg")' },
+      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? mountedTileEl : null),
+    };
+
+    globals.document = {
+      querySelectorAll: (sel: string) => (sel.includes('/mountedFb01/') ? [mountedThumbEl] : []),
+    };
+    globals.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          titles: [{ title: 'Clean Title', votes: 5 }],
+          thumbnails: [{ timestamp: 12, votes: 5 }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )) as typeof fetch;
+
+    t.after(() => {
+      clearDeArrowCache();
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+    });
+
+    const tileCase = createTileFeedItem({
+      contentId: 'mountedFb01',
+      onSelectCommand: { watchEndpoint: { videoId: 'mountedFb01' } },
+    });
+    await applyDeArrowBranding([tileCase.entry]);
+
+    assert.equal(
+      mountedThumbEl.style.backgroundImage,
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=mountedFb01&time=12"), url("https://i.ytimg.com/vi/mountedFb01/hq720.jpg"), url("https://i.ytimg.com/vi/mountedFb01/hqdefault.jpg")'
+    );
+  });
 });

@@ -715,6 +715,11 @@ describe('TV browse/JSON.parse transforms', () => {
     // JSON.parse array & primitive passthrough + _yttv JSON wrapper + ENABLE_PREVIEWS_WITH_SOUND sync.
     syncYttvPreviewAndJson();
     assert.equal(flagsMap.get('ENABLE_PREVIEWS_WITH_SOUND'), true);
+    const wrappedYttvParse = (fakeWindow._yttv as { jsonMod: { JSON: { parse: typeof JSON.parse } } }).jsonMod.JSON
+      .parse;
+    assert.deepEqual(wrappedYttvParse('[1,2]'), [1, 2]);
+    assert.equal(wrappedYttvParse('null'), null);
+    assert.equal(wrappedYttvParse('42'), 42);
     assert.deepEqual(JSON.parse('[1,2]'), [1, 2]);
     assert.equal(JSON.parse('null'), null);
     assert.equal(JSON.parse('42'), 42);
@@ -993,5 +998,40 @@ describe('TV browse/JSON.parse transforms', () => {
     assert.ok(
       homeContinuationPayload.continuationContents.horizontalListContinuation.items[0]?.tileRenderer.onFocusCommand
     );
+  });
+
+  test('[TDD Red: M5] processShelvesSync filters direct browse items once instead of double-scanning badges', () => {
+    let badgeReads = 0;
+    const tile: Record<string, unknown> = {
+      contentId: 'directOnce1',
+      style: 'TILE_STYLE_YTLR_DEFAULT',
+      onSelectCommand: { watchEndpoint: { videoId: 'directOnce1' } },
+    };
+    Object.defineProperty(tile, 'badges', {
+      enumerable: true,
+      get() {
+        badgeReads++;
+        return [{ metadataBadgeRenderer: { label: 'HD' } }];
+      },
+    });
+
+    const browsePayload = {
+      contents: {
+        tvBrowseRenderer: {
+          content: {
+            tvSurfaceContentRenderer: {
+              content: {
+                sectionListRenderer: {
+                  contents: [{ tileRenderer: tile }],
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    transformInnertubeResponseSync(browsePayload);
+    assert.equal(badgeReads, 1);
   });
 });

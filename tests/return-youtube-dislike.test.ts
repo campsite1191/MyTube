@@ -540,4 +540,101 @@ describe('return-youtube-dislike', () => {
     fakeLocation.hash = '#/';
     for (const fn of winListeners.get('hashchange') ?? []) fn();
   });
+
+  test('[TDD Red: M1] aborts in-flight Shorts RYD fetch and disconnects overlay observer when WEB_PAGE_TYPE_SHORTS is removed without hashchange', async (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevMutationObserver = globals.MutationObserver;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+    const prevRaf = globals.requestAnimationFrame;
+
+    const observers: Array<{ target: unknown; cb: (mutations: unknown[]) => void; disconnected: boolean }> = [];
+    globals.MutationObserver = class {
+      private readonly rec: { target: unknown; cb: (mutations: unknown[]) => void; disconnected: boolean };
+      constructor(cb: (mutations: unknown[]) => void) {
+        this.rec = { target: null, cb, disconnected: false };
+      }
+      observe(target: unknown): void {
+        this.rec.target = target;
+        observers.push(this.rec);
+      }
+      disconnect(): void {
+        this.rec.disconnected = true;
+      }
+    };
+    globals.CSSStyleSheet = class {
+      replaceSync(): void {}
+    };
+    globals.requestAnimationFrame = (cb: () => void) => {
+      cb();
+      return 1;
+    };
+
+    const bodyClasses = new Set<string>(['WEB_PAGE_TYPE_SHORTS']);
+    const overlayEl = { nodeName: 'YTLR-REEL-PLAYER-OVERLAY-RENDERER' };
+    const bodyEl = {
+      nodeName: 'BODY',
+      classList: {
+        contains: (cls: string) => bodyClasses.has(cls),
+        add: (cls: string) => bodyClasses.add(cls),
+        remove: (cls: string) => bodyClasses.delete(cls),
+      },
+    };
+    const fakeLocation = { hash: '#/', search: '' };
+    globals.window = {
+      location: fakeLocation,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    globals.document = {
+      body: bodyEl,
+      documentElement: bodyEl,
+      adoptedStyleSheets: [],
+      querySelector: (sel: string) => (sel === 'ytlr-reel-player-overlay-renderer' ? overlayEl : null),
+      querySelectorAll: () => [],
+    };
+
+    let shortsSignal: AbortSignal | undefined;
+    globals.fetch = ((_url: unknown, init?: RequestInit) => {
+      shortsSignal = init?.signal ?? undefined;
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+
+    const uninstallRyd = installReturnYouTubeDislike();
+    t.after(() => {
+      uninstallRyd();
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+      if (prevRaf === undefined) delete globals.requestAnimationFrame;
+      else globals.requestAnimationFrame = prevRaf;
+    });
+
+    setShortsOverlayStats('shortExit01', '15K');
+    const overlayObservers = observers.filter((o) => o.target === overlayEl);
+    assert.ok(overlayObservers.length >= 1);
+    assert.equal(shortsSignal?.aborted, false);
+
+    // Exiting Shorts back to Home drops WEB_PAGE_TYPE_SHORTS while location.hash stays '#/'.
+    bodyClasses.delete('WEB_PAGE_TYPE_SHORTS');
+    for (const obs of observers.filter(
+      (o) => !o.disconnected && (o.target === bodyEl || o.target === globals.document)
+    )) {
+      obs.cb([{ type: 'attributes', attributeName: 'class', target: bodyEl }]);
+    }
+
+    assert.equal(shortsSignal?.aborted, true);
+    assert.equal(
+      overlayObservers.every((o) => o.disconnected),
+      true
+    );
+  });
 });
