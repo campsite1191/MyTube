@@ -137,6 +137,18 @@ function enrichShortsActionBar(payload: Record<string, unknown>): boolean {
       likeIndex = i;
       if (typeof toggleBtn.title === 'string' && toggleBtn.title.trim()) {
         likeCount = toggleBtn.title.trim();
+        delete toggleBtn.title;
+      }
+      const toggledBtn = readRecordPath(
+        btn,
+        'likeButtonViewModel',
+        'toggleButtonViewModel',
+        'toggleButtonViewModel',
+        'toggledButtonViewModel',
+        'buttonViewModel'
+      );
+      if (toggledBtn && 'title' in toggledBtn) {
+        delete toggledBtn.title;
       }
       const onTap = readRecordPath(toggleBtn, 'onTap', 'innertubeCommand');
       const authTarget = readRecordPath(

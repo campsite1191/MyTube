@@ -3,11 +3,25 @@ import { describe, test } from 'node:test';
 import {
   fetchDislikeCount,
   installReturnYouTubeDislike,
+  normalizeVoteCount,
   setShortsOverlayStats,
   setWatchLikeCount,
 } from '../../mods/features/return-youtube-dislike.ts';
 
 describe('return-youtube-dislike', () => {
+  test('normalizeVoteCount accepts valid numeric/compact counts and rejects hidden-like or zero labels', () => {
+    assert.equal(normalizeVoteCount(null), null);
+    assert.equal(normalizeVoteCount(undefined), null);
+    assert.equal(normalizeVoteCount(''), null);
+    assert.equal(normalizeVoteCount('Like'), null);
+    assert.equal(normalizeVoteCount('like this video along with 0 other people'), null);
+    assert.equal(normalizeVoteCount('0'), null);
+    assert.equal(normalizeVoteCount('42'), '42');
+    assert.equal(normalizeVoteCount('1,250'), '1.3K');
+    assert.equal(normalizeVoteCount('12.5 k'), '12.5K');
+    assert.equal(normalizeVoteCount('19M'), '19M');
+  });
+
   test('installReturnYouTubeDislike no-ops safely when window or document is absent', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
@@ -42,6 +56,9 @@ describe('return-youtube-dislike', () => {
 
     globalThis.fetch = (async () => new Response(JSON.stringify({ dislikes: 'NaN' }), { status: 200 })) as typeof fetch;
     assert.equal(await fetchDislikeCount('vidBadType'), null);
+
+    globalThis.fetch = (async () => new Response(JSON.stringify({ dislikes: 0 }), { status: 200 })) as typeof fetch;
+    assert.equal(await fetchDislikeCount('vidZero'), null);
 
     globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
     assert.equal(await fetchDislikeCount('vid404'), null);
@@ -228,9 +245,18 @@ describe('return-youtube-dislike', () => {
     assert.match(injectedCss, /pointer-events:\s*none\s*!important/);
     assert.match(injectedCss, /display:\s*inline-flex\s*!important/);
     assert.match(injectedCss, /flex-direction:\s*row\s*!important/);
+    assert.match(injectedCss, /vertical-align:\s*top\s*!important/);
+    assert.match(injectedCss, /gap:\s*0;/);
+    assert.match(injectedCss, /\[idomkey="like-button"\]\[data-tt-count\]::after\s*\{\s*padding-right:\s*0\.75rem;/);
     assert.match(
       injectedCss,
-      /:last-child\s*\[idomkey="dislike-button"\]\[data-tt-count\]::after\s*\{\s*padding-right:\s*1rem;/
+      /ytlr-watch-default\s+\[idomkey="dislike-button"\]\[data-tt-count\]::after\s*\{\s*padding-right:\s*1rem;/
+    );
+    assert.doesNotMatch(injectedCss, /:last-child\s*\[idomkey="dislike-button"\]/);
+    assert.match(injectedCss, /ytlr-reel-action-bar-button-view-model\[data-tt-count\]\s+yt-formatted-string/);
+    assert.doesNotMatch(
+      injectedCss,
+      /ytlr-reel-action-bar-button-view-model\[data-tt-count\]\s+:is\(yt-icon-button,\s*yt-button-container\)/
     );
     assert.doesNotMatch(injectedCss, /top:\s*100%/);
 
@@ -893,5 +919,111 @@ describe('return-youtube-dislike', () => {
     delete globals.document;
     setShortsOverlayStats('ssrShort', '7');
     setShortsOverlayStats('ssrShort', '8');
+  });
+
+  test('patchShortsActionBarFocusSkip skips inert synthetic Dislike button in both D-pad directions and clamps at boundaries', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+    const prevRaf = globals.requestAnimationFrame;
+
+    t.after(() => {
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+      if (prevRaf === undefined) delete globals.requestAnimationFrame;
+      else globals.requestAnimationFrame = prevRaf;
+    });
+
+    globals.CSSStyleSheet = class {
+      replaceSync(): void {}
+    };
+    globals.requestAnimationFrame = (cb: () => void) => {
+      cb();
+      return 1;
+    };
+
+    const makeBarItem = (inert: boolean, focusable: string) => ({
+      inert,
+      dataset: {} as Record<string, string>,
+      getAttribute: (name: string) => (name === 'hybridnavfocusable' ? focusable : null),
+      hasAttribute: (name: string) => name === 'hybridnavfocusable' || name === 'tabindex',
+      setAttribute: () => {},
+      querySelectorAll: () => [],
+    });
+
+    let barItems = [makeBarItem(false, 'true'), makeBarItem(true, 'false'), makeBarItem(false, 'true')];
+    let currentFc: { __instance: { props: { selectedIndex?: unknown; ga?: (idx: number) => void } } } | null = null;
+    const initialFcProps: { selectedIndex?: unknown; ga?: (idx: number) => void } = {};
+    const barInst: Record<string, unknown> = {
+      state: { qQ: 0 },
+      unrelated: 42,
+      onSelect(idx: number) {
+        if (currentFc) {
+          currentFc.__instance.props = { selectedIndex: idx, ga: barInst.onSelect as (i: number) => void };
+        }
+      },
+    };
+    const origFn = barInst.onSelect as (idx: number) => void;
+    initialFcProps.selectedIndex = 0;
+    initialFcProps.ga = origFn;
+
+    let currentBar: Record<string, unknown> | null = null;
+
+    globals.document = {
+      body: { isConnected: true },
+      documentElement: { isConnected: true },
+      adoptedStyleSheets: [],
+      querySelector: (sel: string) => (sel === 'ytlr-reel-action-bar-view-model' ? currentBar : null),
+      querySelectorAll: () => [],
+    };
+
+    // 1. Missing bar, missing __instance, missing yt-focus-container, and missing handler match all return cleanly.
+    setShortsOverlayStats('shortSkip1', '10K');
+    currentBar = { querySelector: () => currentFc, querySelectorAll: () => barItems };
+    setShortsOverlayStats('shortSkip1', '11K');
+    currentBar.__instance = {};
+    setShortsOverlayStats('shortSkip1', '12K');
+    currentFc = { __instance: { props: { selectedIndex: 0 } } };
+    setShortsOverlayStats('shortSkip1', '13K');
+
+    // 2. Matching barInst handler wraps both barInst and mounted fcProps in place, and tracks replaced props objects across re-renders.
+    barInst.onSelect = origFn;
+    currentBar.__instance = barInst;
+    currentFc = { __instance: { props: initialFcProps } };
+    setShortsOverlayStats('shortSkip1', '14K');
+
+    const wrappedHandler = barInst.onSelect as (idx: number) => void;
+    assert.notEqual(wrappedHandler, origFn);
+    assert.equal(initialFcProps.ga, wrappedHandler);
+
+    // Stepping right from Like (0 -> 1) via initial fcProps skips inert Dislike (1), lands on Comments (2), and replaces fcProps.
+    initialFcProps.ga?.(1);
+    assert.equal(currentFc.__instance.props.selectedIndex, 2);
+    assert.notEqual(currentFc.__instance.props, initialFcProps);
+
+    // Stepping left from Comments (2 -> 1) reads the NEW live fcProps (selectedIndex: 2), skips inert Dislike (1), and returns to Like (0).
+    currentFc.__instance.props.ga?.(1);
+    assert.equal(currentFc.__instance.props.selectedIndex, 0);
+
+    // Missing numeric selectedIndex (and null liveFc) defaults prevIdx to 0; out-of-bounds inert ends clamp cleanly back to prevIdx.
+    currentFc.__instance.props = { selectedIndex: undefined, ga: wrappedHandler };
+    barItems = [makeBarItem(false, 'false'), makeBarItem(true, 'true'), makeBarItem(false, 'false')];
+    wrappedHandler(1); // steps +1 past end -> clamps back to prevIdx 0
+    assert.equal(currentFc.__instance.props.selectedIndex, 0);
+
+    currentFc.__instance.props = { selectedIndex: 2, ga: wrappedHandler };
+    wrappedHandler(1); // steps -1 past index 0 -> clamps back to prevIdx 2
+    assert.equal(currentFc.__instance.props.selectedIndex, 2);
+
+    const savedFc = currentFc;
+    currentFc = null;
+    wrappedHandler(1); // liveFc is null -> prevIdx defaults to 0
+    currentFc = savedFc;
+
+    // Re-running applyShortsOverlayLabels skips already-patched barInst without double-wrapping.
+    setShortsOverlayStats('shortSkip1', '15K');
+    assert.equal(barInst.onSelect, wrappedHandler);
   });
 });

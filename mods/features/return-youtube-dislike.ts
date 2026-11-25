@@ -36,6 +36,24 @@ const SHORTS_LIKE_SELECTOR =
 const SHORTS_DISLIKE_SELECTOR =
   'ytlr-reel-action-bar-view-model ytlr-reel-action-bar-button-view-model:has(yt-button-container[aria-label="Dislike"])';
 const SHORTS_COUNT_TARGET = 'ytlr-reel-action-bar-button-view-model[data-tt-count]';
+const VOTE_COUNT_RE = /^(\d[\d,]*(?:\.\d+)?)\s*([KMBT])?$/i;
+
+/**
+ * Normalizes a formatted or raw vote count string (e.g. `"12.5 K"`, `"1,250"`) into a compact
+ * display label (`"12.5K"`, `"1.3K"`), returning `null` for zero or non-numeric labels (e.g. `"Like"`).
+ */
+export function normalizeVoteCount(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null;
+  const match = raw.trim().match(VOTE_COUNT_RE) as [string, string, string | undefined] | null;
+  if (!match) return null;
+  const digits = match[1].replace(/,/g, '');
+  const suffix = match[2];
+  if (suffix) {
+    return `${digits}${suffix.toUpperCase()}`;
+  }
+  const numericValue = Number(digits);
+  return numericValue > 0 ? formatCompactCount(numericValue) : null;
+}
 
 function installVoteLabelStyles(): void {
   if (stylesInstalled || typeof document === 'undefined') return;
@@ -45,11 +63,12 @@ function installVoteLabelStyles(): void {
         pointer-events: none !important;
       }
       ytlr-watch-default ${VOTE_TARGET}:has([data-tt-count]),
-      ${SHORTS_COUNT_TARGET},
-      ${SHORTS_COUNT_TARGET} :is(yt-icon-button, yt-button-container) {
+      ytlr-watch-default ${VOTE_TARGET}[data-tt-count],
+      ${SHORTS_COUNT_TARGET} {
         width: auto !important;
         min-width: fit-content !important;
         max-width: none !important;
+        vertical-align: top !important;
         overflow: visible !important;
       }
       ytlr-watch-default ${VOTE_TARGET}[data-tt-count],
@@ -57,14 +76,15 @@ function installVoteLabelStyles(): void {
         display: inline-flex !important;
         flex-direction: row !important;
         align-items: center !important;
-        width: auto !important;
-        min-width: fit-content !important;
-        max-width: none !important;
-        gap: 0.375rem;
-        overflow: visible !important;
+        gap: 0;
+        vertical-align: top !important;
       }
       ${SHORTS_COUNT_TARGET} {
+        gap: 0.375rem;
         margin-right: 0.75rem !important;
+      }
+      ${SHORTS_COUNT_TARGET} yt-formatted-string {
+        display: none !important;
       }
       ytlr-watch-default ${VOTE_TARGET}[data-tt-count]::after,
       ${SHORTS_COUNT_TARGET}::after {
@@ -81,7 +101,10 @@ function installVoteLabelStyles(): void {
         white-space: nowrap;
         pointer-events: none;
       }
-      ytlr-watch-default :is(ytlr-redux-connect-ytlr-like-button-renderer, div > ytlr-like-button-renderer):last-child [idomkey="dislike-button"][data-tt-count]::after {
+      ytlr-watch-default [idomkey="like-button"][data-tt-count]::after {
+        padding-right: 0.75rem;
+      }
+      ytlr-watch-default [idomkey="dislike-button"][data-tt-count]::after {
         padding-right: 1rem;
       }
     `);
@@ -209,15 +232,63 @@ function findObserverTarget(
  * Records the live formatted like count from YouTube's InnerTube `/next` response.
  */
 export function setWatchLikeCount(videoId: string | null, count: string | null): void {
-  if (!videoId || !count) return;
-  const compact = count.replace(/\s+/g, '');
-  if (!compact) return;
+  const compact = normalizeVoteCount(count);
+  if (!videoId || !compact) return;
   currentLike = { videoId, count: compact };
   if (videoId === getActiveWatchVideoId() && typeof document !== 'undefined') {
     for (const container of queryElements(VOTE_CONTAINER_SELECTOR)) disableFocus(container);
     applyButtonLabels(LIKE_BUTTON_SELECTOR, compact);
     patchTransportFocusSkip();
   }
+}
+
+function patchShortsActionBarFocusSkip(): void {
+  const barEl = document.querySelector('ytlr-reel-action-bar-view-model') as
+    | (Element & { __instance?: Record<string, unknown> })
+    | null;
+  if (!barEl) return;
+  const barInst = barEl.__instance;
+  const fcEl = barEl.querySelector?.('yt-focus-container') as
+    | (Element & { __instance?: { props?: Record<string, unknown> } })
+    | null;
+  const fcProps = fcEl?.__instance?.props;
+  if (!barInst || !fcProps || patchedTransportInstances.has(barInst)) return;
+
+  const fcEntries = Object.entries(fcProps);
+  let matchedHandler: { barKey: string; fcKey: string } | null = null;
+  for (const key of Object.getOwnPropertyNames(barInst)) {
+    const fn = barInst[key];
+    if (typeof fn !== 'function') continue;
+    const fcMatch = fcEntries.find(([, value]) => value === fn);
+    if (fcMatch) {
+      matchedHandler = { barKey: key, fcKey: fcMatch[0] };
+      break;
+    }
+  }
+  if (!matchedHandler) return;
+
+  patchedTransportInstances.add(barInst);
+  const origSelect = barInst[matchedHandler.barKey] as (idx: number) => void;
+  const wrappedSelect = (nextIdx: number): void => {
+    const liveFc = barEl.querySelector('yt-focus-container') as
+      | (Element & { __instance?: { props?: { selectedIndex?: unknown } } })
+      | null;
+    const liveIdx = liveFc?.__instance?.props?.selectedIndex;
+    const prevIdx = typeof liveIdx === 'number' ? liveIdx : 0;
+    const step = nextIdx >= prevIdx ? 1 : -1;
+    const items = Array.from(barEl.querySelectorAll<HTMLElement>('ytlr-reel-action-bar-button-view-model'));
+    let targetIdx = nextIdx;
+    while (targetIdx >= 0 && targetIdx < items.length) {
+      const item = items[targetIdx] as HTMLElement;
+      if (!item.inert && item.getAttribute?.('hybridnavfocusable') !== 'false') {
+        break;
+      }
+      targetIdx += step;
+    }
+    origSelect.call(barInst, targetIdx >= 0 && targetIdx < items.length ? targetIdx : prevIdx);
+  };
+  barInst[matchedHandler.barKey] = wrappedSelect;
+  fcProps[matchedHandler.fcKey] = wrappedSelect;
 }
 
 function clearShortsOverlayState(): void {
@@ -230,6 +301,7 @@ function applyShortsOverlayLabels(shorts: NonNullable<typeof currentShorts>): vo
   if (typeof document === 'undefined') return;
   applyButtonLabels(SHORTS_LIKE_SELECTOR, shorts.likeCount, false);
   applyButtonLabels(SHORTS_DISLIKE_SELECTOR, shorts.dislikeCount, true);
+  patchShortsActionBarFocusSkip();
 }
 
 /**
@@ -237,7 +309,7 @@ function applyShortsOverlayLabels(shorts: NonNullable<typeof currentShorts>): vo
  */
 export function setShortsOverlayStats(videoId: string | null, likeCount: string | null): void {
   if (!videoId) return;
-  const compactLikes = typeof likeCount === 'string' && likeCount.trim() ? likeCount.replace(/\s+/g, '') : null;
+  const compactLikes = normalizeVoteCount(likeCount);
 
   if (currentShorts?.videoId === videoId) {
     if (compactLikes) currentShorts.likeCount = compactLikes;
@@ -309,7 +381,7 @@ export async function fetchDislikeCount(videoId: string, signal?: AbortSignal): 
     });
     if (!resp.ok || signal?.aborted) return null;
     const data = (await resp.json()) as { dislikes?: unknown } | null;
-    return typeof data?.dislikes === 'number' ? formatCompactCount(data.dislikes) : null;
+    return typeof data?.dislikes === 'number' && data.dislikes > 0 ? formatCompactCount(data.dislikes) : null;
   } catch {
     return null;
   }

@@ -133,6 +133,17 @@ describe('player-overlays transforms', () => {
         },
       })
     );
+    // Non-numeric / hidden-like strings (e.g. "Like" fallback) are ignored cleanly.
+    assert.doesNotThrow(() =>
+      recordTransportLikeCount({
+        videoDetails: { videoId: 'hiddenLikeVid' },
+        transportControls: {
+          transportControlsRenderer: {
+            actions: [{ likeButtonRenderer: { likeCountText: { simpleText: 'Like' } } }],
+          },
+        },
+      })
+    );
   });
 
   test('transformTransportControls strips subscribe, prev/next, and report/feedback buttons across variants', () => {

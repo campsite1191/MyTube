@@ -44,6 +44,12 @@ function makeReelPayload(
                               },
                             },
                           },
+                          toggledButtonViewModel: {
+                            buttonViewModel: {
+                              iconName: 'HEART',
+                              title: '385K',
+                            },
+                          },
                         },
                       },
                     },
@@ -135,6 +141,33 @@ describe('shorts-overlay', () => {
         ?.buttonViewModel?.iconName,
       'DISLIKE'
     );
+    const likeToggleModel = (
+      payload.overlay as {
+        reelPlayerOverlayRenderer: {
+          buttonBar: {
+            reelActionBarViewModel: {
+              buttonViewModels: Array<{
+                reelActionBarButtonViewModel?: {
+                  buttonViewModel?: {
+                    likeButtonViewModel?: {
+                      toggleButtonViewModel?: {
+                        toggleButtonViewModel?: {
+                          defaultButtonViewModel?: { buttonViewModel?: { title?: string } };
+                          toggledButtonViewModel?: { buttonViewModel?: { title?: string } };
+                        };
+                      };
+                    };
+                  };
+                };
+              }>;
+            };
+          };
+        };
+      }
+    ).reelPlayerOverlayRenderer.buttonBar.reelActionBarViewModel.buttonViewModels[0]?.reelActionBarButtonViewModel
+      ?.buttonViewModel?.likeButtonViewModel?.toggleButtonViewModel?.toggleButtonViewModel;
+    assert.equal('title' in (likeToggleModel?.defaultButtonViewModel?.buttonViewModel ?? {}), false);
+    assert.equal('title' in (likeToggleModel?.toggledButtonViewModel?.buttonViewModel ?? {}), false);
 
     // Second call is idempotent.
     assert.equal(enrichShortsPlayerOverlay(payload), false);

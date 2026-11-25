@@ -2,7 +2,7 @@ import { t } from '../core/i18n.ts';
 import { getActiveWatchVideoId } from '../core/lifecycle.ts';
 import { injectCss } from '../core/styles.ts';
 import { dispatchYttvCommand } from '../core/yttv-bridge.ts';
-import { setWatchLikeCount } from '../features/return-youtube-dislike.ts';
+import { normalizeVoteCount, setWatchLikeCount } from '../features/return-youtube-dislike.ts';
 import type { SponsorBlockSegment } from '../features/sponsorblock.ts';
 import { onSponsorBlockSegmentsReady, resolveSegmentActionType } from '../features/sponsorblock.ts';
 import { ButtonRenderer, timelyAction } from '../ui/yt-ui.ts';
@@ -222,8 +222,9 @@ export function recordTransportLikeCount(r: Record<string, unknown>): void {
           typeof readFormattedText
         >[0]
       );
-      if (text) {
-        setWatchLikeCount(videoId, text);
+      const normalized = normalizeVoteCount(text);
+      if (normalized) {
+        setWatchLikeCount(videoId, normalized);
         return;
       }
     }
