@@ -17,7 +17,7 @@ interface MockEl {
 }
 
 describe('mods/index.ts entrypoint bootstrap', () => {
-  test('seeds immediate preferences synchronously and schedules post-first-paint modules on ready', async (t) => {
+  test('wires synchronous hooks, seeds preferences, and schedules post-first-paint modules on ready', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
     const prevDocument = globals.document;
@@ -33,6 +33,7 @@ describe('mods/index.ts entrypoint bootstrap', () => {
     const bodyChildren: MockEl[] = [];
     const storageMap = new Map<string, string>();
     const activeTimeouts = new Set<ReturnType<typeof setTimeout>>();
+    const docListeners: string[] = [];
 
     globals.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
       const id = origSetTimeout(() => {
@@ -107,7 +108,9 @@ describe('mods/index.ts entrypoint bootstrap', () => {
       getElementById: (id: string) => findById(bodyChildren, id),
       querySelector: () => null,
       querySelectorAll: () => [],
-      addEventListener: () => {},
+      addEventListener: (type: string) => {
+        docListeners.push(type);
+      },
       removeEventListener: () => {},
     };
     globals.window = {
@@ -145,6 +148,16 @@ describe('mods/index.ts entrypoint bootstrap', () => {
     await import('../mods/index.ts');
     assert.ok(storageMap.has('yt.leanback.default::recurring_actions'));
     assert.ok(storageMap.has('yt-player-quality'));
+    assert.ok(docListeners.includes('error'));
+    assert.ok(docListeners.includes('keydown'));
+    assert.ok(docListeners.includes('click'));
+
+    const parsedEndscreen = JSON.parse('{"endscreen":{"endscreenRenderer":{}}}') as { endscreen: unknown };
+    assert.equal(parsedEndscreen.endscreen, null);
+    const respEndscreen = (await new Response(JSON.stringify({ endscreen: { endscreenRenderer: {} } })).json()) as {
+      endscreen: unknown;
+    };
+    assert.equal(respEndscreen.endscreen, null);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(idleQueue.length, 1);

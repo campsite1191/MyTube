@@ -5,12 +5,10 @@ import { installInnertubeInterceptor } from '../../mods/core/innertube-intercept
 import {
   applyShortsFeedMetadata,
   clearShortsMetadataCache,
-  enrichShortsPlayerOverlay,
-  extractShortsMetadataFromReel,
-  formatShortsUploadedAt,
-  formatShortsViewCount,
   installShortsMetadata,
-} from '../../mods/transforms/shorts-metadata.ts';
+} from '../../mods/features/shorts-metadata.ts';
+import { transformInnertubeResponseSync } from '../../mods/transforms/innertube-response.ts';
+import { enrichShortsPlayerOverlay } from '../../mods/transforms/shorts-overlay.ts';
 import type { FeedItem } from '../../mods/types/innertube.ts';
 
 function makeReelPayload(
@@ -90,105 +88,6 @@ function makeReelPayload(
 }
 
 describe('shorts-metadata', () => {
-  test('formats view counts and upload timestamps cleanly', () => {
-    assert.equal(formatShortsViewCount('12,318,166 views'), '12.3M views');
-    assert.equal(formatShortsViewCount('842 views'), '842 views');
-    assert.equal(formatShortsViewCount('1 view'), '1 view');
-    assert.equal(formatShortsViewCount('93M views'), '93M views');
-    assert.equal(formatShortsViewCount('No views'), 'No views');
-    assert.equal(formatShortsViewCount(''), null);
-
-    assert.equal(formatShortsUploadedAt('1 day ago', 'Published on Nov 20, 2026'), '1 day ago');
-    assert.equal(formatShortsUploadedAt('', 'Published on Nov 20, 2026'), 'Nov 20, 2026');
-    assert.equal(formatShortsUploadedAt('', ''), null);
-  });
-
-  test('extractShortsMetadataFromReel and enrichShortsPlayerOverlay append metadata idempotently', () => {
-    const payload = makeReelPayload('WjCH5JUNzao', '12,318,166 views', '1 day ago', 'Can I Beat Magnus?');
-    assert.equal(extractShortsMetadataFromReel(payload), '12.3M views • 1 day ago');
-
-    assert.equal(enrichShortsPlayerOverlay(payload), true);
-    const hdr = (
-      payload.overlay as {
-        reelPlayerOverlayRenderer: {
-          reelPlayerHeaderSupportedRenderers: {
-            reelPlayerHeaderRenderer: { reelTitleText: { runs: Array<{ text: string }> } };
-          };
-          buttonBar: {
-            reelActionBarViewModel: {
-              buttonViewModels: Array<{
-                reelActionBarButtonViewModel?: {
-                  buttonViewModel?: { buttonViewModel?: { iconName?: string; accessibilityText?: string } };
-                };
-              }>;
-            };
-          };
-        };
-      }
-    ).reelPlayerOverlayRenderer;
-
-    assert.deepEqual(hdr.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.reelTitleText.runs, [
-      { text: 'Can I Beat Magnus?' },
-      { text: '\n12.3M views • 1 day ago' },
-    ]);
-    assert.equal(hdr.buttonBar.reelActionBarViewModel.buttonViewModels.length, 3);
-    assert.equal(
-      hdr.buttonBar.reelActionBarViewModel.buttonViewModels[1]?.reelActionBarButtonViewModel?.buttonViewModel
-        ?.buttonViewModel?.iconName,
-      'DISLIKE'
-    );
-
-    // Second call is idempotent
-    assert.equal(enrichShortsPlayerOverlay(payload), false);
-    assert.equal(hdr.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.reelTitleText.runs.length, 2);
-    assert.equal(hdr.buttonBar.reelActionBarViewModel.buttonViewModels.length, 3);
-
-    // Also supports simpleText titles
-    const simplePayload: Record<string, unknown> = {
-      overlay: {
-        reelPlayerOverlayRenderer: {
-          reelPlayerHeaderSupportedRenderers: {
-            reelPlayerHeaderRenderer: {
-              reelTitleText: { simpleText: 'Simple Title' },
-              timestampText: { simpleText: '3 hours ago' },
-            },
-          },
-        },
-      },
-      engagementPanels: [
-        {
-          engagementPanelSectionListRenderer: {
-            content: {
-              structuredDescriptionContentRenderer: {
-                items: [
-                  {
-                    videoDescriptionHeaderRenderer: {
-                      factoid: [
-                        { factoidRenderer: { label: { simpleText: 'Views' }, value: { simpleText: '4,500' } } },
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
-      ],
-    };
-    assert.equal(enrichShortsPlayerOverlay(simplePayload), true);
-    const simpleHdr = (
-      simplePayload.overlay as {
-        reelPlayerOverlayRenderer: {
-          reelPlayerHeaderSupportedRenderers: {
-            reelPlayerHeaderRenderer: { reelTitleText: { simpleText?: string; runs?: Array<{ text: string }> } };
-          };
-        };
-      }
-    ).reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer;
-    assert.equal(simpleHdr.reelTitleText.simpleText, undefined);
-    assert.deepEqual(simpleHdr.reelTitleText.runs, [{ text: 'Simple Title' }, { text: '\n4.5K views • 3 hours ago' }]);
-  });
-
   test('applyShortsFeedMetadata prefetches visible Short shelf tiles and ignores regular videos', async (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
@@ -412,7 +311,7 @@ describe('shorts-metadata', () => {
       return resp;
     };
 
-    const restoreInterceptor = installInnertubeInterceptor();
+    const restoreInterceptor = installInnertubeInterceptor(transformInnertubeResponseSync);
     t.after(() => {
       restoreInterceptor();
       clearShortsMetadataCache();
@@ -434,7 +333,6 @@ describe('shorts-metadata', () => {
         },
       });
     }
-    // Add duplicate videoId to exercise inFlightShortsMeta dedup and pre-populated line skip.
     shortsBatch.push(
       {
         tileRenderer: {
@@ -479,58 +377,6 @@ describe('shorts-metadata', () => {
     clearShortsMetadataCache();
     await abortBatch;
 
-    // Missing engagement panel description header & factoids without Views return null; reelTitle without runs/simpleText skips title mutation.
-    assert.equal(
-      extractShortsMetadataFromReel({
-        engagementPanels: [
-          {
-            engagementPanelSectionListRenderer: {
-              content: { structuredDescriptionContentRenderer: { items: [{ unrelated: {} }] } },
-            },
-          },
-        ],
-      }),
-      null
-    );
-    assert.equal(
-      extractShortsMetadataFromReel({
-        engagementPanels: [
-          {
-            engagementPanelSectionListRenderer: {
-              content: {
-                structuredDescriptionContentRenderer: {
-                  items: [
-                    {
-                      videoDescriptionHeaderRenderer: {
-                        factoid: [{ factoidRenderer: { label: { simpleText: 'Likes' }, value: { simpleText: '5K' } } }],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        ],
-      }),
-      null
-    );
-    const rawHeaderPayload = makeReelPayload('titleless1', '500 views', '1 day ago');
-    (
-      rawHeaderPayload as {
-        overlay: {
-          reelPlayerOverlayRenderer: {
-            reelPlayerHeaderSupportedRenderers: {
-              reelPlayerHeaderRenderer: { reelTitleText: Record<string, unknown> };
-            };
-          };
-        };
-      }
-    ).overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.reelTitleText = {
-      accessibility: { accessibilityData: { label: 'Short accessible title' } },
-    };
-    assert.equal(enrichShortsPlayerOverlay(rawHeaderPayload), true);
-
-    // Thumbnail-URL videoId fallback, non-YT URL miss, existing PLACEHOLDER_TEXT line replacement, setTimeout yield (no rAF), fetch error & empty metadata cleanup.
     delete globals.requestAnimationFrame;
     const unidentifiableShortTile: FeedItem = {
       tileRenderer: {
@@ -563,7 +409,7 @@ describe('shorts-metadata', () => {
       throw new Error('network down');
     };
     await applyShortsFeedMetadata([unidentifiableShortTile, shortPlaceholderTile]);
-    // Empty metadata payload deletes pending targets cleanly; missing INNERTUBE_CONTEXT returns null.
+
     const emptyPayloadTile: FeedItem = {
       tileRenderer: {
         style: 'TILE_STYLE_YTLR_SHORTS',
@@ -672,7 +518,6 @@ describe('shorts-metadata', () => {
     ]);
     await fetchStarted;
 
-    // Opening Shorts toggles body.WEB_PAGE_TYPE_SHORTS while location.hash stays '#/'.
     bodyClasses.add('WEB_PAGE_TYPE_SHORTS');
     for (const obs of observers.filter(
       (o) => !o.disconnected && (o.target === bodyEl || o.target === globals.document)
@@ -781,7 +626,7 @@ describe('shorts-metadata', () => {
     assert.equal(lineTextEl.textContent, '');
   });
 
-  test('covers helper fallbacks, overlay edges, tile videoId resolution, concurrency/cache/abort paths, and missing DOM guards', async (t) => {
+  test('covers tile videoId resolution, concurrency/cache/abort paths, and missing DOM guards', async (t) => {
     clearShortsMetadataCache();
     const globals = globalThis as Record<string, unknown>;
     const prevWindow = globals.window;
@@ -790,126 +635,15 @@ describe('shorts-metadata', () => {
     const prevElement = globals.Element;
     const prevRaf = globals.requestAnimationFrame;
 
-    // 1. installShortsMetadata no-ops when window or document is absent.
+    // 1. installShortsMetadata and applyShortsFeedMetadata no-op when window or document is absent.
     delete globals.window;
     assert.doesNotThrow(() => installShortsMetadata()());
+    await applyShortsFeedMetadata([{ tileRenderer: { style: 'TILE_STYLE_YTLR_SHORTS', contentId: 'noWinSh0001' } }]);
     globals.window = {};
     delete globals.document;
     assert.doesNotThrow(() => installShortsMetadata()());
 
-    // 2. Helper fallbacks.
-    assert.equal(formatShortsViewCount(null), null);
-    assert.equal(formatShortsUploadedAt(null, null), null);
-    assert.equal(formatShortsUploadedAt('   ', null), null);
-    assert.equal(extractShortsMetadataFromReel(null), null);
-    assert.equal(
-      extractShortsMetadataFromReel({
-        engagementPanels: [
-          { engagementPanelSectionListRenderer: { content: { structuredDescriptionContentRenderer: {} } } },
-          {
-            engagementPanelSectionListRenderer: {
-              content: {
-                structuredDescriptionContentRenderer: {
-                  items: [null, { videoDescriptionHeaderRenderer: {} }],
-                },
-              },
-            },
-          },
-        ],
-      }),
-      null
-    );
-    assert.equal(
-      extractShortsMetadataFromReel({
-        engagementPanels: [
-          {
-            engagementPanelSectionListRenderer: {
-              content: {
-                structuredDescriptionContentRenderer: {
-                  items: [
-                    {
-                      videoDescriptionHeaderRenderer: {
-                        factoid: [
-                          { other: {} },
-                          { factoidRenderer: { label: { simpleText: 'Likes' }, value: { simpleText: '5' } } },
-                          { factoidRenderer: { label: { simpleText: 'Views' }, value: {} } },
-                        ],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        ],
-      }),
-      null
-    );
-
-    // 3. enrichShortsActionBar / enrichShortsPlayerOverlay edge cases:
-    // null button item, authDeterminedCommand videoId fallback, missing metaText, missing reelTitleText.
-    const authOverlayPayload: Record<string, unknown> = {
-      overlay: {
-        reelPlayerOverlayRenderer: {
-          reelPlayerHeaderSupportedRenderers: {
-            reelPlayerHeaderRenderer: {
-              timestampText: { simpleText: '' },
-            },
-          },
-          buttonBar: {
-            reelActionBarViewModel: {
-              buttonViewModels: [
-                null,
-                {
-                  reelActionBarButtonViewModel: {
-                    buttonViewModel: {
-                      likeButtonViewModel: {
-                        toggleButtonViewModel: {
-                          toggleButtonViewModel: {
-                            defaultButtonViewModel: {
-                              buttonViewModel: {
-                                title: '99',
-                                onTap: {
-                                  innertubeCommand: {
-                                    authDeterminedCommand: {
-                                      authenticatedCommand: {
-                                        likeEndpoint: { target: { videoId: 'authShort01' } },
-                                      },
-                                    },
-                                  },
-                                },
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-    };
-    assert.equal(enrichShortsPlayerOverlay(authOverlayPayload), true);
-    assert.equal(
-      enrichShortsPlayerOverlay({
-        ...makeReelPayload('noTitle0001', '500 views', '1 day ago'),
-        overlay: {
-          reelPlayerOverlayRenderer: {
-            reelPlayerHeaderSupportedRenderers: {
-              reelPlayerHeaderRenderer: {
-                timestampText: { simpleText: '1 day ago' },
-              },
-            },
-          },
-        },
-      }),
-      false
-    );
-
-    // 4. DOM focusin edge cases, inFlight dedup, network reject, and aborted navigation after yield.
+    // 2. DOM focusin edge cases, inFlight dedup, network reject, and aborted navigation after yield.
     class MockElement {}
     globals.Element = MockElement;
     delete globals.requestAnimationFrame;
@@ -962,7 +696,6 @@ describe('shorts-metadata', () => {
       else globals.requestAnimationFrame = prevRaf;
     });
 
-    // Trigger focusin with non-Element, detached element, invalid videoId, missing lineEl, missing ytcfg, and duplicate inFlight.
     focusInHandler?.({ target: {} });
     const detachedEl = Object.assign(new MockElement(), { closest: () => null });
     focusInHandler?.({ target: detachedEl });
@@ -998,15 +731,13 @@ describe('shorts-metadata', () => {
           : { textContent: '\u00A0' },
     });
     ytcfgMode = 'missing';
-    focusInHandler?.({ target: emptyPlaceholderTile }); // missing ytcfg -> returns null cleanly
+    focusInHandler?.({ target: emptyPlaceholderTile });
     ytcfgMode = 'valid';
-    focusInHandler?.({ target: emptyPlaceholderTile }); // starts fetch
-    focusInHandler?.({ target: emptyPlaceholderTile }); // hits inFlightShortsMeta dedup (line 335)!
+    focusInHandler?.({ target: emptyPlaceholderTile });
+    focusInHandler?.({ target: emptyPlaceholderTile });
     resolvers.get('inFlySh0001')?.reject(new Error('network boom'));
     await new Promise((r) => setTimeout(r, 15));
 
-    // Cached hit directly in focusInHandler (line 333 + updateMountedTileDom path via focusin cache hit) -> already tested via applyShortsFeedMetadata + cache.
-    // Feed batch with: non-record, missing tileMetadataRenderer, endpoint/thumb videoId fallback, pre-populated line, and placeholder with missing lineItemRenderer.text!
     await applyShortsFeedMetadata(null as unknown as FeedItem[]);
     const abortBatch = applyShortsFeedMetadata([
       null as unknown as FeedItem,
@@ -1054,11 +785,9 @@ describe('shorts-metadata', () => {
         },
       },
     ]);
-    // Clear cache/abort BEFORE post-yield fetch starts so controller.signal.aborted paths fire cleanly.
     clearShortsMetadataCache();
     await abortBatch;
 
-    // Ensure uncached batch with ytcfg missing skips cleanly (line 430), and 3-item concurrency queue aborts mid-flight cleanly.
     ytcfgMode = 'missing';
     await applyShortsFeedMetadata([
       {
@@ -1107,13 +836,11 @@ describe('shorts-metadata', () => {
       },
     ]);
     await new Promise((r) => setTimeout(r, 15));
-    // Abort navigation while 1 & 2 are awaiting fetch and 3 is queued in shortsMetaLimit, then settle 1 & 2.
     clearShortsMetadataCache();
     resolvers.get('queueSh0001')?.resolve({ ok: false } as Response);
     resolvers.get('queueSh0002')?.resolve({ ok: false } as Response);
     await abortMidQueue;
 
-    // Ensure post-yield rejection path in applyShortsFeedMetadata clears pendingTileTextTargets.
     const rejBatch = applyShortsFeedMetadata([
       {
         tileRenderer: {

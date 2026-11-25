@@ -1,8 +1,8 @@
 import { t } from '../core/i18n.ts';
 import { getActiveWatchVideoId } from '../core/lifecycle.ts';
 import type { FormattedText } from '../types/innertube.ts';
+import { readFormattedText } from '../utils/innertube-ast.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
-import { readFormattedText } from './feed-filter.ts';
 
 export interface ChapterTimestamp {
   time: number;

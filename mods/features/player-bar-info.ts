@@ -10,8 +10,8 @@ import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 import type { YtPlayerElement } from '../types/yttv.ts';
 import { formatPlaybackSpeedLabel } from '../ui/speed-ui.ts';
+import { META_SEPARATOR, PLAYER_SELECTOR } from '../utils/innertube-ast.ts';
 
-const PLAYER_SELECTOR = '.html5-video-player';
 const TIME_LABEL_SELECTOR = '[idomkey="time-label"]';
 const ELAPSED_SELECTOR = '[idomkey="elapsedTime"]';
 const DURATION_SELECTOR = '[idomkey="duration"]';
@@ -20,7 +20,6 @@ const OURS = /\s*(?:\(-\d+:\d{2}(?::\d{2})?\)|•\s*-\d+:\d{2}(?::\d{2})?)/g;
 const CLOCK_RE = /\d+:\d{2}(?::\d{2})?/;
 const CLOCK_SPLIT_RE = /^(.*?\d+:\d{2}(?::\d{2})?)([\s\S]*)$/;
 const TRAILING_CLOCK_RE = /(\d+:\d{2}(?::\d{2})?)\s*$/;
-const META_SEPARATOR = ' • ';
 const MAX_DISPLAY_SPEED = 5;
 const VIDEO_EVENTS = [
   'timeupdate',

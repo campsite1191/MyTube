@@ -1,7 +1,7 @@
 import type { FeedItem } from '../types/innertube.ts';
 import { compactInPlace, unwrapFeedItem } from '../utils/feed-helpers.ts';
+import { walkCommands } from '../utils/innertube-ast.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
-import { walkCommands } from './feed-filter.ts';
 
 const INLINE_PREVIEW_OPTIONS = {
   blockAdoption: true,

@@ -1,7 +1,6 @@
 import type { YtPlayerElement } from '../types/yttv.ts';
+import { PLAYER_SELECTOR } from '../utils/innertube-ast.ts';
 import { onAbort } from './lifecycle.ts';
-
-const PLAYER_SELECTOR = '.html5-video-player';
 
 type PlayerWaiter = (player: YtPlayerElement) => void;
 type VideoWaiter = (video: HTMLVideoElement) => void;

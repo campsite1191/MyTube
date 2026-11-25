@@ -1,18 +1,19 @@
 import { t } from '../core/i18n.ts';
 import { getActiveWatchVideoId } from '../core/lifecycle.ts';
-import resolveCommand, {
-  hasReportOrFeedbackEndpointNode,
-  isReportOrFeedbackIcon,
-  isReportOrFeedbackText,
-} from '../core/resolve-command.ts';
 import { injectCss } from '../core/styles.ts';
+import { dispatchYttvCommand } from '../core/yttv-bridge.ts';
 import { setWatchLikeCount } from '../features/return-youtube-dislike.ts';
 import type { SponsorBlockSegment } from '../features/sponsorblock.ts';
 import { onSponsorBlockSegmentsReady, resolveSegmentActionType } from '../features/sponsorblock.ts';
 import { ButtonRenderer, timelyAction } from '../ui/yt-ui.ts';
+import {
+  hasReportOrFeedbackEndpointNode,
+  isReportOrFeedbackIcon,
+  isReportOrFeedbackText,
+  readFormattedText,
+} from '../utils/innertube-ast.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 import { buildChaptersMarkerEntity } from './chapters.ts';
-import { readFormattedText } from './feed-filter.ts';
 
 const TRANSPORT_BUTTON_LIST_KEYS = ['promotedActions', 'actions', 'buttons', 'engagementActions'] as const;
 const DIRECT_PREV_NEXT_KEYS = ['skipPreviousButton', 'skipNextButton'] as const;
@@ -105,7 +106,7 @@ export function injectChapters(r: Record<string, unknown>): void {
   batchUpdate.mutations = mutations;
   mutations.push(chapterData);
   queueMicrotask(() => {
-    resolveCommand({
+    dispatchYttvCommand({
       clickTrackingParams: null,
       loadMarkersCommand: {
         visibleOnLoadKeys: [chapterData.entityKey],
@@ -194,7 +195,7 @@ export function transformPlayerOverlays(r: Record<string, unknown>): void {
     const beforeCount = target.length;
     appendSponsorBlockTimelyActions(target, segments);
     if (isLateAsync && target.length > beforeCount) {
-      resolveCommand({ updatePlayerOverlayCommand: { timelyActionRenderers: target } });
+      dispatchYttvCommand({ updatePlayerOverlayCommand: { timelyActionRenderers: target } });
     }
   });
 }
@@ -255,7 +256,7 @@ export function transformTransportControls(r: Record<string, unknown>): void {
     const beforeCount = promotedActions.length;
     appendSponsorBlockHighlightButton(promotedActions, segments);
     if (isLateAsync && promotedActions.length > beforeCount) {
-      resolveCommand({ updateTransportControlsCommand: { promotedActions } });
+      dispatchYttvCommand({ updateTransportControlsCommand: { promotedActions } });
     }
   });
 }

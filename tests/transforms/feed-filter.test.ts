@@ -2,20 +2,17 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
-  extractItemChannelName,
   filterFeedItemsSync,
   filterShelvesInPlaceSync,
-  getExistingMenuItemLists,
   hasBlockedBadge,
   hasPaidOfferEndpoint,
   isBlockedBadge,
   isStandaloneHeaderNode,
   isSurveyItem,
-  readFormattedText,
   shouldHideFeedItem,
-  walkCommands,
 } from '../../mods/transforms/feed-filter.ts';
 import type { FeedItem } from '../../mods/types/innertube.ts';
+import { readFormattedText } from '../../mods/utils/innertube-ast.ts';
 
 describe('ads, sign-in nudges, and surveys', () => {
   test('filters ad slots, wrapped ad slots, and sign-in nudges', () => {
@@ -142,82 +139,6 @@ describe('paid offers and deep badge scanning', () => {
   });
 });
 
-describe('text, command, menu, and channel extraction helpers', () => {
-  test('extractItemChannelName and getExistingMenuItemLists handle tiles and lockups', () => {
-    const sharedMenuItems = [{ menuServiceItemRenderer: { serviceEndpoint: { id: 1 } } }];
-    const tileItem: FeedItem = {
-      tileRenderer: {
-        contentId: 't1',
-        metadata: {
-          tileMetadataRenderer: {
-            lines: [{ lineRenderer: { items: [{ lineItemRenderer: { text: { simpleText: 'Tech Channel' } } }] } }],
-          },
-        },
-        menu: {
-          menuRenderer: {
-            items: sharedMenuItems,
-          },
-        },
-        onLongPressCommand: {
-          showMenuCommand: {
-            menu: {
-              menuRenderer: {
-                items: sharedMenuItems,
-              },
-            },
-          },
-        },
-      },
-    };
-    const lockupItem: FeedItem = {
-      lockupViewModel: {
-        contentId: 'l1',
-        metadata: {
-          lockupMetadataViewModel: {
-            metadata: {
-              contentMetadataViewModel: {
-                metadataRows: [{ metadataParts: [{ text: { content: 'Music Channel' } }] }],
-              },
-            },
-          },
-        },
-        rendererContext: {
-          commandContext: {
-            onLongPress: {
-              innertubeCommand: {
-                showMenuCommand: {
-                  menu: {
-                    menuRenderer: {
-                      items: [{ menuServiceItemRenderer: { serviceEndpoint: { id: 2 } } }],
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    };
-
-    assert.equal(extractItemChannelName(tileItem), 'Tech Channel');
-    assert.equal(extractItemChannelName(lockupItem), 'Music Channel');
-    assert.equal(getExistingMenuItemLists(tileItem).length, 1);
-    assert.equal(getExistingMenuItemLists(lockupItem).length, 1);
-    assert.equal(readFormattedText({ runs: [{ text: 'A' }, { text: 'B' }] }), 'AB');
-    assert.equal(
-      walkCommands(
-        {
-          commandExecutorCommand: {
-            commands: [{ innertubeCommand: { targetAction: true } }],
-          },
-        },
-        (cmd) => Boolean(cmd.targetAction)
-      ),
-      true
-    );
-  });
-});
-
 describe('filterFeedItemsSync and filterShelvesInPlaceSync', () => {
   test('filters hidden entries cleanly in new arrays and in-place shelf arrays', () => {
     const validVideo: FeedItem = { tileRenderer: { contentId: 'ok' } };
@@ -269,76 +190,7 @@ describe('filterFeedItemsSync and filterShelvesInPlaceSync', () => {
     );
     assert.equal(isStandaloneHeaderNode({ shelfRenderer: {} }), false);
 
-    // Additional readFormattedText formats: nested node.text, attributedString, accessibility label, and empty fallback.
-    assert.equal(readFormattedText({ text: { simpleText: 'Nested Text' } }), 'Nested Text');
-    assert.equal(readFormattedText({ attributedString: { content: 'Attributed' } }), 'Attributed');
-    assert.equal(
-      readFormattedText({ accessibility: { accessibilityData: { label: 'Accessible Label' } } }),
-      'Accessible Label'
-    );
-    assert.equal(readFormattedText({ runs: [{ notText: 1 }] }), '');
-    assert.equal(readFormattedText({ unknownField: 1 }), '');
-
     assert.equal(hasBlockedBadge({ tileRenderer: { badges: [{ text: { simpleText: 'Members only' } }] } }), true);
-    assert.equal(
-      extractItemChannelName({
-        lockupViewModel: {
-          metadata: {
-            lockupMetadataViewModel: {
-              metadata: {
-                contentMetadataViewModel: {
-                  metadataRows: [{ metadataParts: [{ text: { content: '   ' } }] }],
-                },
-              },
-            },
-          },
-        },
-      }),
-      ''
-    );
-
-    // Defensive null/depth/badge-style/text fallbacks across exported helpers.
-    assert.equal(readFormattedText(null), '');
-    assert.equal(readFormattedText(123), '');
-    assert.equal(
-      walkCommands({ commandExecutorCommand: { commands: [{ nope: 1 }] } }, (c) => Boolean(c.hit)),
-      false
-    );
-    assert.equal(
-      walkCommands({ commandExecutorCommand: { commands: [{ nope: 1 }, { hit: true }] } }, (c) => Boolean(c.hit)),
-      true
-    );
-    assert.equal(
-      extractItemChannelName({
-        lockupViewModel: {
-          metadata: { lockupMetadataViewModel: { metadata: { contentMetadataViewModel: { metadataRows: 'bad' } } } },
-        },
-      }),
-      ''
-    );
-    assert.equal(
-      extractItemChannelName({
-        lockupViewModel: {
-          metadata: { lockupMetadataViewModel: { metadata: { contentMetadataViewModel: { metadataRows: [null] } } } },
-        },
-      }),
-      ''
-    );
-    assert.equal(
-      extractItemChannelName({
-        tileRenderer: {
-          metadata: {
-            tileMetadataRenderer: {
-              lines: [{ lineRenderer: { items: [null, { lineItemRenderer: { text: { simpleText: 'Channel A' } } }] } }],
-            },
-          },
-        },
-      }),
-      'Channel A'
-    );
-    assert.equal(extractItemChannelName({ tileRenderer: { metadata: { tileMetadataRenderer: {} } } }), '');
-    assert.equal(extractItemChannelName(null), '');
-    assert.deepEqual(getExistingMenuItemLists(null), []);
     assert.equal(hasBlockedBadge(null), false);
     assert.equal(hasPaidOfferEndpoint(null), false);
     assert.equal(shouldHideFeedItem(null), false);

@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-
-import resolveCommand, { patchResolveCommand } from '../../mods/core/resolve-command.ts';
 import {
   dispatchYttvCommand,
   findResolveCommandHost,
@@ -12,6 +10,7 @@ import {
   showToast,
   whenYttvReady,
 } from '../../mods/core/yttv-bridge.ts';
+import resolveCommand, { patchResolveCommand } from '../../mods/ui/resolve-command.ts';
 
 describe('yttv-bridge service lookup and dispatching', () => {
   test('returns null when _yttv or required services are missing or invalid', (t) => {

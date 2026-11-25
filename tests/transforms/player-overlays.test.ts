@@ -4,6 +4,7 @@ import { describe, test } from 'node:test';
 import { installSponsorBlock } from '../../mods/features/sponsorblock.ts';
 import {
   injectChapters,
+  installTransportControlsStyles,
   recordTransportLikeCount,
   transformPlayerOverlays,
   transformTransportControls,
@@ -302,5 +303,39 @@ describe('player-overlays transforms', () => {
       ).transportControlsRenderer.promotedActions.length,
       2
     );
+  });
+
+  test('installTransportControlsStyles injects static display:none CSS once and no-ops without document', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevCssStyleSheet = globals.CSSStyleSheet;
+    t.after(() => {
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevCssStyleSheet === undefined) delete globals.CSSStyleSheet;
+      else globals.CSSStyleSheet = prevCssStyleSheet;
+    });
+
+    delete globals.document;
+    installTransportControlsStyles();
+
+    globals.CSSStyleSheet = class {
+      cssText = '';
+      replaceSync(text: string): void {
+        this.cssText = text;
+      }
+    };
+    const fakeDoc = { adoptedStyleSheets: [] as Array<{ cssText: string }> };
+    globals.document = fakeDoc;
+
+    installTransportControlsStyles();
+    installTransportControlsStyles();
+
+    assert.equal(fakeDoc.adoptedStyleSheets.length, 1);
+    const css = fakeDoc.adoptedStyleSheets[0]?.cssText ?? '';
+    assert.match(css, /\[idomkey="skipPrevious"\]/);
+    assert.match(css, /\[idomkey="skipNext"\]/);
+    assert.doesNotMatch(css, /WEB_PAGE_TYPE_SHORTS/);
+    assert.match(css, /display:\s*none\s*!important/);
   });
 });

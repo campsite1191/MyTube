@@ -1,11 +1,16 @@
 import { t } from '../core/i18n.ts';
 import { findFeedbackToken } from '../core/innertube-calls.ts';
-import { extractCustomAction } from '../core/resolve-command.ts';
 import type { FeedItem, InnertubeCommand, Thumbnail, WatchEndpoint } from '../types/innertube.ts';
 import { longPressData, MenuServiceItemRenderer } from '../ui/yt-ui.ts';
 import { buildLongPressPayload, unwrapFeedItem } from '../utils/feed-helpers.ts';
+import {
+  extractCustomAction,
+  extractItemChannelName,
+  getExistingMenuItemLists,
+  readFormattedText,
+  walkCommands,
+} from '../utils/innertube-ast.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
-import { extractItemChannelName, getExistingMenuItemLists, readFormattedText, walkCommands } from './feed-filter.ts';
 
 const MENU_TITLE_CASE_KEYS: Readonly<Record<string, string>> = {
   'save to watch later': 'videoMenu.saveToWatchLater',

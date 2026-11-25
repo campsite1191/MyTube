@@ -47,6 +47,107 @@ function extractRunBlocks(yamlContent: string): Array<{ line: number; body: stri
   return blocks;
 }
 
+const MOD_SUBDIRS = ['core', 'features', 'transforms', 'ui', 'utils'] as const;
+const MAX_MOD_FILE_LINES = 500;
+
+function collectModTsFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...collectModTsFiles(fullPath));
+    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
+      results.push(fullPath);
+    }
+  }
+  return results.sort();
+}
+
+function isRuntimeSpecifierClause(clause: string): boolean {
+  const trimmed = clause.trim();
+  if (trimmed.startsWith('type ') || trimmed.startsWith('type{')) return false;
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    const inner = trimmed.slice(1, -1).trim();
+    if (!inner) return false;
+    const parts = inner
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    return parts.some((part) => !part.startsWith('type '));
+  }
+  return true;
+}
+
+function extractRelativeImports(source: string): Array<{ specifier: string; isRuntime: boolean }> {
+  const imports: Array<{ specifier: string; isRuntime: boolean }> = [];
+  const stmtRe = /^[ \t]*(?:(import|export)\s+([\s\S]*?)\s+from\s+['"](\.[^'"]+)['"]|import\s+['"](\.[^'"]+)['"])/gm;
+  for (const match of source.matchAll(stmtRe)) {
+    if (match[4]) {
+      imports.push({ specifier: match[4], isRuntime: true });
+      continue;
+    }
+    const clause = match[2] ?? '';
+    const specifier = match[3] ?? '';
+    imports.push({ specifier, isRuntime: isRuntimeSpecifierClause(clause) });
+  }
+  return imports;
+}
+
+function findRuntimeCycles(nodes: readonly string[], adjacency: Map<string, Set<string>>): string[][] {
+  let index = 0;
+  const indices = new Map<string, number>();
+  const lowlinks = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const cycles: string[][] = [];
+
+  const strongConnect = (v: string): void => {
+    const vIdx = index++;
+    indices.set(v, vIdx);
+    lowlinks.set(v, vIdx);
+    stack.push(v);
+    onStack.add(v);
+
+    for (const w of adjacency.get(v) ?? []) {
+      if (!indices.has(w)) {
+        strongConnect(w);
+        const vLow = lowlinks.get(v) ?? 0;
+        const wLow = lowlinks.get(w) ?? 0;
+        if (wLow < vLow) lowlinks.set(v, wLow);
+      } else if (onStack.has(w)) {
+        const vLow = lowlinks.get(v) ?? 0;
+        const wIdx = indices.get(w) ?? 0;
+        if (wIdx < vLow) lowlinks.set(v, wIdx);
+      }
+    }
+
+    if ((lowlinks.get(v) ?? 0) === vIdx) {
+      const scc: string[] = [];
+      let member: string | undefined;
+      do {
+        member = stack.pop();
+        if (member !== undefined) {
+          onStack.delete(member);
+          scc.push(member);
+        }
+      } while (member !== undefined && member !== v);
+
+      if (scc.length > 1 || (scc.length === 1 && adjacency.get(v)?.has(v))) {
+        cycles.push(scc);
+      }
+    }
+  };
+
+  for (const node of nodes) {
+    if (!indices.has(node)) {
+      strongConnect(node);
+    }
+  }
+
+  return cycles;
+}
+
 describe('Repository, patch & CI workflow invariants', () => {
   test('[H1] patches/10 keeps AudioTrackAudioSink as default instead of forcing NdkAudioMode::kPullSink', () => {
     const patch10 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '10-media-hdr-aaudio-cache-tuning.patch'), 'utf8');
@@ -119,21 +220,92 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(fs.existsSync(path.join(ROOT_DIR, 'mods', 'package-lock.json')), true);
   });
 
-  test('mirrors every runtime module under mods/ with a 1:1 unit test file under tests/', () => {
+  test('mirrors every runtime module under mods/ 1:1 with tests/ bidirectionally', () => {
     const modsDir = path.join(ROOT_DIR, 'mods');
     const testsDir = path.join(ROOT_DIR, 'tests');
+    assert.equal(fs.existsSync(path.join(modsDir, 'index.ts')), true, 'Missing mods/index.ts');
     assert.equal(fs.existsSync(path.join(testsDir, 'index.test.ts')), true, 'Missing tests/index.test.ts');
 
-    for (const subdir of ['core', 'features', 'transforms', 'ui', 'utils']) {
-      const files = fs
+    const rootTestFiles = fs
+      .readdirSync(testsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.test.ts'))
+      .map((entry) => entry.name)
+      .sort();
+    assert.deepEqual(rootTestFiles, ['index.test.ts']);
+
+    for (const subdir of MOD_SUBDIRS) {
+      const modFiles = fs
         .readdirSync(path.join(modsDir, subdir))
         .filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts'))
         .sort();
-      for (const file of files) {
+      const testFiles = fs
+        .readdirSync(path.join(testsDir, subdir))
+        .filter((f) => f.endsWith('.test.ts'))
+        .sort();
+
+      for (const file of modFiles) {
         const expectedTest = path.join(testsDir, subdir, `${path.basename(file, '.ts')}.test.ts`);
         assert.equal(fs.existsSync(expectedTest), true, `Missing 1:1 test file: ${expectedTest}`);
       }
+      for (const testFile of testFiles) {
+        const baseName = testFile.slice(0, -'.test.ts'.length);
+        const expectedMod = path.join(modsDir, subdir, `${baseName}.ts`);
+        assert.equal(fs.existsSync(expectedMod), true, `Orphaned unit test without runtime module: ${testFile}`);
+      }
     }
+  });
+
+  test('enforces <= 500 lines per file, zero runtime import cycles, and strict utils/core layer boundaries in mods/', () => {
+    const modsDir = path.join(ROOT_DIR, 'mods');
+    const allModFiles = collectModTsFiles(modsDir);
+    const runtimeFiles = allModFiles.filter(
+      (filePath) => !filePath.endsWith('.d.ts') && !path.relative(modsDir, filePath).startsWith(`types${path.sep}`)
+    );
+    const runtimeSet = new Set(runtimeFiles);
+    const adjacency = new Map<string, Set<string>>();
+
+    for (const filePath of allModFiles) {
+      const content = fs.readFileSync(filePath, 'utf8');
+      const lineCount = content.endsWith('\n') ? content.split('\n').length - 1 : content.split('\n').length;
+      const relPath = path.relative(ROOT_DIR, filePath);
+      assert.ok(
+        lineCount <= MAX_MOD_FILE_LINES,
+        `${relPath} has ${lineCount} lines, exceeding max ${MAX_MOD_FILE_LINES}`
+      );
+
+      if (!runtimeSet.has(filePath)) continue;
+
+      const relFromMods = path.relative(modsDir, filePath).split(path.sep).join('/');
+      const sourceLayer = relFromMods.split('/')[0] ?? '';
+      const edges = new Set<string>();
+      adjacency.set(filePath, edges);
+
+      for (const { specifier, isRuntime } of extractRelativeImports(content)) {
+        const resolved = path.resolve(path.dirname(filePath), specifier);
+        if (isRuntime && runtimeSet.has(resolved)) {
+          edges.add(resolved);
+        }
+
+        const targetRel = path.relative(modsDir, resolved).split(path.sep).join('/');
+        const targetLayer = targetRel.split('/')[0] ?? '';
+        if (sourceLayer === 'utils') {
+          assert.ok(
+            targetLayer === 'utils' || targetLayer === 'types',
+            `Layer violation in ${relPath}: utils may only import utils or types (found ${specifier})`
+          );
+        } else if (sourceLayer === 'core') {
+          assert.ok(
+            targetLayer === 'core' || targetLayer === 'utils' || targetLayer === 'types',
+            `Layer violation in ${relPath}: core may only import core, utils, or types (found ${specifier})`
+          );
+        }
+      }
+    }
+
+    const cycles = findRuntimeCycles(runtimeFiles, adjacency).map((cycle) =>
+      cycle.map((filePath) => path.relative(ROOT_DIR, filePath))
+    );
+    assert.deepEqual(cycles, [], `Detected runtime import cycle(s): ${JSON.stringify(cycles)}`);
   });
 
   test('coverage verifier enforces 100% line, branch, function coverage and runtime file completeness, and is wired into lint and CI', () => {

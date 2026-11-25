@@ -1,13 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import resolveCommand, {
-  extractCustomAction,
-  hasReportOrFeedbackEndpointNode,
-  isReportOrFeedbackIcon,
-  isReportOrFeedbackText,
-  patchResolveCommand,
-} from '../../mods/core/resolve-command.ts';
+import resolveCommand, { patchResolveCommand } from '../../mods/ui/resolve-command.ts';
 
 describe('resolve-command', () => {
   test('handles I18N_LANGUAGE, EXIT_APP, SKIP, SHOW_TOAST, NOT_INTERESTED, DONT_RECOMMEND_CHANNEL, and FEEDBACK_REASON', async (t) => {
@@ -159,16 +153,6 @@ describe('resolve-command', () => {
       resolvedCmds.some(
         (c) => (c as { openPopupAction?: { popupType?: string } }).openPopupAction?.popupType === 'TOAST'
       )
-    );
-
-    // 5. Coverage for helper guards, PREF merging, SET_PLAYER_SPEED, GO_TO_CHANNEL, report filtering, and native passthrough.
-    assert.equal(isReportOrFeedbackIcon('BUG_REPORT'), false);
-    assert.equal(isReportOrFeedbackIcon('FLAG'), true);
-    assert.equal(isReportOrFeedbackText('Send Feedback'), true);
-    assert.equal(hasReportOrFeedbackEndpointNode({ getReportFormEndpoint: {} }), true);
-    assert.equal(
-      extractCustomAction({ signalAction: { customAction: { action: 'PING', parameters: 1 } } })?.action,
-      'PING'
     );
 
     fakeDoc.cookie = 'PREF=tz=America.Los_Angeles&hl=fr&f6=8; OTHER=1';
@@ -489,8 +473,7 @@ describe('resolve-command', () => {
       },
     };
 
-    // Non-record and missing-host guards before/after patching.
-    assert.equal(extractCustomAction(null), null);
+    // Missing-host guards before/after patching.
     delete globals.window;
     assert.equal(resolveCommand({ signalAction: { signal: 'NO_HOST' } }), undefined);
     globals.window = {

@@ -310,6 +310,10 @@ describe('onWatchSession helper', () => {
     fakeLocation.hash = '#/';
     bodyClasses.add('WEB_PAGE_TYPE_SHORTS');
     assert.equal(isPlaybackPageActive(), true);
+
+    bodyClasses.delete('WEB_PAGE_TYPE_SHORTS');
+    globals.window = {};
+    assert.equal(isPlaybackPageActive(), false);
   });
 
   test('[M3] onWatchSession isolates synchronous exceptions when joining an already-active Watch session', (t) => {

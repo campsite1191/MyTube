@@ -1,6 +1,6 @@
 import { NOOP } from '../core/lifecycle.ts';
-import resolveCommand, { patchResolveCommand } from '../core/resolve-command.ts';
-import { getCommandExecutor, whenYttvReady } from '../core/yttv-bridge.ts';
+import { getCommandExecutor, registerCommandDispatcher, whenYttvReady } from '../core/yttv-bridge.ts';
+import resolveCommand, { patchResolveCommand } from './resolve-command.ts';
 
 const STARTUP_COMMAND = { browseEndpoint: { browseId: 'FEtopics' } } as const;
 
@@ -42,6 +42,7 @@ export function ensureResolveHooksOnActionKey(event: KeyboardEvent): void {
 export function installUiHooks(): () => void {
   if (uiHooksInstalled || typeof document === 'undefined') return NOOP;
   uiHooksInstalled = true;
+  registerCommandDispatcher(resolveCommand);
 
   const targetDocument = document;
   const targetWindow = typeof window !== 'undefined' ? window : undefined;
@@ -61,8 +62,4 @@ export function installUiHooks(): () => void {
     uiHooksInstalled = false;
     uiInitialized = false;
   };
-}
-
-if (typeof document !== 'undefined') {
-  installUiHooks();
 }

@@ -1,6 +1,5 @@
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
-import resolveCommand from './resolve-command.ts';
-import { getCurrentIdentityService, getKabukiInnerTubeClient } from './yttv-bridge.ts';
+import { dispatchYttvCommand, getCurrentIdentityService, getKabukiInnerTubeClient } from './yttv-bridge.ts';
 
 interface NextNavParams {
   tileRenderer?: {
@@ -78,7 +77,7 @@ export function requestNextAndNavigateChannel(params: NextNavParams): void {
             );
             const ownerRenderer = readRecordPath(metadataEntry, 'videoMetadataRenderer', 'owner', 'videoOwnerRenderer');
             if (ownerRenderer?.navigationEndpoint) {
-              resolveCommand(ownerRenderer.navigationEndpoint);
+              dispatchYttvCommand(ownerRenderer.navigationEndpoint);
               return;
             }
           }

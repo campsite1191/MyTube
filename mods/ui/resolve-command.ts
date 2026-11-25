@@ -1,14 +1,21 @@
+import { t } from '../core/i18n.ts';
+import { getFeedbackPanelTokens, requestNextAndNavigateChannel, sendFeedbackToken } from '../core/innertube-calls.ts';
+import { isPlaybackPageActive } from '../core/lifecycle.ts';
+import { findResolveCommandHost, registerCommandDispatcher, showToast } from '../core/yttv-bridge.ts';
 import { patchAutoTranslateCommand } from '../features/more-subtitles.ts';
-import { readFormattedText, walkCommands } from '../transforms/feed-filter.ts';
 import type { FormattedText, InnertubeCommand } from '../types/innertube.ts';
-import { formatPlaybackSpeedLabel, setPlaybackSpeed, speedSettings } from '../ui/speed-ui.ts';
-import { buttonItem, overlayPanelItemListRenderer, showModal } from '../ui/yt-ui.ts';
 import { compactInPlace } from '../utils/feed-helpers.ts';
+import {
+  extractCustomAction,
+  hasReportOrFeedbackEndpointNode,
+  isReportOrFeedbackIcon,
+  isReportOrFeedbackText,
+  readFormattedText,
+  walkCommands,
+} from '../utils/innertube-ast.ts';
 import { isObjectLike, isRecord, readRecordPath } from '../utils/type-guards.ts';
-import { t } from './i18n.ts';
-import { getFeedbackPanelTokens, requestNextAndNavigateChannel, sendFeedbackToken } from './innertube-calls.ts';
-import { isPlaybackPageActive } from './lifecycle.ts';
-import { findResolveCommandHost, registerCommandDispatcher, showToast } from './yttv-bridge.ts';
+import { formatPlaybackSpeedLabel, setPlaybackSpeed, speedSettings } from './speed-ui.ts';
+import { buttonItem, overlayPanelItemListRenderer, showModal } from './yt-ui.ts';
 
 type ResolveInstance = { resolveCommand: (cmd: InnertubeCommand, arg?: unknown) => unknown };
 
@@ -28,8 +35,6 @@ export default function resolveCommand(cmd: unknown, arg?: unknown): unknown {
     : findResolveCommandHost()?.instance;
   return target ? target.resolveCommand(cmd as InnertubeCommand, arg) : undefined;
 }
-
-registerCommandDispatcher(resolveCommand);
 
 function buildUpdatedPrefCookieValue(existingCookie: string, lang: string): string {
   const prefEntry = existingCookie
@@ -63,9 +68,6 @@ function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
   return false;
 }
 
-const NON_REPORT_ICONS = new Set(['BUG_REPORT']);
-const REPORT_OR_FEEDBACK_ICON_RE = /(?:REPORT|FLAG|FEEDBACK)/i;
-const REPORT_OR_FEEDBACK_TEXT_RE = /\b(?:report|feedback)\b/i;
 const POPUP_ITEM_RENDERER_KEYS = [
   'compactLinkRenderer',
   'compactToggleRenderer',
@@ -79,20 +81,6 @@ function unwrapPopupItemRenderer(item: unknown): Record<string, unknown> | undef
     if (isRecord(item[key])) return item[key];
   }
   return undefined;
-}
-
-export function isReportOrFeedbackIcon(iconType: unknown): boolean {
-  return typeof iconType === 'string' && !NON_REPORT_ICONS.has(iconType) && REPORT_OR_FEEDBACK_ICON_RE.test(iconType);
-}
-
-export function isReportOrFeedbackText(text: unknown): boolean {
-  return typeof text === 'string' && text.length > 0 && REPORT_OR_FEEDBACK_TEXT_RE.test(text);
-}
-
-export function hasReportOrFeedbackEndpointNode(node: Record<string, unknown>): boolean {
-  return Boolean(
-    node.getReportVideoFormEndpoint || node.getReportFormEndpoint || node.flagVideoEndpoint || node.sendFeedbackEndpoint
-  );
 }
 
 function hasReportOrFeedbackEndpoint(endpoint: unknown): boolean {
@@ -178,18 +166,6 @@ function patchPlaybackSettingsPopup(cmd: Record<string, unknown>, isPrimaryPlayb
   }
 }
 
-export function extractCustomAction(cmd: unknown): { action: string; parameters?: unknown } | null {
-  if (!isRecord(cmd)) return null;
-  const direct = isRecord(cmd.customAction) ? cmd.customAction : undefined;
-  if (typeof direct?.action === 'string') return { action: direct.action, parameters: direct.parameters };
-
-  for (const wrapperKey of ['signalAction', 'showEngagementPanelEndpoint', 'playlistEditEndpoint'] as const) {
-    const nested = readRecordPath(cmd, wrapperKey, 'customAction');
-    if (typeof nested?.action === 'string') return { action: nested.action, parameters: nested.parameters };
-  }
-  return null;
-}
-
 const patchedResolveFns = new WeakSet<object>();
 
 function runCustomAction(action: string, parameters?: unknown): void {
@@ -239,6 +215,7 @@ function needsCommandInterception(cmd: unknown, depth = 0): boolean {
 }
 
 export function patchResolveCommand(): void {
+  registerCommandDispatcher(resolveCommand);
   if (typeof window === 'undefined' || !window._yttv) return;
   for (const entry of Object.values(window._yttv)) {
     if (!isObjectLike(entry) || !isObjectLike(entry.instance) || typeof entry.instance.resolveCommand !== 'function') {

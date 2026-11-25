@@ -1,5 +1,6 @@
 import type { FeedItem } from '../types/innertube.ts';
 import { compactInPlace, unwrapFeedItem } from '../utils/feed-helpers.ts';
+import { readFormattedText, walkCommands } from '../utils/innertube-ast.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 
 const BADGE_KEY_RE = /badge/i;
@@ -62,124 +63,6 @@ const BADGE_SKIP_KEYS = new Set([
 ]);
 const PAID_BADGE_STYLES = ['BADGE_STYLE_TYPE_YPC', 'BADGE_STYLE_TYPE_PAID', 'PAID_CONTENT'] as const;
 const PAID_BADGE_LABEL_RE = /\b(buy or rent|rent or buy|paid content)\b|^(paid|rent|buy)\b/i;
-
-/**
- * Traverses an InnerTube command object, following nested `innertubeCommand` and
- * `commandExecutorCommand.commands` entries up to `maxDepth`, stopping early if
- * `visitor` returns `true`.
- */
-export function walkCommands(
-  node: unknown,
-  visitor: (command: Record<string, unknown>) => boolean,
-  maxDepth = 4
-): boolean {
-  const visit = (current: unknown, depth: number): boolean => {
-    if (!isRecord(current) || depth > maxDepth) return false;
-    if (visitor(current)) return true;
-
-    if (visit(current.innertubeCommand, depth + 1)) return true;
-
-    const executor = current.commandExecutorCommand;
-    if (isRecord(executor) && Array.isArray(executor.commands)) {
-      for (const subCommand of executor.commands) {
-        if (visit(subCommand, depth + 1)) return true;
-      }
-    }
-
-    return false;
-  };
-
-  return visit(node, 0);
-}
-
-/**
- * Extracts plain text from an InnerTube formatted text node (`simpleText`, `content`, or `runs`).
- */
-export function readFormattedText(node: unknown): string {
-  if (!node) return '';
-  if (typeof node === 'string') return node;
-  if (!isRecord(node)) return '';
-
-  if (typeof node.simpleText === 'string') return node.simpleText;
-  if (typeof node.content === 'string') return node.content;
-  if (Array.isArray(node.runs)) {
-    return node.runs.map((run) => (isRecord(run) && typeof run.text === 'string' ? run.text : '')).join('');
-  }
-  if (isRecord(node.text)) {
-    const nested = readFormattedText(node.text);
-    if (nested) return nested;
-  }
-  if (isRecord(node.attributedString)) {
-    const attributed = readFormattedText(node.attributedString);
-    if (attributed) return attributed;
-  }
-  const accessLabel = readRecordPath(node, 'accessibility', 'accessibilityData')?.label;
-  return typeof accessLabel === 'string' ? accessLabel : '';
-}
-
-function firstNonEmptyText(nodes: unknown, pick: (entry: Record<string, unknown>) => unknown): string {
-  if (!Array.isArray(nodes)) return '';
-  for (const entry of nodes) {
-    if (!isRecord(entry)) continue;
-    const text = readFormattedText(pick(entry)).trim();
-    if (text) return text;
-  }
-  return '';
-}
-
-/**
- * Extracts the channel display name from a `tileRenderer` or `lockupViewModel` feed item.
- */
-export function extractItemChannelName(item: FeedItem | null | undefined): string {
-  const target = unwrapFeedItem(item);
-  if (!target) return '';
-
-  if (target.tileRenderer) {
-    const lines = target.tileRenderer.metadata?.tileMetadataRenderer?.lines;
-    const lineItems = readRecordPath(Array.isArray(lines) ? lines[0] : undefined, 'lineRenderer')?.items;
-    return firstNonEmptyText(lineItems, (entry) => readRecordPath(entry, 'lineItemRenderer')?.text);
-  }
-
-  const contentMeta = readRecordPath(
-    target.lockupViewModel?.metadata?.lockupMetadataViewModel,
-    'metadata',
-    'contentMetadataViewModel'
-  );
-  const rows = Array.isArray(contentMeta?.metadataRows) ? contentMeta.metadataRows : undefined;
-  const parts = isRecord(rows?.[0]) ? rows[0].metadataParts : undefined;
-  return firstNonEmptyText(parts, (entry) => entry.text);
-}
-
-/**
- * Collects unique existing menu item arrays attached to a feed item's menu or long-press commands.
- */
-export function getExistingMenuItemLists(item: FeedItem | null | undefined): Array<Array<Record<string, unknown>>> {
-  const target = unwrapFeedItem(item);
-  if (!target) return [];
-
-  const lists: Array<Array<Record<string, unknown>>> = [];
-  const collectMenuItems = (command: unknown): void => {
-    walkCommands(command, (cmd) => {
-      const menuRenderer = readRecordPath(cmd, 'showMenuCommand', 'menu', 'menuRenderer');
-      if (Array.isArray(menuRenderer?.items)) {
-        lists.push(menuRenderer.items as Array<Record<string, unknown>>);
-      }
-      return false;
-    });
-  };
-
-  if (target.tileRenderer) {
-    const tileMenuRenderer = readRecordPath(target.tileRenderer.menu, 'menuRenderer');
-    if (Array.isArray(tileMenuRenderer?.items)) {
-      lists.push(tileMenuRenderer.items as Array<Record<string, unknown>>);
-    }
-    collectMenuItems(target.tileRenderer.onLongPressCommand);
-  } else if (target.lockupViewModel) {
-    collectMenuItems(target.lockupViewModel.rendererContext?.commandContext?.onLongPress);
-  }
-
-  return Array.from(new Set(lists));
-}
 
 function isDirectMediaCard(node: Record<string, unknown>): boolean {
   return Boolean(
