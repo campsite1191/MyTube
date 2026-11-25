@@ -28,10 +28,12 @@ export function parseTimestamps(input: string): ChapterTimestamp[] {
   const result: ChapterTimestamp[] = [];
 
   for (const rawLine of lines) {
-    const match = rawLine.trim().match(TIMESTAMP_RE);
-    if (!match || match[2] === undefined || match[3] === undefined) continue;
+    const match = rawLine.trim().match(TIMESTAMP_RE) as
+      | [string, string | undefined, string, string, string | undefined]
+      | null;
+    if (!match) continue;
     const hasHours = match[1] !== undefined;
-    const hours = hasHours ? Number.parseInt(match[1] ?? '0', 10) : 0;
+    const hours = match[1] !== undefined ? Number.parseInt(match[1], 10) : 0;
     const minutes = Number.parseInt(match[2], 10);
     const seconds = Number.parseInt(match[3], 10);
     if (seconds >= 60 || (hasHours && minutes >= 60)) continue;
@@ -183,10 +185,12 @@ function parseLengthSecondsMs(rawLength: unknown): number {
 }
 
 function parseClockDurationMs(clockText: string): number {
-  const match = clockText.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
-  if (!match || match[2] === undefined || match[3] === undefined) return 0;
+  const match = clockText.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/) as
+    | [string, string | undefined, string, string]
+    | null;
+  if (!match) return 0;
   const hasHours = match[1] !== undefined;
-  const hours = hasHours ? Number.parseInt(match[1] ?? '0', 10) : 0;
+  const hours = match[1] !== undefined ? Number.parseInt(match[1], 10) : 0;
   const minutes = Number.parseInt(match[2], 10);
   const seconds = Number.parseInt(match[3], 10);
   if (seconds >= 60 || (hasHours && minutes >= 60)) return 0;
@@ -199,11 +203,9 @@ function parseClockDurationMs(clockText: string): number {
  * `/youtubei/v1/next` responses can resolve the exact video duration without reading stale DOM state.
  */
 export function recordVideoDurationFromPayload(payload: Record<string, unknown>): void {
-  const details = isRecord(payload.videoDetails)
-    ? payload.videoDetails
-    : isRecord(payload.playerResponse) && isRecord(payload.playerResponse.videoDetails)
-      ? payload.playerResponse.videoDetails
-      : undefined;
+  const details =
+    (isRecord(payload.videoDetails) ? payload.videoDetails : null) ??
+    readRecordPath(payload, 'playerResponse', 'videoDetails');
   const videoId = typeof details?.videoId === 'string' ? details.videoId : '';
   if (!videoId) return;
   const durationMs = parseLengthSecondsMs(details?.lengthSeconds);
@@ -259,12 +261,10 @@ export function buildChaptersMarkerEntity(
 
   recordVideoDurationFromPayload(video);
   const metadata = extractVideoMetadataRenderer(video);
-  const playerResponse = isRecord(video.playerResponse) ? video.playerResponse : undefined;
-  const videoDetails = isRecord(video.videoDetails)
-    ? video.videoDetails
-    : isRecord(playerResponse?.videoDetails)
-      ? playerResponse.videoDetails
-      : undefined;
+  const videoDetails =
+    (isRecord(video.videoDetails) ? video.videoDetails : null) ??
+    readRecordPath(video, 'playerResponse', 'videoDetails') ??
+    undefined;
   const videoId =
     (typeof metadata?.videoId === 'string' && metadata.videoId) ||
     (typeof videoDetails?.videoId === 'string' && videoDetails.videoId) ||
@@ -291,9 +291,7 @@ export function buildChaptersMarkerEntity(
   if (chapters.length < 2) return null;
 
   const markers: unknown[] = [];
-  for (let i = 0; i < chapters.length; i++) {
-    const chapter = chapters[i];
-    if (!chapter) continue;
+  for (const [i, chapter] of chapters.entries()) {
     const nextChapter = chapters[i + 1];
     const duration = nextChapter ? nextChapter.time - chapter.time : videoDurationMs - chapter.time;
     markers.push(createMarker(chapter.name, String(chapter.time), String(duration), videoId, i));

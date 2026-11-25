@@ -184,7 +184,7 @@ jobs:
             npm run lint:knip
             npm run lint:biome
             npm run build:js
-            npm test
+            npm run lint:coverage
           )
           ls -lh "$GITHUB_WORKSPACE/builder/mods/dist/userscript.js"
           cp "$GITHUB_WORKSPACE/builder/mods/dist/userscript.js" src/cobalt/android/apk/app/src/app/assets/userscript.js

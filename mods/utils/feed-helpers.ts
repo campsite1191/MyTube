@@ -7,6 +7,8 @@ export const FEED_METADATA_CACHE_MAX_SIZE = 2000;
 /**
  * Unwraps `richItemRenderer.content` when present, or returns the plain item record itself.
  */
+export function unwrapFeedItem(item: FeedItem): FeedItem;
+export function unwrapFeedItem(item: FeedItem | null | undefined): FeedItem | null;
 export function unwrapFeedItem(item: FeedItem | null | undefined): FeedItem | null {
   if (!isRecord(item)) return null;
   const content = item.richItemRenderer?.content;

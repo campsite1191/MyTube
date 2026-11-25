@@ -1,5 +1,5 @@
 import type { AdaptiveFormat } from '../types/innertube.ts';
-import { isRecord } from '../utils/type-guards.ts';
+import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 
 export interface AudioFormatEntry extends AdaptiveFormat {
   audioChannels?: number;
@@ -93,7 +93,7 @@ export function filterStreamingFormats(formats: AudioFormatEntry[]): AudioFormat
   if (audio.length === 0) return formats;
 
   const rankedTracks = Array.from(tracks.values()).toSorted(compareTrackSummaries);
-  const bestTrackId = rankedTracks[0]?.id ?? '';
+  const bestTrackId = (rankedTracks[0] as TrackSummary).id;
 
   const sortedAudio = audio.toSorted((a, b) => {
     const aId = a.audioTrack?.id ?? '';
@@ -103,15 +103,13 @@ export function filterStreamingFormats(formats: AudioFormatEntry[]): AudioFormat
     if (aIsBestTrack !== bIsBestTrack) return aIsBestTrack ? -1 : 1;
 
     if (aId !== bId) {
-      const aTrack = tracks.get(aId);
-      const bTrack = tracks.get(bId);
-      if (aTrack && bTrack) {
-        if (aTrack.isOriginal !== bTrack.isOriginal) return aTrack.isOriginal ? -1 : 1;
-        if (aTrack.bestTier !== bTrack.bestTier) return aTrack.bestTier - bTrack.bestTier;
-        const nameCmp = aTrack.displayName.localeCompare(bTrack.displayName);
-        if (nameCmp !== 0) return nameCmp;
-        if (aTrack.firstIndex !== bTrack.firstIndex) return aTrack.firstIndex - bTrack.firstIndex;
-      }
+      const aTrack = tracks.get(aId) as TrackSummary;
+      const bTrack = tracks.get(bId) as TrackSummary;
+      if (aTrack.isOriginal !== bTrack.isOriginal) return aTrack.isOriginal ? -1 : 1;
+      if (aTrack.bestTier !== bTrack.bestTier) return aTrack.bestTier - bTrack.bestTier;
+      const nameCmp = aTrack.displayName.localeCompare(bTrack.displayName);
+      if (nameCmp !== 0) return nameCmp;
+      if (aTrack.firstIndex !== bTrack.firstIndex) return aTrack.firstIndex - bTrack.firstIndex;
     }
 
     const tierDiff = getAudioTier(a) - getAudioTier(b);
@@ -142,14 +140,9 @@ export function filterStreamingFormats(formats: AudioFormatEntry[]): AudioFormat
  * on unexpectedly at playback start (manual CC toggling remains unaffected).
  */
 export function disableAutoCaptionsInPayload(payload: Record<string, unknown>): void {
-  const captions = isRecord(payload.captions) ? payload.captions : undefined;
-  const playerResponse = isRecord(payload.playerResponse) ? payload.playerResponse : undefined;
-  const prCaptions = isRecord(playerResponse?.captions) ? playerResponse.captions : undefined;
-  const tracklist = isRecord(captions?.playerCaptionsTracklistRenderer)
-    ? captions.playerCaptionsTracklistRenderer
-    : isRecord(prCaptions?.playerCaptionsTracklistRenderer)
-      ? prCaptions.playerCaptionsTracklistRenderer
-      : undefined;
+  const tracklist =
+    readRecordPath(payload, 'captions', 'playerCaptionsTracklistRenderer') ??
+    readRecordPath(payload, 'playerResponse', 'captions', 'playerCaptionsTracklistRenderer');
 
   if (!tracklist) return;
 
@@ -219,10 +212,7 @@ export function stripAdsFromPayload(payload: Record<string, unknown>): void {
   if (Array.isArray(payload.entries)) {
     payload.entries = payload.entries.filter((entry) => {
       if (!isRecord(entry)) return true;
-      const cmd = isRecord(entry.command) ? entry.command : undefined;
-      const reelEp = isRecord(cmd?.reelWatchEndpoint) ? cmd.reelWatchEndpoint : undefined;
-      const adParams = isRecord(reelEp?.adClientParams) ? reelEp.adClientParams : undefined;
-      return !adParams?.isAd;
+      return !readRecordPath(entry, 'command', 'reelWatchEndpoint', 'adClientParams')?.isAd;
     });
   }
 }

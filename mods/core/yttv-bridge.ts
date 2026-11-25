@@ -77,7 +77,6 @@ export function whenYttvReady(callback: () => void): void {
   };
 
   const schedulePoll = (delayMs: number): void => {
-    if (readyAbort.signal.aborted) return;
     pollAbort?.abort();
     pollAbort = new AbortController();
     scheduleAbortableTimeout(check, delayMs, pollAbort.signal);

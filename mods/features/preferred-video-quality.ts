@@ -1,4 +1,4 @@
-import { onAbort, onWatchSession } from '../core/lifecycle.ts';
+import { NOOP, onAbort, onWatchSession } from '../core/lifecycle.ts';
 import { onPlayer } from '../core/player-observer.ts';
 import type { YtPlayerStateObject, YtQualityData } from '../types/yttv.ts';
 import { isRecord } from '../utils/type-guards.ts';
@@ -122,7 +122,7 @@ export function selectPlaybackQuality(availableQualities: readonly YtQualityData
     }
   }
 
-  return highestBelowTarget?.quality ?? lowestAboveTarget?.quality ?? HIGHRES_QUALITY_ID;
+  return ((highestBelowTarget ?? lowestAboveTarget) as ResolutionCandidate).quality;
 }
 
 export function applyPreferredQualityToPlayer(player: QualityControllablePlayer): boolean {
@@ -212,12 +212,11 @@ let preferredQualityInstalled = false;
  * without interrupting Home inline previews or Shorts.
  */
 export function installPreferredVideoQuality(): () => void {
-  if (preferredQualityInstalled || typeof document === 'undefined' || typeof window === 'undefined') return () => {};
+  if (preferredQualityInstalled || typeof document === 'undefined' || typeof window === 'undefined') return NOOP;
   preferredQualityInstalled = true;
   seedPreferredQualityStorage();
   const unsub = onWatchSession((videoId, signal) => {
     onPlayer((player) => {
-      if (signal.aborted) return;
       attachPreferredQualityController(player, signal, videoId);
     }, signal);
   });

@@ -4,7 +4,7 @@ import { extractCustomAction } from '../core/resolve-command.ts';
 import type { FeedItem, InnertubeCommand, Thumbnail, WatchEndpoint } from '../types/innertube.ts';
 import { longPressData, MenuServiceItemRenderer } from '../ui/yt-ui.ts';
 import { buildLongPressPayload, unwrapFeedItem } from '../utils/feed-helpers.ts';
-import { isRecord } from '../utils/type-guards.ts';
+import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 import { extractItemChannelName, getExistingMenuItemLists, readFormattedText, walkCommands } from './feed-filter.ts';
 
 const MENU_TITLE_CASE_KEYS: Readonly<Record<string, string>> = {
@@ -48,16 +48,14 @@ function findWatchEndpoint(node: unknown): WatchEndpoint | null {
 }
 
 function readMenuItemText(menuItem: Record<string, unknown>): string {
-  const service = isRecord(menuItem.menuServiceItemRenderer) ? menuItem.menuServiceItemRenderer : undefined;
-  const nav = isRecord(menuItem.menuNavigationItemRenderer) ? menuItem.menuNavigationItemRenderer : undefined;
-  const renderer = service ?? nav;
+  const renderer =
+    readRecordPath(menuItem, 'menuServiceItemRenderer') ?? readRecordPath(menuItem, 'menuNavigationItemRenderer');
   return readFormattedText(renderer?.text).trim();
 }
 
 function setMenuItemText(menuItem: Record<string, unknown>, newText: string): void {
-  const service = isRecord(menuItem.menuServiceItemRenderer) ? menuItem.menuServiceItemRenderer : undefined;
-  const nav = isRecord(menuItem.menuNavigationItemRenderer) ? menuItem.menuNavigationItemRenderer : undefined;
-  const renderer = service ?? nav;
+  const renderer =
+    readRecordPath(menuItem, 'menuServiceItemRenderer') ?? readRecordPath(menuItem, 'menuNavigationItemRenderer');
   if (!renderer || !isRecord(renderer.text)) return;
 
   if (Array.isArray(renderer.text.runs)) {
@@ -79,11 +77,10 @@ function normalizeMenuItemText(menuItem: Record<string, unknown>): void {
 }
 
 function isRemovedLongPressMenuItem(menuItem: Record<string, unknown>): boolean {
-  const nav = isRecord(menuItem.menuNavigationItemRenderer) ? menuItem.menuNavigationItemRenderer : undefined;
-  const navEp = isRecord(nav?.navigationEndpoint) ? nav.navigationEndpoint : undefined;
+  const navEp = readRecordPath(menuItem, 'menuNavigationItemRenderer', 'navigationEndpoint');
   if (navEp?.addToPlaylistEndpoint) return true;
 
-  const service = isRecord(menuItem.menuServiceItemRenderer) ? menuItem.menuServiceItemRenderer : undefined;
+  const service = readRecordPath(menuItem, 'menuServiceItemRenderer');
   if (getCustomActionName(service?.serviceEndpoint) === 'ADD_TO_QUEUE') return true;
 
   const label = readMenuItemText(menuItem).toLowerCase();
@@ -113,10 +110,8 @@ function getFeedbackPanel(item: FeedItem): { panelId: string; params: string } |
 
 function menuHasFeedbackItems(menuItems: readonly Record<string, unknown>[]): boolean {
   return menuItems.some((menuItem) => {
-    const service = isRecord(menuItem.menuServiceItemRenderer) ? menuItem.menuServiceItemRenderer : undefined;
-    const nav = isRecord(menuItem.menuNavigationItemRenderer) ? menuItem.menuNavigationItemRenderer : undefined;
-    const serviceEp = service?.serviceEndpoint;
-    const navEp = nav?.navigationEndpoint;
+    const serviceEp = readRecordPath(menuItem, 'menuServiceItemRenderer')?.serviceEndpoint;
+    const navEp = readRecordPath(menuItem, 'menuNavigationItemRenderer')?.navigationEndpoint;
     const act = getCustomActionName(serviceEp);
     return (
       act === 'NOT_INTERESTED' ||
@@ -215,9 +210,9 @@ export function addLongPress(items: FeedItem[]): void {
     if (tr) {
       tr.onLongPressCommand = data;
     } else if (lv) {
-      lv.rendererContext = lv.rendererContext || {};
-      lv.rendererContext.commandContext = lv.rendererContext.commandContext || {};
-      lv.rendererContext.commandContext.onLongPress = { innertubeCommand: data };
+      (lv.rendererContext as { commandContext: { onLongPress?: unknown } }).commandContext.onLongPress = {
+        innertubeCommand: data,
+      };
     }
   }
 }

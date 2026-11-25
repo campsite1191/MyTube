@@ -78,7 +78,7 @@ jobs:
           npm run lint:knip
           npm run lint:biome
           npm run build:js
-          npm test
+          npm run lint:coverage
           ls -lh mods/dist/userscript.js
 
       - name: Replace assets/userscript.js (Stored)

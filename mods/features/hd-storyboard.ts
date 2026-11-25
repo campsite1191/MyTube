@@ -6,8 +6,7 @@ type AnyFn = (...args: unknown[]) => unknown;
 const wrappedSetFns = new WeakSet<AnyFn>();
 let installed = false;
 
-function patchExperimentFlags(flags: unknown): void {
-  if (!isRecord(flags)) return;
+function patchExperimentFlags(flags: AnyRecord): void {
   flags.web_l3_storyboard = true;
   flags.force_full_animation = true;
   flags.force_memory_saving_mode = false;
@@ -26,10 +25,10 @@ function patchTectonicFeatureSwitches(switches: unknown): void {
 
 function patchYtConfigData(configData: unknown): void {
   if (!isRecord(configData)) return;
-  if (!isRecord(configData.EXPERIMENT_FLAGS)) {
-    configData.EXPERIMENT_FLAGS = {};
-  }
-  patchExperimentFlags(configData.EXPERIMENT_FLAGS);
+  const rawFlags = configData.EXPERIMENT_FLAGS;
+  const flags: AnyRecord = isRecord(rawFlags) ? rawFlags : {};
+  configData.EXPERIMENT_FLAGS = flags;
+  patchExperimentFlags(flags);
 }
 
 function wrapYtcfg(ytcfgObj: unknown): unknown {
@@ -120,17 +119,17 @@ function patchYtNamespace(ytObj: unknown): void {
  * `enableHdStoryboardThumbnails`) at `document-start` so seek previews use high-res `320x180` (`L3`)
  * frames instead of dropping levels `>= 180px` or falling back to limited-memory low-res previews.
  */
-export function installHdStoryboard(
-  targetWindow: AnyRecord | undefined = typeof window !== 'undefined' ? (window as unknown as AnyRecord) : undefined
-): void {
-  if (!targetWindow) return;
-  if (targetWindow === (typeof window !== 'undefined' ? (window as unknown) : undefined)) {
+export function installHdStoryboard(targetWindow?: AnyRecord): void {
+  const defaultWindow = typeof window !== 'undefined' ? (window as unknown as AnyRecord) : undefined;
+  const win = targetWindow ?? defaultWindow;
+  if (!win) return;
+  if (win === defaultWindow) {
     if (installed) return;
     installed = true;
   }
 
-  installPropertyTrap(targetWindow, 'environment', patchEnvironmentObject);
-  installPropertyTrap(targetWindow, 'ytcfg', wrapYtcfg);
-  installPropertyTrap(targetWindow, 'yt', patchYtNamespace);
-  installPropertyTrap(targetWindow, 'tectonicConfig', patchTectonicConfig);
+  installPropertyTrap(win, 'environment', patchEnvironmentObject);
+  installPropertyTrap(win, 'ytcfg', wrapYtcfg);
+  installPropertyTrap(win, 'yt', patchYtNamespace);
+  installPropertyTrap(win, 'tectonicConfig', patchTectonicConfig);
 }

@@ -1,6 +1,6 @@
 import pLimit from 'p-limit';
 import QuickLRU from 'quick-lru';
-import { observeShortsPage } from '../core/lifecycle.ts';
+import { NOOP, observeShortsPage } from '../core/lifecycle.ts';
 import { setShortsOverlayStats } from '../features/return-youtube-dislike.ts';
 import type { FeedItem } from '../types/innertube.ts';
 import { FEED_METADATA_CACHE_MAX_SIZE, formatCompactCount, unwrapFeedItem } from '../utils/feed-helpers.ts';
@@ -21,8 +21,7 @@ const shortsMetadataCache = new QuickLRU<string, string>({ maxSize: FEED_METADAT
 const inFlightShortsMeta = new Map<string, Promise<string | null>>();
 const pendingTileTextTargets = new Map<string, Set<Record<string, unknown>>>();
 
-let activeNavigationController: AbortController | null =
-  typeof AbortController === 'function' ? new AbortController() : null;
+let activeNavigationController = new AbortController();
 let shortsMetadataInstalled = false;
 let suppressOverlayEnrichmentCount = 0;
 
@@ -40,8 +39,7 @@ export function formatShortsViewCount(rawViews: string | null | undefined): stri
     const count = Number(match[1].replace(/,/g, ''));
     if (Number.isFinite(count) && count > 0) {
       if (count < 1000) return `${Math.round(count)} ${count === 1 ? 'view' : 'views'}`;
-      const compact = formatCompactCount(count);
-      if (compact) return `${compact} views`;
+      return `${formatCompactCount(count)} views`;
     }
   }
   return trimmed;
@@ -86,7 +84,7 @@ function readViewsFromDescription(descHeader: Record<string, unknown> | undefine
 
   const factoids = Array.isArray(descHeader.factoid) ? descHeader.factoid : [];
   for (const entry of factoids) {
-    const factoid = isRecord(entry) && isRecord(entry.factoidRenderer) ? entry.factoidRenderer : undefined;
+    const factoid = readRecordPath(entry, 'factoidRenderer');
     if (!factoid) continue;
     const label = readFormattedText(factoid.label);
     if (!/^views?$/i.test(label)) continue;
@@ -201,7 +199,7 @@ export function enrichShortsPlayerOverlay(payload: unknown): boolean {
   const metaText = extractShortsMetadataFromReel(payload);
   if (!metaText) return barUpdated;
 
-  const titleObj = isRecord(hdr.reelTitleText) ? hdr.reelTitleText : undefined;
+  const titleObj = readRecordPath(hdr, 'reelTitleText');
   if (!titleObj) return barUpdated;
   const currentText = readFormattedText(titleObj);
   if (!currentText || currentText.includes(metaText)) return barUpdated;
@@ -243,6 +241,11 @@ function extractShortTileVideoId(tr: Record<string, unknown>): string | null {
   return extractVideoIdFromUrlList(readRecordPath(tr, 'header', 'tileHeaderRenderer', 'thumbnail')?.thumbnails);
 }
 
+function getFirstLineItem(line: unknown): Record<string, unknown> | null {
+  const items = readRecordPath(line, 'lineRenderer')?.items;
+  return Array.isArray(items) && isRecord(items[0]) ? items[0] : null;
+}
+
 function ensureTileMetaLine(
   tileMeta: Record<string, unknown>,
   initialText: string
@@ -250,10 +253,10 @@ function ensureTileMetaLine(
   const existingLines = Array.isArray(tileMeta.lines) ? tileMeta.lines : [];
   if (existingLines.length > 0) {
     const firstText = existingLines
-      .map((l) => readFormattedText(readRecordPath(l, 'lineRenderer', 'items', '0')))
+      .map((l) => readFormattedText(readRecordPath(getFirstLineItem(l), 'lineItemRenderer', 'text')))
       .join('');
     if (firstText && firstText !== PLACEHOLDER_TEXT) return undefined;
-    const textObj = readRecordPath(existingLines[0], 'lineRenderer', 'items', '0', 'lineItemRenderer', 'text');
+    const textObj = readRecordPath(getFirstLineItem(existingLines[0]), 'lineItemRenderer', 'text');
     if (textObj) return textObj;
   }
   const textObj: Record<string, unknown> = { simpleText: initialText };
@@ -293,8 +296,8 @@ function applyResolvedMetadata(videoId: string, label: string): void {
 }
 
 function abortPendingShortsMetadataRequests(): void {
-  activeNavigationController?.abort();
-  activeNavigationController = typeof AbortController === 'function' ? new AbortController() : null;
+  activeNavigationController.abort();
+  activeNavigationController = new AbortController();
   inFlightShortsMeta.clear();
   pendingTileTextTargets.clear();
 }
@@ -312,11 +315,10 @@ function readYtcfgContext(): {
 } | null {
   if (typeof window === 'undefined') return null;
   const rawYtcfg = (window as unknown as { ytcfg?: { data_?: unknown; d?: () => unknown } }).ytcfg;
-  let ytcfg = isRecord(rawYtcfg?.data_) ? rawYtcfg.data_ : undefined;
+  let ytcfg = readRecordPath(rawYtcfg, 'data_');
   if (!ytcfg && typeof rawYtcfg?.d === 'function') {
     try {
-      const candidate = rawYtcfg.d();
-      if (isRecord(candidate)) ytcfg = candidate;
+      ytcfg = readRecordPath(rawYtcfg.d());
     } catch {
       return null;
     }
@@ -330,22 +332,18 @@ function readYtcfgContext(): {
   };
 }
 
-function fetchShortsMetadata(videoId: string, controller: AbortController | null): Promise<string | null> {
-  const cached = shortsMetadataCache.get(videoId);
-  if (cached !== undefined) return Promise.resolve(cached);
-
+function fetchShortsMetadata(videoId: string, controller: AbortController): Promise<string | null> {
   const pending = inFlightShortsMeta.get(videoId);
   if (pending) return pending;
 
   const ytcfg = readYtcfgContext();
   if (!ytcfg || typeof fetch !== 'function') return Promise.resolve(null);
 
-  const signal = controller?.signal;
+  const { signal } = controller;
   const request = shortsMetaLimit(async (): Promise<string | null> => {
-    if (signal?.aborted) return null;
-    const cachedWhileQueued = shortsMetadataCache.get(videoId);
-    if (cachedWhileQueued !== undefined) return cachedWhileQueued;
+    if (signal.aborted) return null;
 
+    let label: string | null = null;
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -363,36 +361,37 @@ function fetchShortsMetadata(videoId: string, controller: AbortController | null
           playerRequest: { videoId },
           disablePlayerResponse: true,
         }),
-        ...(signal ? { signal } : {}),
+        signal,
       });
-      if (!response.ok) return null;
-      let json: unknown;
-      if (typeof response.text === 'function') {
-        const rawText = await response.text();
-        suppressOverlayEnrichmentCount++;
-        try {
-          json = JSON.parse(rawText);
-        } finally {
-          suppressOverlayEnrichmentCount--;
+      if (response.ok) {
+        let json: unknown;
+        if (typeof response.text === 'function') {
+          const rawText = await response.text();
+          suppressOverlayEnrichmentCount++;
+          try {
+            json = JSON.parse(rawText);
+          } finally {
+            suppressOverlayEnrichmentCount--;
+          }
+        } else {
+          suppressOverlayEnrichmentCount++;
+          try {
+            json = await response.json();
+          } finally {
+            suppressOverlayEnrichmentCount--;
+          }
         }
-      } else {
-        suppressOverlayEnrichmentCount++;
-        try {
-          json = await response.json();
-        } finally {
-          suppressOverlayEnrichmentCount--;
-        }
+        const resolved = extractShortsMetadataFromReel(json) ?? '';
+        shortsMetadataCache.set(videoId, resolved);
+        label = resolved;
       }
-      const label = extractShortsMetadataFromReel(json) ?? '';
-      shortsMetadataCache.set(videoId, label);
-      return label;
     } catch {
-      return null;
-    } finally {
-      if (inFlightShortsMeta.get(videoId) === request) {
-        inFlightShortsMeta.delete(videoId);
-      }
+      // Ignore aborted navigations, network failures, or JSON parse errors.
     }
+    if (inFlightShortsMeta.get(videoId) === request) {
+      inFlightShortsMeta.delete(videoId);
+    }
+    return label;
   });
 
   inFlightShortsMeta.set(videoId, request);
@@ -451,12 +450,12 @@ export async function applyShortsFeedMetadata(items: FeedItem[]): Promise<void> 
 
   // Yield until after the current frame paints so background lookups never delay feed card rendering.
   await yieldBeforeNetworkFetch();
-  if (controller?.signal.aborted) return;
+  if (controller.signal.aborted) return;
 
   await Promise.all(
     [...toFetch].map((videoId) =>
       fetchShortsMetadata(videoId, controller).then((label) => {
-        if (controller?.signal.aborted) return;
+        if (controller.signal.aborted) return;
         if (label !== null) {
           applyResolvedMetadata(videoId, label);
         } else {
@@ -472,7 +471,7 @@ export async function applyShortsFeedMetadata(items: FeedItem[]): Promise<void> 
  * and aborts pending Short metadata lookups on route changes.
  */
 export function installShortsMetadata(): () => void {
-  if (shortsMetadataInstalled || typeof document === 'undefined' || typeof window === 'undefined') return () => {};
+  if (shortsMetadataInstalled || typeof document === 'undefined' || typeof window === 'undefined') return NOOP;
   shortsMetadataInstalled = true;
 
   const targetWindow = window;
@@ -498,7 +497,7 @@ export function installShortsMetadata(): () => void {
 
     const controller = activeNavigationController;
     void fetchShortsMetadata(videoId, controller).then((label) => {
-      if (!controller?.signal.aborted && label !== null) {
+      if (!controller.signal.aborted && label !== null) {
         applyResolvedMetadata(videoId, label);
       }
     });

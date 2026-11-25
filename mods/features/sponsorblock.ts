@@ -1,6 +1,7 @@
 import { t } from '../core/i18n.ts';
 import {
   isPlayerBarVisible,
+  NOOP,
   observeDom,
   observePlayerBar,
   onAbort,
@@ -135,8 +136,9 @@ class SponsorBlockHandler {
   private segments: SponsorBlockSegment[] = [];
 
   private readonly durationChangeHandler = (): void => {
-    if (this.segmentsOverlay && this.video?.duration && Math.abs(this.video.duration - this.overlayDuration) > 0.5) {
-      this.renderSegmentBars(this.video.duration);
+    const overlay = this.segmentsOverlay;
+    if (overlay && this.video?.duration && Math.abs(this.video.duration - this.overlayDuration) > 0.5) {
+      this.renderSegmentBars(overlay, this.video.duration);
     } else {
       this.buildOverlay();
     }
@@ -162,7 +164,6 @@ class SponsorBlockHandler {
       this.segments = segments;
 
       onVideo((video) => {
-        if (this.signal.aborted) return;
         this.video = video;
         video.addEventListener('durationchange', this.durationChangeHandler, { signal: this.signal });
         this.buildOverlay();
@@ -197,24 +198,22 @@ class SponsorBlockHandler {
     this.segmentsOverlay.style.setProperty('height', `${trackRect.height}px`, 'important');
   }
 
-  private syncOverlayVisibility(bar?: Element | null): void {
-    if (!this.segmentsOverlay) return;
+  private syncOverlayVisibility(overlay: HTMLDivElement, bar?: Element | null): void {
     const progressBar = bar ?? document.querySelector(PLAYER_BAR_SELECTOR);
     const nextDisplay = isPlayerBarVisible(progressBar) ? 'block' : 'none';
-    if (this.segmentsOverlay.style.display !== nextDisplay) {
-      this.segmentsOverlay.style.setProperty('display', nextDisplay, 'important');
+    if (overlay.style.display !== nextDisplay) {
+      overlay.style.setProperty('display', nextDisplay, 'important');
     }
   }
 
-  private renderSegmentBars(duration: number): void {
-    if (!this.segmentsOverlay) return;
+  private renderSegmentBars(overlay: HTMLDivElement, duration: number): void {
     const bars = this.segments.map((segment) => {
       const { color, opacity, widthPercent, leftPercent } = computeSegmentBarGeometry(segment, duration);
       const elm = document.createElement('div');
       elm.style.cssText = `background-color: ${color} !important; opacity: ${opacity} !important; height: 100% !important; width: ${widthPercent}% !important; left: ${leftPercent}% !important; position: absolute !important;`;
       return elm;
     });
-    this.segmentsOverlay.replaceChildren(...bars);
+    overlay.replaceChildren(...bars);
     this.overlayDuration = duration;
   }
 
@@ -229,25 +228,25 @@ class SponsorBlockHandler {
     }
 
     this.segmentsOverlay = overlay;
-    this.renderSegmentBars(duration);
+    this.renderSegmentBars(overlay, duration);
     this.syncOverlayLayout();
     observePlayerBar(this.signal, (bar) => {
-      this.syncOverlayVisibility(bar);
+      this.syncOverlayVisibility(overlay, bar);
       this.syncOverlayLayout();
     });
     observeDom(
       host,
       (mutations) => {
-        if (this.signal.aborted || !this.segmentsOverlay) return;
+        if (this.signal.aborted) return;
         for (const mutation of mutations) {
           for (const removed of mutation.removedNodes) {
-            if (removed === this.segmentsOverlay) {
-              host.appendChild(this.segmentsOverlay);
+            if (removed === overlay) {
+              host.appendChild(overlay);
               break;
             }
           }
         }
-        this.syncOverlayVisibility();
+        this.syncOverlayVisibility(overlay);
         this.syncOverlayLayout();
       },
       { childList: true },
@@ -257,7 +256,7 @@ class SponsorBlockHandler {
   }
 
   private buildOverlay(): void {
-    if (this.signal.aborted || this.segmentsOverlay || !this.video?.duration) return;
+    if (this.segmentsOverlay || !this.video?.duration) return;
 
     const tryMount = (): boolean => {
       const track = this.findProgressTrack();
@@ -331,7 +330,7 @@ export function onSponsorBlockSegmentsReady(
  * Installs SponsorBlock segment fetching, progress-bar markers, highlight jump, and manual-skip overlay data.
  */
 export function installSponsorBlock(): () => void {
-  if (sponsorBlockInstalled || typeof window === 'undefined' || typeof document === 'undefined') return () => {};
+  if (sponsorBlockInstalled || typeof window === 'undefined' || typeof document === 'undefined') return NOOP;
   sponsorBlockInstalled = true;
   installSponsorBlockStyles();
   const unsub = onWatchSession((videoId, signal) => {

@@ -3,6 +3,9 @@
  * cleanup hooks share one cancellation token without manual teardown bookkeeping.
  */
 
+/** Shared no-op teardown callback returned by guarded `install*` entrypoints. */
+export const NOOP: () => void = () => {};
+
 export function onAbort(signal: AbortSignal | undefined, cleanup: () => void): void {
   if (!signal) return;
   if (signal.aborted) {
@@ -63,7 +66,7 @@ export function isPlaybackPageActive(): boolean {
 }
 
 export function observeShortsPage(callback: (isShortsActive: boolean) => void, signal?: AbortSignal): () => void {
-  if (signal?.aborted || typeof document === 'undefined') return () => {};
+  if (signal?.aborted || typeof document === 'undefined') return NOOP;
 
   const doc = document;
   let lastActive = Boolean(doc.body?.classList?.contains('WEB_PAGE_TYPE_SHORTS'));
@@ -170,7 +173,6 @@ export function observePlayerBar(
 
   const bind = (): Element | null => {
     if (signal.aborted || typeof document === 'undefined') return null;
-    if (observedBar?.isConnected) return observedBar;
 
     const bar = document.querySelector(PLAYER_BAR_SELECTOR);
     if (!bar) {

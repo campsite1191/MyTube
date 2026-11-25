@@ -98,9 +98,8 @@ export function findFeedbackToken(obj: unknown, depth = 0): string | null {
   if (!obj || typeof obj !== 'object' || depth > MAX_FEEDBACK_TOKEN_DEPTH) return null;
   const record = obj as Record<string, unknown>;
   if (typeof record.feedbackToken === 'string') return record.feedbackToken;
-  for (const key in record) {
-    if (!Object.hasOwn(record, key)) continue;
-    const token = findFeedbackToken(record[key], depth + 1);
+  for (const value of Object.values(record)) {
+    const token = findFeedbackToken(value, depth + 1);
     if (token) return token;
   }
   return null;

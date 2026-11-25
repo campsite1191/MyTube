@@ -1,3 +1,4 @@
+import { NOOP } from '../core/lifecycle.ts';
 import resolveCommand, { patchResolveCommand } from '../core/resolve-command.ts';
 import { getCommandExecutor, whenYttvReady } from '../core/yttv-bridge.ts';
 
@@ -39,7 +40,7 @@ export function ensureResolveHooksOnActionKey(event: KeyboardEvent): void {
 }
 
 export function installUiHooks(): () => void {
-  if (uiHooksInstalled || typeof document === 'undefined') return () => {};
+  if (uiHooksInstalled || typeof document === 'undefined') return NOOP;
   uiHooksInstalled = true;
 
   const targetDocument = document;

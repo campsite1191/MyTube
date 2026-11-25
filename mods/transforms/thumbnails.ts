@@ -119,8 +119,7 @@ export function upgradeFeedItemThumbnails(entry: FeedItem | null | undefined): b
   const videoId = extractVideoIdForThumbnail(entry);
   if (!videoId) return false;
 
-  const feedItem = unwrapFeedItem(entry);
-  if (!feedItem) return false;
+  const feedItem = unwrapFeedItem(entry as FeedItem);
 
   const thumbnailHandle = getThumbnailListHandle(feedItem);
   if (!thumbnailHandle) return false;
@@ -163,7 +162,7 @@ function setFormattedTitle(
   replacementTitle: string,
   preferContentProperty = false
 ): void {
-  if (!titleContainer || !replacementTitle) return;
+  if (!titleContainer) return;
 
   if (
     preferContentProperty &&
@@ -266,8 +265,7 @@ const EMPTY_DEARROW_BRANDING: DeArrowBrandingResponse = { titles: [], thumbnails
 const deArrowLimit = pLimit(MAX_DEARROW_CONCURRENCY);
 const deArrowCache = new QuickLRU<string, DeArrowBrandingResponse>({ maxSize: FEED_METADATA_CACHE_MAX_SIZE });
 const inFlightDeArrow = new Map<string, Promise<DeArrowBrandingResponse | null>>();
-let activeNavigationController: AbortController | null =
-  typeof AbortController === 'function' ? new AbortController() : null;
+let activeNavigationController = new AbortController();
 
 function hasDeArrowBrandingContent(branding: DeArrowBrandingResponse | null | undefined): boolean {
   return Boolean(branding && (branding.titles?.length || branding.thumbnails?.length));
@@ -275,8 +273,8 @@ function hasDeArrowBrandingContent(branding: DeArrowBrandingResponse | null | un
 
 /** Aborts in-flight and queued DeArrow requests (e.g. on navigation or memory pressure). */
 export function abortPendingDeArrowRequests(): void {
-  activeNavigationController?.abort();
-  activeNavigationController = typeof AbortController === 'function' ? new AbortController() : null;
+  activeNavigationController.abort();
+  activeNavigationController = new AbortController();
   inFlightDeArrow.clear();
 }
 
@@ -298,45 +296,38 @@ export function setupMemoryPressureListener(): void {
   }
 }
 
-function fetchBrandingForVideo(
-  videoId: string,
-  controller: AbortController | null
-): Promise<DeArrowBrandingResponse | null> {
-  const cached = deArrowCache.get(videoId);
-  if (cached) return Promise.resolve(cached);
-
+function fetchBrandingForVideo(videoId: string, controller: AbortController): Promise<DeArrowBrandingResponse | null> {
   const pending = inFlightDeArrow.get(videoId);
   if (pending) return pending;
 
-  const signal = controller?.signal;
+  const { signal } = controller;
   const request = deArrowLimit(async (): Promise<DeArrowBrandingResponse | null> => {
-    if (signal?.aborted) return null;
-    const cachedWhileQueued = deArrowCache.get(videoId);
-    if (cachedWhileQueued) return cachedWhileQueued;
+    if (signal.aborted) return null;
 
+    let branding: DeArrowBrandingResponse | null = null;
     try {
-      const response = await fetch(
-        `https://sponsor.ajay.app/api/branding?videoID=${encodeURIComponent(videoId)}`,
-        signal ? { signal } : undefined
-      );
-      if (signal?.aborted) return null;
-      if (response.status === 404) {
-        deArrowCache.set(videoId, EMPTY_DEARROW_BRANDING);
-        return EMPTY_DEARROW_BRANDING;
+      const response = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${encodeURIComponent(videoId)}`, {
+        signal,
+      });
+      if (!signal.aborted) {
+        if (response.status === 404) {
+          deArrowCache.set(videoId, EMPTY_DEARROW_BRANDING);
+          branding = EMPTY_DEARROW_BRANDING;
+        } else if (response.ok) {
+          const parsed = (await response.json()) as DeArrowBrandingResponse | null;
+          if (!signal.aborted && parsed) {
+            deArrowCache.set(videoId, parsed);
+            branding = parsed;
+          }
+        }
       }
-      if (!response.ok) return null;
-      const branding = (await response.json()) as DeArrowBrandingResponse | null;
-      if (signal?.aborted || !branding) return null;
-      deArrowCache.set(videoId, branding);
-      return branding;
     } catch {
       // Ignore aborted navigations, transient network errors, or JSON parse errors.
-      return null;
-    } finally {
-      if (inFlightDeArrow.get(videoId) === request) {
-        inFlightDeArrow.delete(videoId);
-      }
     }
+    if (inFlightDeArrow.get(videoId) === request) {
+      inFlightDeArrow.delete(videoId);
+    }
+    return branding;
   });
 
   inFlightDeArrow.set(videoId, request);
@@ -369,7 +360,7 @@ export async function applyDeArrowBranding(items: FeedItem[]): Promise<void> {
   await Promise.all(
     tasks.map((task) =>
       fetchBrandingForVideo(task.videoId, requestController).then((branding) => {
-        if (!requestController?.signal.aborted && branding && hasDeArrowBrandingContent(branding)) {
+        if (!requestController.signal.aborted && branding && hasDeArrowBrandingContent(branding)) {
           applyDeArrowBrandingToItem(task.entry, task.videoId, branding, true);
         }
       })

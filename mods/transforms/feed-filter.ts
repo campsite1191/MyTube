@@ -1,6 +1,6 @@
 import type { FeedItem } from '../types/innertube.ts';
 import { compactInPlace, unwrapFeedItem } from '../utils/feed-helpers.ts';
-import { isRecord } from '../utils/type-guards.ts';
+import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 
 const BADGE_KEY_RE = /badge/i;
 const SURVEY_KEY_RE = /survey|questionnaire/i;
@@ -113,14 +113,8 @@ export function readFormattedText(node: unknown): string {
     const attributed = readFormattedText(node.attributedString);
     if (attributed) return attributed;
   }
-  if (
-    isRecord(node.accessibility) &&
-    isRecord(node.accessibility.accessibilityData) &&
-    typeof node.accessibility.accessibilityData.label === 'string'
-  ) {
-    return node.accessibility.accessibilityData.label;
-  }
-  return '';
+  const accessLabel = readRecordPath(node, 'accessibility', 'accessibilityData')?.label;
+  return typeof accessLabel === 'string' ? accessLabel : '';
 }
 
 function firstNonEmptyText(nodes: unknown, pick: (entry: Record<string, unknown>) => unknown): string {
@@ -142,20 +136,17 @@ export function extractItemChannelName(item: FeedItem | null | undefined): strin
 
   if (target.tileRenderer) {
     const lines = target.tileRenderer.metadata?.tileMetadataRenderer?.lines;
-    const firstLine = Array.isArray(lines) ? lines[0] : undefined;
-    const lineItems =
-      isRecord(firstLine) && isRecord(firstLine.lineRenderer) ? firstLine.lineRenderer.items : undefined;
-    return firstNonEmptyText(lineItems, (entry) =>
-      isRecord(entry.lineItemRenderer) ? entry.lineItemRenderer.text : undefined
-    );
+    const lineItems = readRecordPath(Array.isArray(lines) ? lines[0] : undefined, 'lineRenderer')?.items;
+    return firstNonEmptyText(lineItems, (entry) => readRecordPath(entry, 'lineItemRenderer')?.text);
   }
 
-  const metaVm: unknown = target.lockupViewModel?.metadata?.lockupMetadataViewModel;
-  if (!isRecord(metaVm)) return '';
-  const contentMeta = isRecord(metaVm.metadata) ? metaVm.metadata.contentMetadataViewModel : undefined;
-  const rows = isRecord(contentMeta) && Array.isArray(contentMeta.metadataRows) ? contentMeta.metadataRows : undefined;
-  const firstRow = rows?.[0];
-  const parts = isRecord(firstRow) ? firstRow.metadataParts : undefined;
+  const contentMeta = readRecordPath(
+    target.lockupViewModel?.metadata?.lockupMetadataViewModel,
+    'metadata',
+    'contentMetadataViewModel'
+  );
+  const rows = Array.isArray(contentMeta?.metadataRows) ? contentMeta.metadataRows : undefined;
+  const parts = isRecord(rows?.[0]) ? rows[0].metadataParts : undefined;
   return firstNonEmptyText(parts, (entry) => entry.text);
 }
 
@@ -169,9 +160,7 @@ export function getExistingMenuItemLists(item: FeedItem | null | undefined): Arr
   const lists: Array<Array<Record<string, unknown>>> = [];
   const collectMenuItems = (command: unknown): void => {
     walkCommands(command, (cmd) => {
-      const showMenu = isRecord(cmd.showMenuCommand) ? cmd.showMenuCommand : undefined;
-      const menu = isRecord(showMenu?.menu) ? showMenu.menu : undefined;
-      const menuRenderer = isRecord(menu?.menuRenderer) ? menu.menuRenderer : undefined;
+      const menuRenderer = readRecordPath(cmd, 'showMenuCommand', 'menu', 'menuRenderer');
       if (Array.isArray(menuRenderer?.items)) {
         lists.push(menuRenderer.items as Array<Record<string, unknown>>);
       }
@@ -180,8 +169,7 @@ export function getExistingMenuItemLists(item: FeedItem | null | undefined): Arr
   };
 
   if (target.tileRenderer) {
-    const tileMenu = isRecord(target.tileRenderer.menu) ? target.tileRenderer.menu : undefined;
-    const tileMenuRenderer = isRecord(tileMenu?.menuRenderer) ? tileMenu.menuRenderer : undefined;
+    const tileMenuRenderer = readRecordPath(target.tileRenderer.menu, 'menuRenderer');
     if (Array.isArray(tileMenuRenderer?.items)) {
       lists.push(tileMenuRenderer.items as Array<Record<string, unknown>>);
     }
@@ -213,11 +201,13 @@ function getShelfTitleSources(item: Record<string, unknown>): unknown[] {
     for (const key of TITLE_FIELD_KEYS) {
       if (node[key] !== undefined) sources.push(node[key]);
     }
-    if (isRecord(node.richSectionRenderer) && isRecord(node.richSectionRenderer.content)) {
-      visit(node.richSectionRenderer.content, depth + 1, insideHeader);
+    const richContent = readRecordPath(node, 'richSectionRenderer', 'content');
+    if (richContent) {
+      visit(richContent, depth + 1, insideHeader);
     }
-    if (isRecord(node.itemSectionRenderer) && Array.isArray(node.itemSectionRenderer.contents)) {
-      for (const child of node.itemSectionRenderer.contents) {
+    const itemSection = readRecordPath(node, 'itemSectionRenderer');
+    if (Array.isArray(itemSection?.contents)) {
+      for (const child of itemSection.contents) {
         if (isRecord(child) && !isDirectMediaCard(child)) {
           visit(child, depth + 1, false);
         }
@@ -249,9 +239,7 @@ function isSurveyTitle(titleText: unknown): boolean {
 export function isSurveyItem(item: FeedItem | null | undefined): boolean {
   if (!isRecord(item)) return false;
 
-  for (const key in item) {
-    if (Object.hasOwn(item, key) && SURVEY_KEY_RE.test(key)) return true;
-  }
+  if (Object.keys(item).some((key) => SURVEY_KEY_RE.test(key))) return true;
 
   for (const candidate of getShelfTitleSources(item)) {
     if (isSurveyTitle(readFormattedText(candidate))) {
@@ -327,9 +315,7 @@ function matchBadgeNode(node: unknown, depth = 0): boolean {
     return true;
   }
 
-  for (const key in record) {
-    if (!Object.hasOwn(record, key)) continue;
-    const child = record[key];
+  for (const child of Object.values(record)) {
     if (child && typeof child === 'object' && matchBadgeNode(child, depth + 1)) {
       return true;
     }
@@ -353,10 +339,8 @@ export function hasBlockedBadge(item: FeedItem | null | undefined): boolean {
     }
 
     const record = node as Record<string, unknown>;
-    for (const key in record) {
-      if (!Object.hasOwn(record, key) || BADGE_SKIP_KEYS.has(key)) continue;
-      const child = record[key];
-      if (!child || typeof child !== 'object') continue;
+    for (const [key, child] of Object.entries(record)) {
+      if (BADGE_SKIP_KEYS.has(key) || !child || typeof child !== 'object') continue;
 
       if (BADGE_KEY_RE.test(key)) {
         if (matchBadgeNode(child, 0)) return true;
@@ -401,7 +385,6 @@ function isShelfContainer(item: FeedItem): boolean {
 export function shouldHideFeedItem(item: FeedItem | null | undefined): boolean {
   if (!isRecord(item)) return false;
   const target = unwrapFeedItem(item);
-  if (!target) return false;
 
   if (item.adSlotRenderer || target.adSlotRenderer) return true;
   if (item.feedNudgeRenderer || target.feedNudgeRenderer) return true;

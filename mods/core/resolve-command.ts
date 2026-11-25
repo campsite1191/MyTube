@@ -45,13 +45,15 @@ function buildUpdatedPrefCookieValue(existingCookie: string, lang: string): stri
 function handleSetClientSetting(endpoint: Record<string, unknown>): boolean {
   const settingDatas = Array.isArray(endpoint.settingDatas) ? endpoint.settingDatas : [];
   for (const rawSetting of settingDatas) {
-    if (!isRecord(rawSetting)) continue;
-    const enumObj = isRecord(rawSetting.clientSettingEnum) ? rawSetting.clientSettingEnum : undefined;
+    const enumObj = readRecordPath(rawSetting, 'clientSettingEnum');
     if (enumObj?.item === 'I18N_LANGUAGE') {
-      const lang = typeof rawSetting.stringValue === 'string' ? rawSetting.stringValue : '';
+      const lang =
+        typeof (rawSetting as Record<string, unknown>).stringValue === 'string'
+          ? ((rawSetting as Record<string, unknown>).stringValue as string)
+          : '';
       const date = new Date();
       date.setFullYear(date.getFullYear() + 10);
-      const nextPref = buildUpdatedPrefCookieValue(typeof document !== 'undefined' ? document.cookie : '', lang);
+      const nextPref = buildUpdatedPrefCookieValue(document.cookie, lang);
       // biome-ignore lint/suspicious/noDocumentCookie: YouTube TV reads PREF cookie synchronously before RELOAD_PAGE.
       document.cookie = `PREF=${nextPref}; path=/; expires=${date.toUTCString()};`;
       resolveCommand({ signalAction: { signal: 'RELOAD_PAGE' } });
@@ -99,15 +101,15 @@ function hasReportOrFeedbackEndpoint(endpoint: unknown): boolean {
     if (hasReportOrFeedbackEndpointNode(node)) {
       return true;
     }
-    const clientOverlay = isRecord(node.openClientOverlayAction) ? node.openClientOverlayAction : undefined;
+    const clientOverlay = readRecordPath(node, 'openClientOverlayAction');
     if (isReportOrFeedbackText(clientOverlay?.type)) {
       return true;
     }
-    const openPopup = isRecord(node.openPopupAction) ? node.openPopupAction : undefined;
+    const openPopup = readRecordPath(node, 'openPopupAction');
     if (isReportOrFeedbackText(openPopup?.uniqueId)) {
       return true;
     }
-    const signal = isRecord(node.signalAction) ? node.signalAction : undefined;
+    const signal = readRecordPath(node, 'signalAction');
     return isReportOrFeedbackText(signal?.signal);
   });
 }
@@ -116,7 +118,7 @@ function isReportOrFeedbackPopupItem(item: unknown): boolean {
   const renderer = unwrapPopupItemRenderer(item);
   if (!renderer) return false;
 
-  const icon = isRecord(renderer.icon) ? renderer.icon : undefined;
+  const icon = readRecordPath(renderer, 'icon');
   if (isReportOrFeedbackIcon(icon?.iconType)) {
     return true;
   }
@@ -146,8 +148,8 @@ function patchPlaybackSettingsPopup(cmd: Record<string, unknown>, isPrimaryPlayb
   );
   const menuPopup = readRecordPath(popup, 'menuPopupRenderer');
   const listContainer = itemList ?? menuPopup;
-  const items = Array.isArray(listContainer?.items) ? listContainer.items : undefined;
-  if (!items || !listContainer) return;
+  if (!listContainer || !Array.isArray(listContainer.items)) return;
+  const items = listContainer.items;
 
   compactInPlace(items, isReportOrFeedbackPopupItem);
 
@@ -158,10 +160,9 @@ function patchPlaybackSettingsPopup(cmd: Record<string, unknown>, isPrimaryPlayb
   if (!isPrimaryPlaybackSettings) return;
 
   for (const item of items) {
-    if (!isRecord(item) || !isRecord(item.compactLinkRenderer)) continue;
-    const clr = item.compactLinkRenderer;
-    const icon = isRecord(clr.icon) ? clr.icon : undefined;
-    const iconType = icon?.iconType;
+    const clr = readRecordPath(item, 'compactLinkRenderer');
+    if (!clr) continue;
+    const iconType = readRecordPath(clr, 'icon')?.iconType;
     if (iconType === 'SLOW_MOTION_VIDEO' || iconType === 'SPEEDOMETER') {
       clr.subtitle = { simpleText: formatPlaybackSpeedLabel() };
       clr.serviceEndpoint = {
@@ -223,15 +224,14 @@ function needsCommandInterception(cmd: unknown, depth = 0): boolean {
     return true;
   }
 
-  const openPopup = isRecord(cmd.openPopupAction) ? cmd.openPopupAction : undefined;
+  const openPopup = readRecordPath(cmd, 'openPopupAction');
   const uniqueId = typeof openPopup?.uniqueId === 'string' ? openPopup.uniqueId : '';
   if (isInterceptedPopupUniqueId(uniqueId)) return true;
 
-  const reqAcct = isRecord(cmd.requestAccountSelectorCommand) ? cmd.requestAccountSelectorCommand : undefined;
-  const acctCtx = isRecord(reqAcct?.identityActionContext) ? reqAcct.identityActionContext : undefined;
+  const acctCtx = readRecordPath(cmd, 'requestAccountSelectorCommand', 'identityActionContext');
   if (acctCtx?.eventTrigger === 'ACCOUNT_EVENT_TRIGGER_ON_EXIT') return true;
 
-  const cmdExec = isRecord(cmd.commandExecutorCommand) ? cmd.commandExecutorCommand : undefined;
+  const cmdExec = readRecordPath(cmd, 'commandExecutorCommand');
   if (Array.isArray(cmdExec?.commands)) {
     return cmdExec.commands.some((subCmd) => needsCommandInterception(subCmd, depth + 1));
   }
@@ -264,7 +264,7 @@ export function patchResolveCommand(): void {
           runCustomAction(extracted.action, extracted.parameters);
           return true;
         }
-        const openPopup = isRecord(rawCmd.openPopupAction) ? rawCmd.openPopupAction : undefined;
+        const openPopup = readRecordPath(rawCmd, 'openPopupAction');
         const uniqueId = typeof openPopup?.uniqueId === 'string' ? openPopup.uniqueId : '';
         if (uniqueId === 'playback-settings') {
           patchPlaybackSettingsPopup(rawCmd, true);
@@ -275,7 +275,7 @@ export function patchResolveCommand(): void {
         }
       }
 
-      const cmdExec = isRecord(effectiveCmd.commandExecutorCommand) ? effectiveCmd.commandExecutorCommand : undefined;
+      const cmdExec = readRecordPath(effectiveCmd, 'commandExecutorCommand');
       if (Array.isArray(cmdExec?.commands) && cmdExec.commands.some((subCmd) => needsCommandInterception(subCmd))) {
         for (const subCmd of cmdExec.commands) {
           const extracted = isRecord(subCmd) ? extractCustomAction(subCmd) : null;
@@ -288,8 +288,7 @@ export function patchResolveCommand(): void {
         return true;
       }
 
-      const reqAcct = isRecord(rawCmd.requestAccountSelectorCommand) ? rawCmd.requestAccountSelectorCommand : undefined;
-      const acctCtx = isRecord(reqAcct?.identityActionContext) ? reqAcct.identityActionContext : undefined;
+      const acctCtx = readRecordPath(rawCmd, 'requestAccountSelectorCommand', 'identityActionContext');
       if (acctCtx?.eventTrigger === 'ACCOUNT_EVENT_TRIGGER_ON_EXIT') {
         ogResolve.call(this, { signalAction: { signal: 'EXIT_APP' } });
         return false;
@@ -363,9 +362,7 @@ async function markFeedback(
     if (!showReasons || !isRecord(response)) return;
 
     const feedbackResponses = Array.isArray(response.feedbackResponses) ? response.feedbackResponses : [];
-    const first = isRecord(feedbackResponses[0]) ? feedbackResponses[0] : undefined;
-    const dialog = isRecord(first?.followUpDialog) ? first.followUpDialog : undefined;
-    const dismissal = isRecord(dialog?.dismissalFollowUpRenderer) ? dialog.dismissalFollowUpRenderer : undefined;
+    const dismissal = readRecordPath(feedbackResponses[0], 'followUpDialog', 'dismissalFollowUpRenderer');
     const reasons = dismissal?.reasons;
     if (!Array.isArray(reasons) || reasons.length === 0) return;
 

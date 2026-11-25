@@ -1,5 +1,6 @@
 import {
   isPlayerBarVisible,
+  NOOP,
   observePlayerBar,
   onAbort,
   onWatchSession,
@@ -43,11 +44,17 @@ interface ClockTarget {
  */
 export function parseClockSeconds(str: string | null | undefined): number | null {
   const m = String(str || '').match(/(\d+):(\d{2})(?::(\d{2}))?/);
-  if (!m || m[1] === undefined || m[2] === undefined) return null;
+  if (!m) return null;
   const a = Number(m[1]);
   const b = Number(m[2]);
   if (m[3] !== undefined) return a * 3600 + b * 60 + Number(m[3]);
   return a * 60 + b;
+}
+
+function matchClockSplit(rawText: string): [string, string] | null {
+  const clean = rawText.replace(OURS, '');
+  const m = clean.match(CLOCK_SPLIT_RE) as [string, string, string] | null;
+  return m ? [m[1], m[2]] : null;
 }
 
 /**
@@ -71,13 +78,11 @@ export function computeRemainingText(
   durationSec: number,
   currentTimeSec: number,
   durationOverrideSec: number | null,
-  fallbackDur: boolean
+  fallbackDur: boolean,
+  splitMatch: [string, string] | null = matchClockSplit(rawText)
 ): string | null {
-  if (!durationSec || !Number.isFinite(durationSec)) return null;
-  const clean = rawText.replace(OURS, '');
-  const m = clean.match(CLOCK_SPLIT_RE);
-  if (!m || m[1] === undefined) return null;
-  const elapsedSec = fallbackDur ? null : parseClockSeconds(m[1]);
+  if (!durationSec || !Number.isFinite(durationSec) || !splitMatch) return null;
+  const elapsedSec = fallbackDur ? null : parseClockSeconds(splitMatch[0]);
   const effectiveDuration = durationOverrideSec ?? Math.floor(durationSec);
   const secondsLeft =
     elapsedSec !== null
@@ -96,16 +101,15 @@ export function formatRemainingLabel(
   durationOverrideSec: number | null,
   fallbackDur: boolean
 ): string | null {
-  const rem = computeRemainingText(rawText, durationSec, currentTimeSec, durationOverrideSec, fallbackDur);
+  const split = matchClockSplit(rawText);
+  if (!split) return null;
+  const rem = computeRemainingText(rawText, durationSec, currentTimeSec, durationOverrideSec, fallbackDur, split);
   if (rem === null) return null;
-  const clean = rawText.replace(OURS, '');
-  const m = clean.match(CLOCK_SPLIT_RE);
-  if (!m || m[1] === undefined) return null;
-  const suffix = m[2];
+  const [prefix, suffix] = split;
   if (suffix && /\S/.test(suffix)) {
-    return `${m[1]}${META_SEPARATOR}${rem}${/^\s/.test(suffix) ? '' : ' '}${suffix}`;
+    return `${prefix}${META_SEPARATOR}${rem}${/^\s/.test(suffix) ? '' : ' '}${suffix}`;
   }
-  return `${m[1].trim()}${META_SEPARATOR}${rem}`;
+  return `${prefix.trim()}${META_SEPARATOR}${rem}`;
 }
 
 /**
@@ -154,8 +158,7 @@ export function formatDurationLabel(
   return parts.join(META_SEPARATOR);
 }
 
-function findClockTextNode(node: Node | null | undefined): Text | null {
-  if (!node) return null;
+function findClockTextNode(node: Node): Text | null {
   if (node.nodeType === TEXT_NODE_TYPE) {
     return CLOCK_RE.test(node.nodeValue || '') ? (node as Text) : null;
   }
@@ -240,7 +243,7 @@ let playerBarInfoInstalled = false;
  * Installs remaining-time (`• -m:ss`) and metadata display on the Watch player bar, updating only while visible.
  */
 export function installPlayerBarInfo(): () => void {
-  if (playerBarInfoInstalled || typeof window === 'undefined' || typeof document === 'undefined') return () => {};
+  if (playerBarInfoInstalled || typeof window === 'undefined' || typeof document === 'undefined') return NOOP;
   playerBarInfoInstalled = true;
 
   injectCss(`
@@ -283,7 +286,6 @@ export function installPlayerBarInfo(): () => void {
     let lastAppliedSec = -1;
     let pendingApply = false;
     let pendingForceRender = false;
-    let getBar: () => Element | null = () => null;
 
     onAbort(signal, () => {
       videoAbort?.abort();
@@ -304,8 +306,7 @@ export function installPlayerBarInfo(): () => void {
       return cachedDuration;
     };
 
-    const bindVideo = (video: HTMLVideoElement | null | undefined): HTMLVideoElement | null => {
-      if (!video || signal.aborted) return null;
+    const bindVideo = (video: HTMLVideoElement): HTMLVideoElement => {
       if (video === boundVideo) return boundVideo;
       videoAbort?.abort();
       boundVideo = video;
@@ -318,15 +319,13 @@ export function installPlayerBarInfo(): () => void {
     };
 
     const resolveLiveVideo = (): HTMLVideoElement | null => {
-      const current =
-        typeof document.querySelector === 'function' ? document.querySelector<HTMLVideoElement>('video') : null;
+      const current = document.querySelector<HTMLVideoElement>('video');
       if (current) return bindVideo(current);
       return boundVideo?.isConnected !== false ? boundVideo : null;
     };
 
     const resolvePlayer = (): YtPlayerElement | null => {
-      const player =
-        typeof document.querySelector === 'function' ? document.querySelector<YtPlayerElement>(PLAYER_SELECTOR) : null;
+      const player = document.querySelector<YtPlayerElement>(PLAYER_SELECTOR);
       if (player && player !== boundPlayer) {
         boundPlayer = player;
         player.addEventListener?.('onPlaybackQualityChange', scheduleRender, { signal });
@@ -334,9 +333,7 @@ export function installPlayerBarInfo(): () => void {
       return player ?? boundPlayer;
     };
 
-    const render = (bar: Element): boolean => {
-      const video = resolveLiveVideo();
-      if (!video || signal.aborted || !isPlayerBarVisible(bar)) return false;
+    const render = (bar: Element, video: HTMLVideoElement): boolean => {
       const elapsedTarget = getElapsedTarget(bar);
       if (video.duration === Number.POSITIVE_INFINITY) {
         desiredElapsed = null;
@@ -433,7 +430,7 @@ export function installPlayerBarInfo(): () => void {
         if (!video || !liveBar || !isPlayerBarVisible(liveBar)) return;
         const sec = Math.floor(video.currentTime);
         if (!force && sec === lastAppliedSec) return;
-        if (render(liveBar)) {
+        if (render(liveBar, video)) {
           lastAppliedSec = sec;
         }
       };
@@ -444,7 +441,7 @@ export function installPlayerBarInfo(): () => void {
       }
     }
 
-    getBar = observePlayerBar(
+    const getBar = observePlayerBar(
       signal,
       (bar) => {
         if (!isPlayerBarVisible(bar)) return;
@@ -469,7 +466,7 @@ export function installPlayerBarInfo(): () => void {
             desiredDuration !== null &&
             readTarget(durTarget) === desiredDuration);
         if (elapsedReady && durReady) return;
-        if (render(bar)) {
+        if (render(bar, video)) {
           pendingForceRender = false;
           lastAppliedSec = Math.floor(video.currentTime);
         }
@@ -484,9 +481,8 @@ export function installPlayerBarInfo(): () => void {
     );
 
     onVideo((video) => {
-      if (!signal.aborted && bindVideo(video)) {
-        scheduleRender();
-      }
+      bindVideo(video);
+      scheduleRender();
     }, signal);
   });
 

@@ -45,5 +45,5 @@ jobs:
           npm run build:js
           ls -lh mods/dist/userscript.js
 
-      - name: Run Regression & E2E Tests with Coverage
-        run: npm run test:coverage
+      - name: Run Regression & E2E Tests with 100% Coverage
+        run: npm run lint:coverage

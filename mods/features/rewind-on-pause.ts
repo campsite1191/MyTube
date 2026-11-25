@@ -1,4 +1,4 @@
-import { onAbort, onWatchSession } from '../core/lifecycle.ts';
+import { NOOP, onAbort, onWatchSession } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 
 const LONG_PAUSE_MS = 30 * 1000;
@@ -18,13 +18,11 @@ export function computeRewindTime(pausedAt: number, now: number, duration: numbe
 let rewindInstalled = false;
 
 export function installRewindOnPause(): () => void {
-  if (rewindInstalled || typeof document === 'undefined' || typeof window === 'undefined') return () => {};
+  if (rewindInstalled || typeof document === 'undefined' || typeof window === 'undefined') return NOOP;
   rewindInstalled = true;
 
   const unsub = onWatchSession((_videoId, signal) => {
     onVideo((video) => {
-      if (signal.aborted) return;
-
       let activeAbort: AbortController | null = null;
       const cancelPending = (): void => {
         activeAbort?.abort();

@@ -1,4 +1,4 @@
-import { onAbort, onWatchSession, scheduleAbortableTimeout } from '../core/lifecycle.ts';
+import { NOOP, onAbort, onWatchSession, scheduleAbortableTimeout } from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 
@@ -93,10 +93,10 @@ let clockInitialized = false;
 
 /** Initializes the always-on 24h overlay clock and Watch end-time projection via `onWatchSession`. */
 export function initClock(): () => void {
-  if (clockInitialized || typeof document === 'undefined' || document.getElementById(CLOCK_ID)) return () => {};
+  if (clockInitialized || typeof document === 'undefined' || document.getElementById(CLOCK_ID)) return NOOP;
   const targetDoc = document;
   const host = targetDoc.body ?? targetDoc.documentElement;
-  if (!host) return () => {};
+  if (!host) return NOOP;
   clockInitialized = true;
 
   installClockStyles();
@@ -146,7 +146,6 @@ export function initClock(): () => void {
   const unsub = onWatchSession((_videoId, signal) => {
     inWatchSession = true;
     onVideo((video) => {
-      if (signal.aborted) return;
       activeVideo = video;
       for (const evt of VIDEO_SYNC_EVENTS) {
         video.addEventListener(evt, renderAndSchedule, { signal });

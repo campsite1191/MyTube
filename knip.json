@@ -5,8 +5,8 @@
       "ignoreDependencies": ["@biomejs/biome"]
     },
     ".": {
-      "entry": ["tests/*.test.ts"],
-      "project": ["tests/*.ts"]
+      "entry": ["tests/**/*.test.ts", "tests/helpers/coverage-verifier.ts"],
+      "project": ["tests/**/*.ts"]
     }
   }
 }

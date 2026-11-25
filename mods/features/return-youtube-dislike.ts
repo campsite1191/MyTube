@@ -1,4 +1,11 @@
-import { getActiveWatchVideoId, observeDom, observeShortsPage, onAbort, onWatchSession } from '../core/lifecycle.ts';
+import {
+  getActiveWatchVideoId,
+  NOOP,
+  observeDom,
+  observeShortsPage,
+  onAbort,
+  onWatchSession,
+} from '../core/lifecycle.ts';
 import { onVideo } from '../core/player-observer.ts';
 import { injectCss } from '../core/styles.ts';
 import { formatCompactCount } from '../utils/feed-helpers.ts';
@@ -81,12 +88,11 @@ function installVoteLabelStyles(): void {
 }
 
 function queryElements(selector: string): HTMLElement[] {
-  if (typeof document === 'undefined') return [];
   if (typeof document.querySelectorAll === 'function') {
     const matches = Array.from(document.querySelectorAll<HTMLElement>(selector));
     if (matches.length > 0) return matches;
   }
-  const single = document.querySelector?.<HTMLElement>(selector);
+  const single = document.querySelector<HTMLElement>(selector);
   return single ? [single] : [];
 }
 
@@ -121,8 +127,7 @@ function collectInstanceMethodKeys(inst: Record<string, unknown>): string[] {
 }
 
 function patchTransportFocusSkip(): void {
-  if (typeof document === 'undefined') return;
-  const tcEl = document.querySelector?.(TRANSPORT_CONTROLS_DOM_SELECTOR) as
+  const tcEl = document.querySelector(TRANSPORT_CONTROLS_DOM_SELECTOR) as
     | (Element & { __instance?: Record<string, unknown> })
     | null;
   const inst = tcEl?.__instance;
@@ -196,7 +201,7 @@ function findObserverTarget(
     }
   }
   return (
-    document.querySelector?.(TRANSPORT_CONTROLS_DOM_SELECTOR) ?? watchHost ?? document.body ?? document.documentElement
+    document.querySelector(TRANSPORT_CONTROLS_DOM_SELECTOR) ?? watchHost ?? document.body ?? document.documentElement
   );
 }
 
@@ -221,10 +226,10 @@ function clearShortsOverlayState(): void {
   currentShorts = null;
 }
 
-function applyShortsOverlayLabels(): void {
-  if (!currentShorts || typeof document === 'undefined') return;
-  applyButtonLabels(SHORTS_LIKE_SELECTOR, currentShorts.likeCount, false);
-  applyButtonLabels(SHORTS_DISLIKE_SELECTOR, currentShorts.dislikeCount, true);
+function applyShortsOverlayLabels(shorts: NonNullable<typeof currentShorts>): void {
+  if (typeof document === 'undefined') return;
+  applyButtonLabels(SHORTS_LIKE_SELECTOR, shorts.likeCount, false);
+  applyButtonLabels(SHORTS_DISLIKE_SELECTOR, shorts.dislikeCount, true);
 }
 
 /**
@@ -236,62 +241,61 @@ export function setShortsOverlayStats(videoId: string | null, likeCount: string 
 
   if (currentShorts?.videoId === videoId) {
     if (compactLikes) currentShorts.likeCount = compactLikes;
-    applyShortsOverlayLabels();
+    applyShortsOverlayLabels(currentShorts);
     return;
   }
 
   activeShortsAbort?.abort();
-  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const controller = new AbortController();
   activeShortsAbort = controller;
-  currentShorts = { videoId, likeCount: compactLikes, dislikeCount: null };
+  const shorts = { videoId, likeCount: compactLikes, dislikeCount: null };
+  currentShorts = shorts;
 
   if (typeof document === 'undefined') return;
   installVoteLabelStyles();
 
   const sync = (): void => {
-    if (!controller?.signal.aborted && currentShorts?.videoId === videoId) {
-      applyShortsOverlayLabels();
+    if (!controller.signal.aborted && currentShorts?.videoId === videoId) {
+      applyShortsOverlayLabels(shorts);
     }
   };
 
   const attachOverlayObserver = (): void => {
-    if (controller?.signal.aborted || currentShorts?.videoId !== videoId) return;
+    if (controller.signal.aborted || currentShorts?.videoId !== videoId) return;
     sync();
-    const overlayTarget = document.querySelector?.('ytlr-reel-player-overlay-renderer');
+    const overlayTarget = document.querySelector('ytlr-reel-player-overlay-renderer');
     if (overlayTarget) {
-      observeDom(overlayTarget, sync, { childList: true, subtree: true }, controller?.signal);
+      observeDom(overlayTarget, sync, { childList: true, subtree: true }, controller.signal);
       return;
     }
     const root = document.body ?? document.documentElement;
     if (!root) return;
-    const waitAbort = typeof AbortController === 'function' ? new AbortController() : null;
-    if (controller && waitAbort) {
-      onAbort(controller.signal, () => waitAbort.abort());
-    }
+    const waitAbort = new AbortController();
+    onAbort(controller.signal, () => waitAbort.abort());
     observeDom(
       root,
       () => {
-        if (controller?.signal.aborted || currentShorts?.videoId !== videoId) {
-          waitAbort?.abort();
+        if (controller.signal.aborted || currentShorts?.videoId !== videoId) {
+          waitAbort.abort();
           return;
         }
-        const mounted = document.querySelector?.('ytlr-reel-player-overlay-renderer');
+        const mounted = document.querySelector('ytlr-reel-player-overlay-renderer');
         if (mounted) {
-          waitAbort?.abort();
+          waitAbort.abort();
           sync();
-          observeDom(mounted, sync, { childList: true, subtree: true }, controller?.signal);
+          observeDom(mounted, sync, { childList: true, subtree: true }, controller.signal);
         }
       },
       { childList: true, subtree: true },
-      waitAbort?.signal ?? controller?.signal
+      waitAbort.signal
     );
   };
 
   const scheduleFrame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb: () => void) => cb();
   scheduleFrame(attachOverlayObserver);
 
-  void fetchDislikeCount(videoId, controller?.signal).then((dislikes) => {
-    if (!dislikes || controller?.signal.aborted || currentShorts?.videoId !== videoId) return;
+  void fetchDislikeCount(videoId, controller.signal).then((dislikes) => {
+    if (!dislikes || controller.signal.aborted || currentShorts?.videoId !== videoId) return;
     currentShorts.dislikeCount = dislikes;
     sync();
   });
@@ -315,7 +319,7 @@ export async function fetchDislikeCount(videoId: string, signal?: AbortSignal): 
  * Displays live YouTube like counts from `/next` alongside uncached RYD dislike counts as non-interactive labels.
  */
 export function installReturnYouTubeDislike(): () => void {
-  if (rydInstalled || typeof window === 'undefined' || typeof document === 'undefined') return () => {};
+  if (rydInstalled || typeof window === 'undefined' || typeof document === 'undefined') return NOOP;
   rydInstalled = true;
   installVoteLabelStyles();
 
@@ -333,7 +337,7 @@ export function installReturnYouTubeDislike(): () => void {
   const unsub = onWatchSession((videoId, signal) => {
     clearShortsOverlayState();
     if (currentLike?.videoId !== videoId) currentLike = null;
-    if (currentDislike?.videoId !== videoId) currentDislike = null;
+    currentDislike = null;
 
     onAbort(signal, () => {
       if (currentLike?.videoId === videoId) currentLike = null;
@@ -341,7 +345,6 @@ export function installReturnYouTubeDislike(): () => void {
     });
 
     const applyForSession = (): { likeEls: HTMLElement[]; dislikeEls: HTMLElement[] } => {
-      if (signal.aborted) return { likeEls: [], dislikeEls: [] };
       for (const container of queryElements(VOTE_CONTAINER_SELECTOR)) disableFocus(container);
       const likeEls = applyButtonLabels(
         LIKE_BUTTON_SELECTOR,
@@ -362,8 +365,6 @@ export function installReturnYouTubeDislike(): () => void {
     });
 
     onVideo(() => {
-      if (signal.aborted) return;
-
       let observedTarget: Element | null = null;
       let hostAbort: AbortController | null = null;
       onAbort(signal, () => {
@@ -372,9 +373,9 @@ export function installReturnYouTubeDislike(): () => void {
       });
 
       const syncTargetObserverAndLabels = (): void => {
-        const { likeEls, dislikeEls } = applyForSession();
         if (signal.aborted) return;
-        const watchHost = document.querySelector?.('ytlr-watch-default') ?? null;
+        const { likeEls, dislikeEls } = applyForSession();
+        const watchHost = document.querySelector('ytlr-watch-default');
         const desiredTarget = findObserverTarget(likeEls, dislikeEls, watchHost);
         if (!desiredTarget || (desiredTarget === observedTarget && observedTarget.isConnected !== false)) return;
 

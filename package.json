@@ -4,11 +4,13 @@
   "type": "module",
   "description": "Custom Cobalt APK builder with TypeScript ESNext userscript targeting Chromium 138 and native Cobalt patch overlay",
   "scripts": {
-    "test": "node --experimental-strip-types --test 'tests/*.test.ts'",
-    "test:coverage": "node --experimental-strip-types --experimental-test-coverage --test 'tests/*.test.ts'",
+    "test": "node --experimental-strip-types --test 'tests/**/*.test.ts'",
+    "test:coverage": "node --experimental-strip-types --experimental-test-coverage --test-coverage-include='mods/**/*.ts' --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./tests/helpers/coverage-verifier.ts --test-reporter-destination=stdout --test 'tests/**/*.test.ts'",
+    "lint:coverage": "npm run test:coverage",
     "lint:biome": "./mods/node_modules/.bin/biome check --diagnostic-level=warn",
     "lint:knip": "./mods/node_modules/.bin/knip",
     "typecheck": "npm --prefix mods run typecheck",
-    "build:js": "npm --prefix mods run build"
+    "build:js": "npm --prefix mods run build",
+    "lint": "npm run typecheck && npm run lint:knip && npm run lint:biome && npm run build:js && npm run lint:coverage"
   }
 }

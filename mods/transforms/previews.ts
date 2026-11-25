@@ -1,6 +1,6 @@
 import type { FeedItem } from '../types/innertube.ts';
 import { compactInPlace, unwrapFeedItem } from '../utils/feed-helpers.ts';
-import { isRecord } from '../utils/type-guards.ts';
+import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 import { walkCommands } from './feed-filter.ts';
 
 const INLINE_PREVIEW_OPTIONS = {
@@ -24,8 +24,8 @@ function stripEndTimeSeconds(watchEndpoint: Record<string, unknown>): Record<str
 
 function tunePreview(cmd: Record<string, unknown>): void {
   Object.assign(cmd, INLINE_PREVIEW_OPTIONS);
-  const ep = isRecord(cmd.playbackEndpoint) ? cmd.playbackEndpoint : undefined;
-  const watchEndpoint = isRecord(ep?.watchEndpoint) ? ep.watchEndpoint : undefined;
+  const ep = readRecordPath(cmd, 'playbackEndpoint');
+  const watchEndpoint = readRecordPath(ep, 'watchEndpoint');
   if (ep && watchEndpoint && 'endTimeSeconds' in watchEndpoint) {
     cmd.playbackEndpoint = { ...ep, watchEndpoint: stripEndTimeSeconds(watchEndpoint) };
   }
@@ -47,7 +47,7 @@ function stripInlinePreviewCommands(cmd: unknown): void {
     if ('startInlinePlaybackCommand' in node) {
       delete node.startInlinePlaybackCommand;
     }
-    const executor = isRecord(node.commandExecutorCommand) ? node.commandExecutorCommand : undefined;
+    const executor = readRecordPath(node, 'commandExecutorCommand');
     if (executor && Array.isArray(executor.commands)) {
       compactInPlace(executor.commands, isWrappedInlinePreview);
     }
@@ -72,8 +72,8 @@ function inspectFocusCmd(cmd: unknown): boolean {
 function extractWatchOrReelEndpoint(cmd: unknown): Record<string, unknown> | null {
   const result: { endpoint: Record<string, unknown> | null } = { endpoint: null };
   walkCommands(cmd, (node) => {
-    const reelEp = isRecord(node.reelWatchEndpoint) ? node.reelWatchEndpoint : undefined;
-    const watchEp = isRecord(node.watchEndpoint) ? node.watchEndpoint : undefined;
+    const reelEp = readRecordPath(node, 'reelWatchEndpoint');
+    const watchEp = readRecordPath(node, 'watchEndpoint');
     if (typeof reelEp?.videoId === 'string') {
       result.endpoint = { watchEndpoint: { videoId: reelEp.videoId } };
     } else if (typeof watchEp?.videoId === 'string') {
@@ -87,7 +87,7 @@ function extractWatchOrReelEndpoint(cmd: unknown): Record<string, unknown> | nul
 function findCommandExecutor(cmd: unknown): Record<string, unknown> | undefined {
   const result: { executor: Record<string, unknown> | undefined } = { executor: undefined };
   walkCommands(cmd, (node) => {
-    const candidate = isRecord(node.commandExecutorCommand) ? node.commandExecutorCommand : undefined;
+    const candidate = readRecordPath(node, 'commandExecutorCommand');
     if (candidate && Array.isArray(candidate.commands)) {
       result.executor = candidate;
       return true;
@@ -146,7 +146,7 @@ export function addPreviews(items: FeedItem[], shouldInject = true): void {
     const item = unwrapFeedItem(entry) as Record<string, unknown> | null;
     if (!item) continue;
 
-    const masthead = isRecord(item.tvMastheadRenderer) ? item.tvMastheadRenderer : undefined;
+    const masthead = readRecordPath(item, 'tvMastheadRenderer');
     if (Array.isArray(masthead?.companionVideos)) {
       addPreviews(masthead.companionVideos as FeedItem[], allowInject);
     }
@@ -165,9 +165,8 @@ export function addPreviews(items: FeedItem[], shouldInject = true): void {
 
     if (isRecord(item.lockupViewModel)) {
       const lv = item.lockupViewModel;
-      const rendererContext = isRecord(lv.rendererContext) ? lv.rendererContext : undefined;
-      const lvCmdCtx = isRecord(rendererContext?.commandContext) ? rendererContext.commandContext : undefined;
-      const itemPlayback = isRecord(lv.itemPlayback) ? lv.itemPlayback : undefined;
+      const lvCmdCtx = readRecordPath(lv, 'rendererContext', 'commandContext');
+      const itemPlayback = readRecordPath(lv, 'itemPlayback');
       if (!allowInject) {
         stripInlinePreviewCommands(itemPlayback?.playbackCommand);
         stripInlinePreviewCommands(lvCmdCtx?.onFocus);

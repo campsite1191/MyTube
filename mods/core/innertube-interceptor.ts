@@ -27,8 +27,8 @@ import {
   upgradeFeedThumbnails,
 } from '../transforms/thumbnails.ts';
 import type { FeedItem } from '../types/innertube.ts';
-import { isObjectLike, isRecord } from '../utils/type-guards.ts';
-import { isPlaybackPageActive } from './lifecycle.ts';
+import { isObjectLike, isRecord, readRecordPath } from '../utils/type-guards.ts';
+import { isPlaybackPageActive, NOOP } from './lifecycle.ts';
 import { whenYttvReady } from './yttv-bridge.ts';
 
 const ITEM_LIST_KEYS = [
@@ -42,7 +42,7 @@ const EXTERNAL_JSON_HOSTS = ['sponsor.ajay.app', 'returnyoutubedislikeapi.com'] 
 
 const processedPayloads = new WeakSet<object>();
 const wrappedJsonParsers = new WeakSet<typeof JSON.parse>();
-let rawJsonParse: typeof JSON.parse | null = typeof JSON !== 'undefined' ? JSON.parse : null;
+const rawJsonParse: typeof JSON.parse = JSON.parse;
 let interceptorInstalled = false;
 
 function processShelfContentSync(content: unknown, shouldAddPreviews = true): void {
@@ -51,7 +51,7 @@ function processShelfContentSync(content: unknown, shouldAddPreviews = true): vo
     content.items = processItemsListSync(content.items as FeedItem[], shouldAddPreviews);
   }
   for (const key of ITEM_LIST_KEYS) {
-    const listContainer = isRecord(content[key]) ? content[key] : undefined;
+    const listContainer = readRecordPath(content, key);
     if (listContainer && Array.isArray(listContainer.items)) {
       listContainer.items = processItemsListSync(listContainer.items as FeedItem[], shouldAddPreviews);
     }
@@ -69,7 +69,6 @@ function enrichFeedItemsSync(items: FeedItem[], shouldAddPreviews = true): FeedI
 }
 
 function processItemsListSync(items: FeedItem[], shouldAddPreviews = true): FeedItem[] {
-  if (!Array.isArray(items)) return items;
   return enrichFeedItemsSync(filterFeedItemsSync(items), shouldAddPreviews);
 }
 
@@ -77,26 +76,18 @@ function processItemsListSync(items: FeedItem[], shouldAddPreviews = true): Feed
  * Unifies processing of feed content, ensuring each node is processed exactly once
  * to avoid duplicacy and conflicting in-place mutations.
  */
-function processContentNodeSync(node: unknown, shouldAddPreviews = true): void {
-  if (!isRecord(node)) return;
-
+function processContentNodeSync(node: Record<string, unknown>, shouldAddPreviews = true): void {
   if (isRecord(node.shelfRenderer)) {
     processShelfContentSync(node.shelfRenderer.content, shouldAddPreviews);
   } else {
-    const isr = isRecord(node.itemSectionRenderer) ? node.itemSectionRenderer : undefined;
+    const isr = readRecordPath(node, 'itemSectionRenderer');
     if (isr && Array.isArray(isr.contents)) {
       processShelvesSync(isr.contents as FeedItem[], shouldAddPreviews);
     } else if (node.richSectionRenderer) {
-      const richSectionRecord = isRecord(node.richSectionRenderer) ? node.richSectionRenderer : undefined;
-      const richContent = isRecord(richSectionRecord?.content) ? richSectionRecord.content : undefined;
-      if (
-        richContent?.richShelfRenderer &&
-        Array.isArray((richContent.richShelfRenderer as Record<string, unknown>).contents)
-      ) {
-        processShelvesSync(
-          (richContent.richShelfRenderer as Record<string, unknown>).contents as FeedItem[],
-          shouldAddPreviews
-        );
+      const richContent = readRecordPath(node, 'richSectionRenderer', 'content');
+      const richShelf = readRecordPath(richContent, 'richShelfRenderer');
+      if (richShelf && Array.isArray(richShelf.contents)) {
+        processShelvesSync(richShelf.contents as FeedItem[], shouldAddPreviews);
       } else if (richContent) {
         processShelfContentSync(richContent, shouldAddPreviews);
       }
@@ -104,7 +95,7 @@ function processContentNodeSync(node: unknown, shouldAddPreviews = true): void {
   }
 
   for (const key of ITEM_LIST_KEYS) {
-    const listContainer = isRecord(node[key]) ? node[key] : undefined;
+    const listContainer = readRecordPath(node, key);
     if (listContainer && Array.isArray(listContainer.items)) {
       listContainer.items = processItemsListSync(listContainer.items as FeedItem[], shouldAddPreviews);
     }
@@ -116,14 +107,12 @@ function isStandaloneHiddenHeader(entry: FeedItem): boolean {
 }
 
 function isUntitledShelfRenderer(entry: FeedItem): boolean {
-  const sr = isRecord(entry.shelfRenderer) ? entry.shelfRenderer : undefined;
+  const sr = readRecordPath(entry, 'shelfRenderer');
   if (!sr) return false;
   return !sr.title && !sr.headerRenderer && !sr.header;
 }
 
 function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void {
-  if (!Array.isArray(shelves)) return;
-
   // Drop paired untitled shelves immediately following a hidden standalone header item.
   let skipNextShelf = false;
   for (let i = 0; i < shelves.length; i++) {
@@ -146,7 +135,7 @@ function processShelvesSync(shelves: FeedItem[], shouldAddPreviews = true): void
     if (!isRecord(entry)) continue;
 
     if (entry.shelfRenderer || entry.itemSectionRenderer || entry.richSectionRenderer) {
-      const isr = isRecord(entry.itemSectionRenderer) ? entry.itemSectionRenderer : undefined;
+      const isr = readRecordPath(entry, 'itemSectionRenderer');
       const isrContents = Array.isArray(isr?.contents) ? isr.contents : undefined;
       const prevLen = isrContents ? isrContents.length : 0;
       processContentNodeSync(entry, shouldAddPreviews);
@@ -186,43 +175,40 @@ function processContinuationItemsListSync(items: FeedItem[], shouldAddPreviews =
   for (const entry of items) {
     if (!isRecord(entry)) continue;
     for (const key of ['sectionListContinuation', 'itemSectionContinuation', 'richGridContinuation'] as const) {
-      const cont = isRecord(entry[key]) ? entry[key] : undefined;
+      const cont = readRecordPath(entry, key);
       if (Array.isArray(cont?.contents)) {
         processShelvesSync(cont.contents as FeedItem[], shouldAddPreviews);
       }
     }
-    const surfaceCont = isRecord(entry.tvSurfaceContentContinuation) ? entry.tvSurfaceContentContinuation : undefined;
+    const surfaceCont = readRecordPath(entry, 'tvSurfaceContentContinuation');
     if (surfaceCont?.content) {
       processBrowseContentSync(surfaceCont.content, shouldAddPreviews);
     }
   }
 }
 
-function processBrowseActionsSync(actions: unknown, shouldAddPreviews = true): void {
-  if (!Array.isArray(actions)) return;
+function processBrowseActionsSync(actions: readonly unknown[], shouldAddPreviews = true): void {
   for (const action of actions) {
     if (!isRecord(action)) continue;
-    const reload = isRecord(action.reloadContinuationItemsCommand) ? action.reloadContinuationItemsCommand : undefined;
+    const reload = readRecordPath(action, 'reloadContinuationItemsCommand');
     if (Array.isArray(reload?.continuationItems)) {
       processContinuationItemsListSync(reload.continuationItems as FeedItem[], shouldAddPreviews);
     }
-    const append = isRecord(action.appendContinuationItemsAction) ? action.appendContinuationItemsAction : undefined;
+    const append = readRecordPath(action, 'appendContinuationItemsAction');
     if (Array.isArray(append?.continuationItems)) {
       processContinuationItemsListSync(append.continuationItems as FeedItem[], shouldAddPreviews);
     }
-    const listMutation = isRecord(action.listMutationCommand) ? action.listMutationCommand : undefined;
-    const operationsWrapper = isRecord(listMutation?.operations) ? listMutation.operations : undefined;
+    const operationsWrapper = readRecordPath(action, 'listMutationCommand', 'operations');
     if (Array.isArray(operationsWrapper?.operations)) {
       for (const op of operationsWrapper.operations) {
-        const insertSection =
-          isRecord(op) && isRecord(op.insertItemSectionContent) ? op.insertItemSectionContent : undefined;
+        const insertSection = readRecordPath(op, 'insertItemSectionContent');
         if (Array.isArray(insertSection?.contents)) {
           processShelvesSync(insertSection.contents as FeedItem[], shouldAddPreviews);
         }
       }
     }
-    const replaceContainer = isRecord(action.replaceEnclosingAction) ? action.replaceEnclosingAction : undefined;
-    const replace = isRecord(replaceContainer?.item) ? replaceContainer.item : undefined;
+    const replaceContainer = readRecordPath(action, 'replaceEnclosingAction');
+    const replace = readRecordPath(replaceContainer, 'item');
     if (replace && replaceContainer) {
       if (
         replace.tileRenderer ||
@@ -256,10 +242,7 @@ function processSecondaryNavSync(secondaryNav: Record<string, unknown> | undefin
   if (!Array.isArray(secondaryNav?.sections)) return;
   const seenTabs = new Set<string>();
   for (const rawSection of secondaryNav.sections) {
-    if (!isRecord(rawSection)) continue;
-    const section = isRecord(rawSection.tvSecondaryNavSectionRenderer)
-      ? rawSection.tvSecondaryNavSectionRenderer
-      : undefined;
+    const section = readRecordPath(rawSection, 'tvSecondaryNavSectionRenderer');
     if (!section || !Array.isArray(section.tabs)) continue;
 
     if (isSubscriptionNavSection(section.tabs as SubscriptionTab[])) {
@@ -283,14 +266,14 @@ function processBrowseContentSync(node: unknown, shouldAddPreviews = true): void
     'itemSectionContinuation',
     'richGridContinuation',
   ] as const) {
-    const container = isRecord(node[key]) ? node[key] : undefined;
+    const container = readRecordPath(node, key);
     if (container && Array.isArray(container.contents)) {
       processShelvesSync(container.contents as FeedItem[], shouldAddPreviews);
     }
   }
 
   for (const surfaceKey of ['tvSurfaceContentRenderer', 'tvSurfaceRenderer'] as const) {
-    const surface = isRecord(node[surfaceKey]) ? node[surfaceKey] : undefined;
+    const surface = readRecordPath(node, surfaceKey);
     if (surface?.content) {
       processBrowseContentSync(surface.content, shouldAddPreviews);
     }
@@ -349,17 +332,14 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       transformGuideResponse(r);
     }
 
-    const playerResponse = isRecord(r.playerResponse) ? r.playerResponse : undefined;
+    const playerResponse = readRecordPath(r, 'playerResponse');
     stripPlayerNoise(r);
     if (playerResponse) {
       stripPlayerNoise(playerResponse);
     }
 
-    const streamingData = isRecord(r.streamingData)
-      ? r.streamingData
-      : isRecord(playerResponse?.streamingData)
-        ? playerResponse.streamingData
-        : undefined;
+    const streamingData =
+      readRecordPath(r, 'streamingData') ?? readRecordPath(playerResponse, 'streamingData') ?? undefined;
     if (Array.isArray(streamingData?.adaptiveFormats)) {
       streamingData.adaptiveFormats = filterStreamingFormats(streamingData.adaptiveFormats as AudioFormatEntry[]);
     }
@@ -370,7 +350,7 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       enrichShortsPlayerOverlay(r);
     }
 
-    const contents = isRecord(r.contents) ? r.contents : undefined;
+    const contents = readRecordPath(r, 'contents');
     const isWatchNextPayload = Boolean(
       contents?.singleColumnWatchNextResults || r.playerOverlays || r.transportControls || r.overlay
     );
@@ -379,22 +359,16 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
     if (contents) {
       processBrowseContentSync(contents, allowPreviews);
 
-      const tvBrowse = isRecord(contents.tvBrowseRenderer) ? contents.tvBrowseRenderer : undefined;
-      const tvBrowseInner = isRecord(tvBrowse?.content) ? tvBrowse.content : undefined;
+      const tvBrowseInner = readRecordPath(contents, 'tvBrowseRenderer', 'content');
       if (tvBrowseInner) {
         processBrowseContentSync(tvBrowseInner, allowPreviews);
       }
-      processSecondaryNavSync(
-        isRecord(tvBrowseInner?.tvSecondaryNavRenderer) ? tvBrowseInner.tvSecondaryNavRenderer : undefined,
-        allowPreviews
-      );
+      processSecondaryNavSync(readRecordPath(tvBrowseInner, 'tvSecondaryNavRenderer') ?? undefined, allowPreviews);
 
-      const singleColTabs = isRecord(contents.singleColumnBrowseResultsRenderer)
-        ? contents.singleColumnBrowseResultsRenderer.tabs
-        : undefined;
+      const singleColTabs = readRecordPath(contents, 'singleColumnBrowseResultsRenderer')?.tabs;
       if (Array.isArray(singleColTabs)) {
         for (const tab of singleColTabs) {
-          const tabRenderer = isRecord(tab) && isRecord(tab.tabRenderer) ? tab.tabRenderer : undefined;
+          const tabRenderer = readRecordPath(tab, 'tabRenderer');
           if (tabRenderer?.content) {
             processBrowseContentSync(tabRenderer.content, allowPreviews);
           }
@@ -402,32 +376,29 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       }
     }
 
-    const tvBrowseContent = isRecord(r.tvBrowseContent) ? r.tvBrowseContent : undefined;
+    const tvBrowseContent = readRecordPath(r, 'tvBrowseContent');
     if (tvBrowseContent) {
       processBrowseContentSync(tvBrowseContent, allowPreviews);
-      processSecondaryNavSync(
-        isRecord(tvBrowseContent.tvSecondaryNavRenderer) ? tvBrowseContent.tvSecondaryNavRenderer : undefined,
-        allowPreviews
-      );
+      processSecondaryNavSync(readRecordPath(tvBrowseContent, 'tvSecondaryNavRenderer') ?? undefined, allowPreviews);
     }
 
-    const cont = isRecord(r.continuationContents) ? r.continuationContents : undefined;
+    const cont = readRecordPath(r, 'continuationContents');
     if (cont) {
       for (const key of ['sectionListContinuation', 'itemSectionContinuation', 'richGridContinuation'] as const) {
-        const listCont = isRecord(cont[key]) ? cont[key] : undefined;
+        const listCont = readRecordPath(cont, key);
         if (Array.isArray(listCont?.contents)) {
           processShelvesSync(listCont.contents as FeedItem[], allowPreviews);
         }
       }
-      const horizCont = isRecord(cont.horizontalListContinuation) ? cont.horizontalListContinuation : undefined;
+      const horizCont = readRecordPath(cont, 'horizontalListContinuation');
       if (Array.isArray(horizCont?.items)) {
         horizCont.items = processItemsListSync(horizCont.items as FeedItem[], allowPreviews);
       }
-      const gridCont = isRecord(cont.gridContinuation) ? cont.gridContinuation : undefined;
+      const gridCont = readRecordPath(cont, 'gridContinuation');
       if (Array.isArray(gridCont?.items)) {
         gridCont.items = processItemsListSync(gridCont.items as FeedItem[], allowPreviews);
       }
-      const surfaceCont = isRecord(cont.tvSurfaceContentContinuation) ? cont.tvSurfaceContentContinuation : undefined;
+      const surfaceCont = readRecordPath(cont, 'tvSurfaceContentContinuation');
       if (surfaceCont?.content) {
         processBrowseContentSync(surfaceCont.content, allowPreviews);
       }
@@ -449,11 +420,7 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       processBrowseActionsSync([{ listMutationCommand: r.listMutationCommand }], allowPreviews);
     }
 
-    const watchNext = isRecord(contents?.singleColumnWatchNextResults)
-      ? contents.singleColumnWatchNextResults
-      : undefined;
-    const pivot = isRecord(watchNext?.pivot) ? watchNext.pivot : undefined;
-    const pivotSectionList = isRecord(pivot?.sectionListRenderer) ? pivot.sectionListRenderer : undefined;
+    const pivotSectionList = readRecordPath(contents, 'singleColumnWatchNextResults', 'pivot', 'sectionListRenderer');
     if (pivotSectionList && Array.isArray(pivotSectionList.contents)) {
       const pivotContents = pivotSectionList.contents.filter((elm) => !isRecord(elm) || !elm.alertWithActionsRenderer);
       pivotSectionList.contents = pivotContents;
@@ -474,12 +441,10 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
 export function patchPlaybackContextBody(rawBody: string): string | null {
   if (!rawBody.includes('playbackContext')) return null;
   try {
-    const parseFn = rawJsonParse ?? JSON.parse;
-    const body = parseFn(rawBody);
-    if (!isRecord(body) || !body.playbackContext) return null;
-    const playbackCtx = isRecord(body.playbackContext) ? body.playbackContext : undefined;
-    const contentCtx = isRecord(playbackCtx?.contentPlaybackContext) ? playbackCtx.contentPlaybackContext : undefined;
-    if (!contentCtx || contentCtx.isInlinePlaybackNoAd) return null;
+    const body = rawJsonParse(rawBody);
+    const playbackCtx = readRecordPath(body, 'playbackContext');
+    const contentCtx = readRecordPath(playbackCtx, 'contentPlaybackContext');
+    if (!playbackCtx || !contentCtx || contentCtx.isInlinePlaybackNoAd) return null;
     return JSON.stringify({
       ...body,
       playbackContext: {
@@ -527,26 +492,23 @@ export function syncYttvPreviewAndJson(): void {
 }
 
 export function installInnertubeInterceptor(): () => void {
-  if (interceptorInstalled) return () => {};
+  if (interceptorInstalled) return NOOP;
   interceptorInstalled = true;
   const restorers: Array<() => void> = [];
 
   // 1. Wrap JSON.parse so XHR, Response.text(), and inline XSSI-stripped payloads transform synchronously.
-  if (typeof JSON !== 'undefined' && typeof JSON.parse === 'function') {
-    if (!rawJsonParse) rawJsonParse = JSON.parse;
-    const prevJsonParse = JSON.parse;
-    JSON.parse = wrapJsonParseFn(prevJsonParse);
-    restorers.push(() => {
-      JSON.parse = prevJsonParse;
-    });
-  }
+  const prevJsonParse = JSON.parse;
+  JSON.parse = wrapJsonParseFn(prevJsonParse);
+  restorers.push(() => {
+    JSON.parse = prevJsonParse;
+  });
 
   // 2. Intercept Response.json() (native V8 JSON path that bypasses JSON.parse).
   if (typeof Response !== 'undefined' && typeof Response.prototype?.json === 'function') {
     const origResponseJson = Response.prototype.json;
     Response.prototype.json = async function (this: Response) {
       const data: unknown = await origResponseJson.call(this);
-      const url = typeof this.url === 'string' ? this.url : '';
+      const url = this.url;
       if (url && EXTERNAL_JSON_HOSTS.some((host) => url.includes(host))) {
         return data;
       }

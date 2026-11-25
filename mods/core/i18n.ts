@@ -36,13 +36,11 @@ export function t(key: TranslationKey, variables?: TranslationVariables): string
 export function t(key: string, variables?: TranslationVariables): string;
 export function t(key: string, variables?: TranslationVariables): string {
   if (!Object.hasOwn(EN_TRANSLATIONS, key)) return key;
-  const template = (EN_TRANSLATIONS as Record<string, string | undefined>)[key];
-  if (template === undefined) return key;
+  const template = EN_TRANSLATIONS[key as TranslationKey];
   if (!variables) return template;
 
   return template.replace(INTERPOLATION_PATTERN, (fullMatch, variableName: string) => {
-    if (!Object.hasOwn(variables, variableName)) return fullMatch;
-    const value = variables[variableName];
+    const value = Object.hasOwn(variables, variableName) ? variables[variableName] : undefined;
     return value !== undefined ? String(value) : fullMatch;
   });
 }

@@ -46,7 +46,7 @@ function isUnwantedTransportButton(btn: unknown): boolean {
   ) {
     return true;
   }
-  const nestedBtn = isRecord(btn.button) ? btn.button : undefined;
+  const nestedBtn = readRecordPath(btn, 'button');
   if (
     btn.subscribeButton ||
     btn.subscribeButtonRenderer ||
@@ -58,13 +58,9 @@ function isUnwantedTransportButton(btn: unknown): boolean {
   ) {
     return true;
   }
-  const br = isRecord(nestedBtn?.buttonRenderer)
-    ? nestedBtn.buttonRenderer
-    : isRecord(btn.buttonRenderer)
-      ? btn.buttonRenderer
-      : undefined;
-  const nav = isRecord(br?.navigationEndpoint) ? br.navigationEndpoint : isRecord(br?.command) ? br.command : undefined;
-  const icon = isRecord(br?.icon) ? br.icon : undefined;
+  const br = readRecordPath(nestedBtn, 'buttonRenderer') ?? readRecordPath(btn, 'buttonRenderer');
+  const nav = readRecordPath(br, 'navigationEndpoint') ?? readRecordPath(br, 'command');
+  const icon = readRecordPath(br, 'icon');
   const iconType = String(icon?.iconType || '');
   if (nav?.subscribeEndpoint || nav?.unsubscribeEndpoint || nav?.subscribeCommand || /SUBSCRIBE/i.test(iconType)) {
     return true;
@@ -120,11 +116,9 @@ export function injectChapters(r: Record<string, unknown>): void {
 }
 
 function extractPayloadVideoId(r: Record<string, unknown>): string | null {
-  const currentEp = isRecord(r.currentVideoEndpoint) ? r.currentVideoEndpoint : undefined;
-  const watchEp = isRecord(currentEp?.watchEndpoint) ? currentEp.watchEndpoint : undefined;
-  const details = isRecord(r.videoDetails) ? r.videoDetails : undefined;
-  const playerResp = isRecord(r.playerResponse) ? r.playerResponse : undefined;
-  const playerDetails = isRecord(playerResp?.videoDetails) ? playerResp.videoDetails : undefined;
+  const watchEp = readRecordPath(r, 'currentVideoEndpoint', 'watchEndpoint');
+  const details = readRecordPath(r, 'videoDetails');
+  const playerDetails = readRecordPath(r, 'playerResponse', 'videoDetails');
   return (
     (typeof watchEp?.videoId === 'string' && watchEp.videoId) ||
     (typeof details?.videoId === 'string' && details.videoId) ||
@@ -188,7 +182,7 @@ export function transformPlayerOverlays(r: Record<string, unknown>): void {
 
   if (Array.isArray(overlayRenderer.timelyActionRenderers)) {
     overlayRenderer.timelyActionRenderers = overlayRenderer.timelyActionRenderers.filter((a) => {
-      const inner = isRecord(a) && isRecord(a.timelyActionRenderer) ? a.timelyActionRenderer : undefined;
+      const inner = readRecordPath(a, 'timelyActionRenderer');
       return inner?.type !== 'TIMELY_ACTION_TYPE_SHOPPING' && inner?.type !== 'TIMELY_ACTION_TYPE_NFL_WATERMARK';
     });
   } else {
@@ -220,12 +214,7 @@ export function recordTransportLikeCount(r: Record<string, unknown>): void {
     if (!Array.isArray(list)) continue;
     for (const item of list) {
       if (!isRecord(item)) continue;
-      const btn = isRecord(item.button) ? item.button : undefined;
-      const lr = isRecord(btn?.likeButtonRenderer)
-        ? btn.likeButtonRenderer
-        : isRecord(item.likeButtonRenderer)
-          ? item.likeButtonRenderer
-          : undefined;
+      const lr = readRecordPath(item, 'button', 'likeButtonRenderer') ?? readRecordPath(item, 'likeButtonRenderer');
       if (!lr) continue;
       const text = readFormattedText(
         (lr.likeCountText ?? lr.likeCountWithLikeText ?? lr.likeCountWithUnlikeText) as Parameters<
