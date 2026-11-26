@@ -1,5 +1,5 @@
 diff --git a/cobalt/android/BUILD.gn b/cobalt/android/BUILD.gn
-index c0ea98a..160587a 100644
+index 440ccc8..c015563 100644
 --- a/cobalt/android/BUILD.gn
 +++ b/cobalt/android/BUILD.gn
 @@ -20,14 +20,14 @@ jinja_template("cobalt_manifest") {
@@ -19,7 +19,7 @@ index c0ea98a..160587a 100644
      variables += [ "debuggable=false" ]
    } else {
      variables += [ "debuggable=true" ]
-@@ -442,7 +442,13 @@ android_apk("cobalt_apk") {
+@@ -427,7 +427,13 @@ android_apk("cobalt_apk") {
  
    shared_libraries = [ ":libchrobalt" ]
    srcjar_deps = [ ":libchrobalt__jni_registration" ]
@@ -97,36 +97,28 @@ index f098770..dc2c0bd 100644
      "java/res/values/ids.xml",
      "java/res/values/overlayable.xml",
 diff --git a/media/audio/BUILD.gn b/media/audio/BUILD.gn
-index fb56017..823ef33 100644
+index fb56017..b393c5e 100644
 --- a/media/audio/BUILD.gn
 +++ b/media/audio/BUILD.gn
-@@ -286,10 +286,8 @@ source_set("audio") {
-         "android/opensles_wrapper.cc",
+@@ -287,7 +287,7 @@ source_set("audio") {
        ]
      }
--    # Cobalt uses the Starboard layer instead of AAudio. AAudio also breaks SDK 24 compatibility. See b/508072838.
+     # Cobalt uses the Starboard layer instead of AAudio. AAudio also breaks SDK 24 compatibility. See b/508072838.
 -    if (!is_cobalt) {
--      libs += [ "aaudio" ]
--    }
-+    # Link libaaudio.so directly since android_ndk_api_level = 29 / minSdk = 31.
-+    libs += [ "aaudio" ]
- 
-     deps += [ "//media/base/android:media_jni_headers" ]
++    if (!is_cobalt || android_ndk_api_level >= 26) {
+       libs += [ "aaudio" ]
+     }
  
 diff --git a/media/gpu/BUILD.gn b/media/gpu/BUILD.gn
-index dda0145..cac0b2b 100644
+index dda0145..bca3004 100644
 --- a/media/gpu/BUILD.gn
 +++ b/media/gpu/BUILD.gn
-@@ -186,10 +186,8 @@ component("gpu") {
-     libs += [
+@@ -187,7 +187,7 @@ component("gpu") {
        "mediandk",
      ]
--    # Cobalt uses the Starboard layer instead of AAudio. AAudio also breaks SDK 24 compatibility. See b/508072838.
+     # Cobalt uses the Starboard layer instead of AAudio. AAudio also breaks SDK 24 compatibility. See b/508072838.
 -    if (!is_cobalt) {
--      libs += [ "aaudio" ]
--    }
-+    # Link libaaudio.so directly since android_ndk_api_level = 29 / minSdk = 31.
-+    libs += [ "aaudio" ]
++    if (!is_cobalt || android_ndk_api_level >= 26) {
+       libs += [ "aaudio" ]
+     }
      deps += [
-       # TODO(crbug.com/40552063): This can be removed once CdmManager is removed.
-       "//gpu/ipc/common",
