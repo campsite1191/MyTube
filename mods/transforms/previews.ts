@@ -8,7 +8,7 @@ const INLINE_PREVIEW_OPTIONS = {
   autotransitionDelayMs: -1,
   forceSeamlessAutotransition: false,
   caption: false,
-  delayMs: 2500,
+  delayMs: 1500,
   durationMs: 3600000,
   muted: true,
   restartPlaybackBeforeSeconds: 10,
