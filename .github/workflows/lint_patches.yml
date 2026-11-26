@@ -116,5 +116,14 @@ jobs:
               assert "org.chromium.content.browser.NUM_TEST_SERVICES" not in meta, (
                   "NUM_TEST_SERVICES should be removed from AndroidManifest"
               )
+
+              with open(os.path.join(tmpdir, "starboard/android/shared/BUILD.gn"), "r", encoding="utf-8") as f:
+                  assert "cobalt_crash_annotations" not in f.read(), (
+                      "starboard/android/shared/BUILD.gn should not depend on cobalt_crash_annotations"
+                  )
+              with open(os.path.join(tmpdir, "cobalt/browser/BUILD.gn"), "r", encoding="utf-8") as f:
+                  assert "crash_annotator_jni.cc" not in f.read(), (
+                      "cobalt/browser/BUILD.gn should not compile crash_annotator_jni.cc"
+                  )
               print("Manifest XML & hardening checks passed.")
           PY

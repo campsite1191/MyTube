@@ -5,6 +5,8 @@ import type { FeedItem, TileRenderer } from '../../mods/types/innertube.ts';
 import {
   buildLongPressPayload,
   compactInPlace,
+  createLruCache,
+  FEED_METADATA_CACHE_MAX_SIZE,
   formatCompactCount,
   unwrapFeedItem,
 } from '../../mods/utils/feed-helpers.ts';
@@ -111,5 +113,34 @@ describe('formatCompactCount', () => {
     for (const value of [-1, Number.NaN, Number.POSITIVE_INFINITY, 'not a count']) {
       assert.equal(formatCompactCount(value), '');
     }
+  });
+});
+
+describe('createLruCache', () => {
+  test('uses right-sized default maxSize, promotes hits, evicts oldest entry, overwrites in place, and clears', () => {
+    assert.equal(FEED_METADATA_CACHE_MAX_SIZE, 500);
+    const defaultCache = createLruCache<string, string>();
+    defaultCache.set('k', '');
+    assert.equal(defaultCache.get('k'), '');
+
+    const lru = createLruCache<string, string>(2);
+    assert.equal(lru.get('missing'), undefined);
+
+    lru.set('a', '1');
+    lru.set('b', '2');
+    assert.equal(lru.get('a'), '1');
+
+    // 'b' is now the oldest entry and should be evicted when 'c' is inserted.
+    lru.set('c', '3');
+    assert.equal(lru.get('b'), undefined);
+    assert.equal(lru.get('a'), '1');
+
+    // Overwriting an existing key does not evict other entries.
+    lru.set('a', '1b');
+    assert.equal(lru.get('a'), '1b');
+    assert.equal(lru.get('c'), '3');
+
+    lru.clear();
+    assert.equal(lru.get('a'), undefined);
   });
 });

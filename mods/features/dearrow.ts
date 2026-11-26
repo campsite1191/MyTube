@@ -1,5 +1,4 @@
 import pLimit from 'p-limit';
-import QuickLRU from 'quick-lru';
 import { NOOP, observeShortsPage } from '../core/lifecycle.ts';
 import {
   buildStackedTvBackground,
@@ -7,7 +6,7 @@ import {
   getThumbnailListHandle,
 } from '../transforms/thumbnails.ts';
 import type { FeedItem, FormattedText } from '../types/innertube.ts';
-import { FEED_METADATA_CACHE_MAX_SIZE, unwrapFeedItem } from '../utils/feed-helpers.ts';
+import { createLruCache, unwrapFeedItem } from '../utils/feed-helpers.ts';
 import { VIDEO_ID_RE } from '../utils/innertube-ast.ts';
 import { clearShortsMetadataCache } from './shorts-metadata.ts';
 
@@ -18,11 +17,15 @@ const MAX_DEARROW_CONCURRENCY = 6;
 interface DeArrowTitleEntry {
   title: string;
   votes: number;
+  locked?: boolean;
+  original?: boolean;
 }
 
 interface DeArrowThumbnailEntry {
   timestamp?: number;
   votes: number;
+  locked?: boolean;
+  original?: boolean;
 }
 
 export interface DeArrowBrandingResponse {
@@ -30,18 +33,29 @@ export interface DeArrowBrandingResponse {
   thumbnails?: DeArrowThumbnailEntry[];
 }
 
-const EMPTY_DEARROW_BRANDING: DeArrowBrandingResponse = { titles: [], thumbnails: [] };
+export interface ResolvedDeArrowBranding {
+  title: string | null;
+  timestamp: number | null;
+}
+
+const EMPTY_RESOLVED_BRANDING: ResolvedDeArrowBranding = { title: null, timestamp: null };
 
 const deArrowLimit = pLimit(MAX_DEARROW_CONCURRENCY);
-const deArrowCache = new QuickLRU<string, DeArrowBrandingResponse>({ maxSize: FEED_METADATA_CACHE_MAX_SIZE });
-const inFlightDeArrow = new Map<string, Promise<DeArrowBrandingResponse | null>>();
+const deArrowCache = createLruCache<string, ResolvedDeArrowBranding>();
+const inFlightDeArrow = new Map<string, Promise<ResolvedDeArrowBranding | null>>();
 let activeNavigationController = new AbortController();
 
-export function selectHighestVotedEntry<T extends { votes: number }>(entries: readonly T[]): T | null {
+export function selectHighestVotedEntry<T extends { votes: number; locked?: boolean }>(
+  entries: readonly T[]
+): T | null {
   let highestVotedEntry: T | null = null;
   for (const entry of entries) {
-    if (entry.votes < 0) continue;
-    if (!highestVotedEntry || entry.votes > highestVotedEntry.votes) {
+    if (!entry.locked && entry.votes < 0) continue;
+    if (
+      !highestVotedEntry ||
+      (Boolean(entry.locked) && !highestVotedEntry.locked) ||
+      (Boolean(entry.locked) === Boolean(highestVotedEntry.locked) && entry.votes > highestVotedEntry.votes)
+    ) {
       highestVotedEntry = entry;
     }
   }
@@ -69,23 +83,88 @@ function setFormattedTitle(
 
 function updateMountedDeArrowDom(videoId: string, title: string | null, thumbnailUrl: string | null): void {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
-  if ((!title && !thumbnailUrl) || !VIDEO_ID_RE.test(videoId)) return;
+  if (!VIDEO_ID_RE.test(videoId)) return;
 
   for (const thumb of document.querySelectorAll<HTMLElement>(
-    `ytlr-tile-renderer ytlr-thumbnail-details[style*="/${videoId}/"]`
+    `ytlr-tile-renderer ytlr-thumbnail-details[style*="/${videoId}/"], yt-lockup-view-model image[style*="/${videoId}/"]`
   )) {
-    const card = thumb.closest?.('ytlr-tile-renderer') ?? null;
+    const card = thumb.closest?.('ytlr-tile-renderer, yt-lockup-view-model') ?? null;
     if (title && card) {
       const titleEl = card.querySelector<HTMLElement>(
-        'ytlr-tile-metadata-renderer [idomkey="title"], ytlr-tile-metadata-renderer .ytLrTileMetadataRendererTitle'
+        'ytlr-tile-metadata-renderer [idomkey="title"], ytlr-tile-metadata-renderer .ytLrTileMetadataRendererTitle, yt-lockup-metadata-view-model yt-core-attributed-string[idomkey="prqC5c"], yt-lockup-metadata-view-model [id^="yt-lockup-metadata-view-model"]'
       );
       if (titleEl && titleEl.textContent !== title) {
         titleEl.textContent = title;
       }
     }
     if (thumbnailUrl && thumb.style?.backgroundImage) {
-      thumb.style.backgroundImage = buildStackedTvBackground(videoId, thumbnailUrl);
+      thumb.style.backgroundImage = buildStackedTvBackground(videoId, thumbnailUrl, thumb.style.backgroundImage);
     }
+  }
+}
+
+/** Distills raw DeArrow branding arrays into the winning `{ title, timestamp }` pair. */
+export function resolveDeArrowBranding(branding: DeArrowBrandingResponse): ResolvedDeArrowBranding {
+  let title: string | null = null;
+  if (Array.isArray(branding.titles) && branding.titles.length > 0) {
+    const highestVotedTitle = selectHighestVotedEntry(branding.titles);
+    if (highestVotedTitle && !highestVotedTitle.original && highestVotedTitle.title) {
+      title = highestVotedTitle.title;
+    }
+  }
+
+  let timestamp: number | null = null;
+  if (Array.isArray(branding.thumbnails) && branding.thumbnails.length > 0) {
+    const highestVotedThumbnail = selectHighestVotedEntry(branding.thumbnails);
+    const ts = highestVotedThumbnail && !highestVotedThumbnail.original ? highestVotedThumbnail.timestamp : undefined;
+    if (typeof ts === 'number' && Number.isFinite(ts) && ts >= 0) {
+      timestamp = ts;
+    }
+  }
+
+  return title === null && timestamp === null ? EMPTY_RESOLVED_BRANDING : { title, timestamp };
+}
+
+function applyResolvedDeArrowToItem(
+  entry: FeedItem,
+  videoId: string,
+  resolved: ResolvedDeArrowBranding,
+  updateDom: boolean
+): void {
+  const feedItem = unwrapFeedItem(entry);
+  if (!feedItem) return;
+
+  if (resolved.title) {
+    if (feedItem.tileRenderer) {
+      setFormattedTitle(feedItem.tileRenderer.metadata?.tileMetadataRenderer?.title, resolved.title);
+    } else if (feedItem.lockupViewModel) {
+      setFormattedTitle(feedItem.lockupViewModel.metadata?.lockupMetadataViewModel?.title, resolved.title, true);
+    }
+  }
+
+  let resolvedThumbnailUrl: string | null = null;
+  if (resolved.timestamp !== null) {
+    const url = `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${encodeURIComponent(videoId)}&time=${resolved.timestamp}`;
+    resolvedThumbnailUrl = url;
+    const thumbnailHandle = getThumbnailListHandle(feedItem);
+    if (thumbnailHandle) {
+      const existingThumbnails = thumbnailHandle.getThumbnails();
+      const fallbackThumbnails = Array.isArray(existingThumbnails) ? existingThumbnails : [];
+      if (fallbackThumbnails[0]?.url !== url) {
+        thumbnailHandle.setThumbnails([
+          {
+            url,
+            width: DEARROW_THUMBNAIL_WIDTH,
+            height: DEARROW_THUMBNAIL_HEIGHT,
+          },
+          ...fallbackThumbnails,
+        ]);
+      }
+    }
+  }
+
+  if (updateDom) {
+    updateMountedDeArrowDom(videoId, resolved.title, resolvedThumbnailUrl);
   }
 }
 
@@ -95,54 +174,10 @@ export function applyDeArrowBrandingToItem(
   branding: DeArrowBrandingResponse,
   updateDom = true
 ): void {
-  const feedItem = unwrapFeedItem(entry);
-  if (!feedItem) return;
-
-  let resolvedTitle: string | null = null;
-  if (Array.isArray(branding.titles) && branding.titles.length > 0) {
-    const highestVotedTitle = selectHighestVotedEntry(branding.titles);
-    if (highestVotedTitle?.title) {
-      resolvedTitle = highestVotedTitle.title;
-      if (feedItem.tileRenderer) {
-        setFormattedTitle(feedItem.tileRenderer.metadata?.tileMetadataRenderer?.title, resolvedTitle);
-      } else if (feedItem.lockupViewModel) {
-        setFormattedTitle(feedItem.lockupViewModel.metadata?.lockupMetadataViewModel?.title, resolvedTitle, true);
-      }
-    }
+  const resolved = resolveDeArrowBranding(branding);
+  if (resolved !== EMPTY_RESOLVED_BRANDING) {
+    applyResolvedDeArrowToItem(entry, videoId, resolved, updateDom);
   }
-
-  let resolvedThumbnailUrl: string | null = null;
-  if (Array.isArray(branding.thumbnails) && branding.thumbnails.length > 0) {
-    const highestVotedThumbnail = selectHighestVotedEntry(branding.thumbnails);
-    const ts = highestVotedThumbnail?.timestamp;
-    if (typeof ts === 'number' && Number.isFinite(ts) && ts >= 0) {
-      const url = `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${encodeURIComponent(videoId)}&time=${ts}`;
-      resolvedThumbnailUrl = url;
-      const thumbnailHandle = getThumbnailListHandle(feedItem);
-      if (thumbnailHandle) {
-        const existingThumbnails = thumbnailHandle.getThumbnails();
-        const fallbackThumbnails = Array.isArray(existingThumbnails) ? existingThumbnails : [];
-        if (fallbackThumbnails[0]?.url !== url) {
-          thumbnailHandle.setThumbnails([
-            {
-              url,
-              width: DEARROW_THUMBNAIL_WIDTH,
-              height: DEARROW_THUMBNAIL_HEIGHT,
-            },
-            ...fallbackThumbnails,
-          ]);
-        }
-      }
-    }
-  }
-
-  if (updateDom) {
-    updateMountedDeArrowDom(videoId, resolvedTitle, resolvedThumbnailUrl);
-  }
-}
-
-function hasDeArrowBrandingContent(branding: DeArrowBrandingResponse | null | undefined): boolean {
-  return Boolean(branding && (branding.titles?.length || branding.thumbnails?.length));
 }
 
 /** Aborts in-flight and queued DeArrow requests (e.g. on navigation or memory pressure). */
@@ -170,28 +205,28 @@ export function setupMemoryPressureListener(): void {
   }
 }
 
-function fetchBrandingForVideo(videoId: string, controller: AbortController): Promise<DeArrowBrandingResponse | null> {
+function fetchBrandingForVideo(videoId: string, controller: AbortController): Promise<ResolvedDeArrowBranding | null> {
   const pending = inFlightDeArrow.get(videoId);
   if (pending) return pending;
 
   const { signal } = controller;
-  const request = deArrowLimit(async (): Promise<DeArrowBrandingResponse | null> => {
+  const request = deArrowLimit(async (): Promise<ResolvedDeArrowBranding | null> => {
     if (signal.aborted) return null;
 
-    let branding: DeArrowBrandingResponse | null = null;
+    let resolved: ResolvedDeArrowBranding | null = null;
     try {
       const response = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${encodeURIComponent(videoId)}`, {
         signal,
       });
       if (!signal.aborted) {
         if (response.status === 404) {
-          deArrowCache.set(videoId, EMPTY_DEARROW_BRANDING);
-          branding = EMPTY_DEARROW_BRANDING;
+          deArrowCache.set(videoId, EMPTY_RESOLVED_BRANDING);
+          resolved = EMPTY_RESOLVED_BRANDING;
         } else if (response.ok) {
           const parsed = (await response.json()) as DeArrowBrandingResponse | null;
           if (!signal.aborted && parsed) {
-            deArrowCache.set(videoId, parsed);
-            branding = parsed;
+            resolved = resolveDeArrowBranding(parsed);
+            deArrowCache.set(videoId, resolved);
           }
         }
       }
@@ -201,7 +236,7 @@ function fetchBrandingForVideo(videoId: string, controller: AbortController): Pr
     if (inFlightDeArrow.get(videoId) === request) {
       inFlightDeArrow.delete(videoId);
     }
-    return branding;
+    return resolved;
   });
 
   inFlightDeArrow.set(videoId, request);
@@ -222,8 +257,8 @@ export async function applyDeArrowBranding(items: FeedItem[]): Promise<void> {
 
     const cached = deArrowCache.get(videoId);
     if (cached) {
-      if (hasDeArrowBrandingContent(cached)) {
-        applyDeArrowBrandingToItem(entry, videoId, cached, false);
+      if (cached !== EMPTY_RESOLVED_BRANDING) {
+        applyResolvedDeArrowToItem(entry, videoId, cached, false);
       }
     } else {
       tasks.push({ entry, videoId });
@@ -233,9 +268,9 @@ export async function applyDeArrowBranding(items: FeedItem[]): Promise<void> {
 
   await Promise.all(
     tasks.map((task) =>
-      fetchBrandingForVideo(task.videoId, requestController).then((branding) => {
-        if (!requestController.signal.aborted && branding && hasDeArrowBrandingContent(branding)) {
-          applyDeArrowBrandingToItem(task.entry, task.videoId, branding, true);
+      fetchBrandingForVideo(task.videoId, requestController).then((resolved) => {
+        if (!requestController.signal.aborted && resolved && resolved !== EMPTY_RESOLVED_BRANDING) {
+          applyResolvedDeArrowToItem(task.entry, task.videoId, resolved, true);
         }
       })
     )

@@ -7,6 +7,7 @@ import {
   applyDeArrowBrandingToItem,
   clearDeArrowCache,
   installDeArrow,
+  resolveDeArrowBranding,
   selectHighestVotedEntry,
   setupMemoryPressureListener,
 } from '../../mods/features/dearrow.ts';
@@ -66,7 +67,7 @@ function createLockupFeedItem(overrides: Partial<LockupViewModel> = {}): {
 }
 
 describe('DeArrow branding helpers', () => {
-  test('selectHighestVotedEntry ignores negative votes and handles ties', () => {
+  test('selectHighestVotedEntry ignores negative unlocked votes, handles ties, and prioritizes locked entries', () => {
     assert.equal(selectHighestVotedEntry([]), null);
     assert.equal(selectHighestVotedEntry([{ title: 'Spam', votes: -3 }]), null);
     assert.deepEqual(
@@ -84,9 +85,17 @@ describe('DeArrow branding helpers', () => {
       ]),
       { title: 'Winner', votes: 9 }
     );
+    assert.deepEqual(
+      selectHighestVotedEntry([
+        { title: 'Popular Unlocked', votes: 100, locked: false },
+        { title: 'Locked Low', votes: -1, locked: true },
+        { title: 'Locked Higher', votes: 2, locked: true },
+      ]),
+      { title: 'Locked Higher', votes: 2, locked: true }
+    );
   });
 
-  test('applyDeArrowBrandingToItem updates titles, prepends thumbnail once, and preserves fallbacks', () => {
+  test('applyDeArrowBrandingToItem updates titles, prepends thumbnail once, honors original entries, and preserves fallbacks', () => {
     const branding: DeArrowBrandingResponse = {
       titles: [
         { title: 'Less Voted', votes: 1 },
@@ -112,6 +121,31 @@ describe('DeArrow branding helpers', () => {
       'https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=lockup-vid-1&time=42.5'
     );
     assert.equal(sources?.length, 2);
+
+    const originalCase = createLockupFeedItem();
+    applyDeArrowBrandingToItem(originalCase.entry, 'lockup-vid-1', {
+      titles: [{ title: 'Ignored Original', votes: 10, locked: true, original: true }],
+      thumbnails: [{ timestamp: 10, votes: 10, locked: true, original: true }],
+    });
+    assert.equal(originalCase.lockup.metadata?.lockupMetadataViewModel?.title?.content, 'Original Lockup Title');
+    assert.equal(
+      originalCase.lockup.contentImage?.thumbnailViewModel?.image?.sources?.[0]?.url,
+      'https://i.ytimg.com/vi/lockup-vid-1/hqdefault.jpg'
+    );
+
+    const emptyFromOriginal = resolveDeArrowBranding({
+      titles: [{ title: 'Ignored', votes: 5, original: true }],
+      thumbnails: [{ timestamp: 10, votes: 5, original: true }],
+    });
+    const emptyFromMissing = resolveDeArrowBranding({});
+    assert.equal(emptyFromOriginal, emptyFromMissing);
+    assert.deepEqual(
+      resolveDeArrowBranding({
+        titles: [{ title: 'Kept', votes: 3 }],
+        thumbnails: [{ timestamp: 14, votes: 2 }],
+      }),
+      { title: 'Kept', timestamp: 14 }
+    );
   });
 
   test('applyDeArrowBranding fetches only for valid videos and survives HTTP/network errors', async () => {
@@ -167,7 +201,7 @@ describe('DeArrow branding helpers', () => {
     assert.equal(failingVideoCase.tile.metadata?.tileMetadataRenderer?.title?.simpleText, 'Original Tile Title');
   });
 
-  test('applyDeArrowBranding updates already-mounted DOM tile titles and thumbnails on cold-cache resolution', async (t) => {
+  test('applyDeArrowBranding updates already-mounted DOM tile and lockup titles and thumbnails on cold-cache resolution', async (t) => {
     clearDeArrowCache();
     const globals = globalThis as Record<string, unknown>;
     const prevDocument = globals.document;
@@ -179,12 +213,25 @@ describe('DeArrow branding helpers', () => {
     };
     const mountedThumbEl = {
       tagName: 'YTLR-THUMBNAIL-DETAILS',
-      style: { backgroundImage: 'url("https://i.ytimg.com/vi/mountedVid1/hq720.jpg")' },
-      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? mountedTileEl : null),
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/mountedVid1/hq720.jpg?v=1")' },
+      closest: (sel: string) => (sel.includes('ytlr-tile-renderer') ? mountedTileEl : null),
+    };
+
+    const mountedLockupTitleEl = { textContent: 'Clickbait Lockup Title' };
+    const mountedLockupEl = {
+      querySelector: (sel: string) => (sel.includes('prqC5c') ? mountedLockupTitleEl : null),
+    };
+    const mountedLockupImageEl = {
+      tagName: 'IMAGE',
+      style: {
+        backgroundImage:
+          'linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.8)), url("https://i.ytimg.com/vi/mountedVid1/hq720.jpg?v=1")',
+      },
+      closest: (sel: string) => (sel.includes('yt-lockup-view-model') ? mountedLockupEl : null),
     };
 
     globals.document = {
-      querySelectorAll: (sel: string) => (sel.includes('/mountedVid1/') ? [mountedThumbEl] : []),
+      querySelectorAll: (sel: string) => (sel.includes('/mountedVid1/') ? [mountedThumbEl, mountedLockupImageEl] : []),
     };
     globals.fetch = (async () =>
       new Response(
@@ -211,7 +258,12 @@ describe('DeArrow branding helpers', () => {
     assert.equal(mountedTitleEl.textContent, 'Mounted DeArrow Title');
     assert.equal(
       mountedThumbEl.style.backgroundImage,
-      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=mountedVid1&time=19"), url("https://i.ytimg.com/vi/mountedVid1/hq720.jpg"), url("https://i.ytimg.com/vi/mountedVid1/hqdefault.jpg")'
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=mountedVid1&time=19"), url("https://i.ytimg.com/vi/mountedVid1/hq720.jpg?v=1"), url("https://i.ytimg.com/vi/mountedVid1/hqdefault.jpg")'
+    );
+    assert.equal(mountedLockupTitleEl.textContent, 'Mounted DeArrow Title');
+    assert.equal(
+      mountedLockupImageEl.style.backgroundImage,
+      'linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.8)), url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=mountedVid1&time=19"), url("https://i.ytimg.com/vi/mountedVid1/hq720.jpg?v=1"), url("https://i.ytimg.com/vi/mountedVid1/hqdefault.jpg")'
     );
   });
 
@@ -327,8 +379,8 @@ describe('DeArrow branding helpers', () => {
     const queriedSelectors: string[] = [];
     const bgThumb = {
       tagName: 'YTLR-THUMBNAIL-DETAILS',
-      style: { backgroundImage: 'url("https://i.ytimg.com/vi/probeVid123/hq720.jpg")' },
-      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileCard : null),
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/probeVid123/hq720.jpg?v=1")' },
+      closest: (sel: string) => (sel.includes('ytlr-tile-renderer') ? tileCard : null),
     };
     const tileTitle = { textContent: 'Old' };
     const tileCard = { querySelector: () => tileTitle };
@@ -387,12 +439,15 @@ describe('DeArrow branding helpers', () => {
     });
     await applyDeArrowBranding([probeTile.entry]);
     assert.equal(queriedSelectors.length, 1);
-    assert.equal(queriedSelectors[0], 'ytlr-tile-renderer ytlr-thumbnail-details[style*="/probeVid123/"]');
+    assert.equal(
+      queriedSelectors[0],
+      'ytlr-tile-renderer ytlr-thumbnail-details[style*="/probeVid123/"], yt-lockup-view-model image[style*="/probeVid123/"]'
+    );
     assert.equal(imageProbeConstructed, 0);
     assert.equal(tileTitle.textContent, 'New Clean Title');
     assert.equal(
       bgThumb.style.backgroundImage,
-      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=probeVid123&time=8"), url("https://i.ytimg.com/vi/probeVid123/hq720.jpg"), url("https://i.ytimg.com/vi/probeVid123/hqdefault.jpg")'
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=probeVid123&time=8"), url("https://i.ytimg.com/vi/probeVid123/hq720.jpg?v=1"), url("https://i.ytimg.com/vi/probeVid123/hqdefault.jpg")'
     );
 
     // Warm cache hit does NOT invoke querySelectorAll.
@@ -419,8 +474,8 @@ describe('DeArrow branding helpers', () => {
     };
     const mountedThumbEl = {
       tagName: 'YTLR-THUMBNAIL-DETAILS',
-      style: { backgroundImage: 'url("https://i.ytimg.com/vi/mountedFb01/hq720.jpg")' },
-      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? mountedTileEl : null),
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/mountedFb01/hq720.jpg?v=1")' },
+      closest: (sel: string) => (sel.includes('ytlr-tile-renderer') ? mountedTileEl : null),
     };
 
     globals.document = {
@@ -450,7 +505,7 @@ describe('DeArrow branding helpers', () => {
 
     assert.equal(
       mountedThumbEl.style.backgroundImage,
-      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=mountedFb01&time=12"), url("https://i.ytimg.com/vi/mountedFb01/hq720.jpg"), url("https://i.ytimg.com/vi/mountedFb01/hqdefault.jpg")'
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=mountedFb01&time=12"), url("https://i.ytimg.com/vi/mountedFb01/hq720.jpg?v=1"), url("https://i.ytimg.com/vi/mountedFb01/hqdefault.jpg")'
     );
   });
 
@@ -492,6 +547,20 @@ describe('DeArrow branding helpers', () => {
       const d = makeItem('dedupVid1');
       await applyDeArrowBranding([d]);
       assert.equal(fetchCalls, 2);
+
+      // Original/empty 200 OK branding caches as EMPTY_RESOLVED_BRANDING without refetching on next pass.
+      globalThis.fetch = (async (): Promise<Response> => {
+        fetchCalls++;
+        return new Response(JSON.stringify({ titles: [{ title: 'Orig', votes: 5, original: true }], thumbnails: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof globalThis.fetch;
+      const origItem = makeItem('origOnly1');
+      await applyDeArrowBranding([origItem]);
+      await applyDeArrowBranding([origItem]);
+      assert.equal(fetchCalls, 3);
+      assert.equal(origItem.tileRenderer.metadata.tileMetadataRenderer.title.simpleText, 'Orig');
     } finally {
       clearDeArrowCache();
       globalThis.fetch = origFetch;
@@ -637,7 +706,9 @@ describe('installDeArrow lifecycle and edge cases', () => {
     delete globals.window;
     setupMemoryPressureListener();
 
-    applyDeArrowBrandingToItem(null as unknown as FeedItem, 'vid12345678', {});
+    applyDeArrowBrandingToItem(null as unknown as FeedItem, 'vid12345678', {
+      titles: [{ title: 'NullEntry', votes: 1 }],
+    });
     applyDeArrowBrandingToItem({ tileRenderer: {} }, 'vid12345678', { titles: [{ title: 'NoContainer', votes: 1 }] });
     applyDeArrowBrandingToItem({} as FeedItem, 'invalid', { titles: [{ title: 'InvalidId', votes: 1 }] });
 

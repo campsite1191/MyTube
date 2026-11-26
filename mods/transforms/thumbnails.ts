@@ -7,7 +7,7 @@ const HQ_THUMBNAIL_WIDTH = 1280;
 const HQ_THUMBNAIL_HEIGHT = 720;
 
 const CUSTOM_THUMBNAIL_URL_PATTERN = /_custom_/;
-const YOUTUBE_HQ720_URL_PATTERN = /\/vi\/([^/?]+)\/hq720\.jpg/;
+const YOUTUBE_HQ720_URL_PATTERN = /\/vi\/([^/?&]+)\/hq720\.jpg/;
 const DEARROW_THUMBNAIL_URL_PATTERN = /dearrow-thumb\.ajay\.app\/.*?[?&]videoID=([^&]+)/;
 const CSS_BACKGROUND_URL_RE = /url\(["']?([^"')]+)["']?\)/;
 
@@ -47,17 +47,24 @@ export function getThumbnailListHandle(feedItem: FeedItem): ThumbnailListHandle 
   return null;
 }
 
-export function buildStackedTvBackground(videoId: string, primaryUrl: string): string {
-  const hq720Url = `https://i.ytimg.com/vi/${videoId}/hq720.jpg`;
+export function buildHq720Url(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/hq720.jpg?v=1`;
+}
+
+export function buildStackedTvBackground(videoId: string, primaryUrl: string, existingBackgroundImage = ''): string {
+  const hq720Url = buildHq720Url(videoId);
   const hqDefaultUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-  if (!YOUTUBE_HQ720_URL_PATTERN.test(primaryUrl)) {
-    return `url("${primaryUrl}"), url("${hq720Url}"), url("${hqDefaultUrl}")`;
-  }
-  return `url("${primaryUrl}"), url("${hqDefaultUrl}")`;
+  const layers = YOUTUBE_HQ720_URL_PATTERN.test(primaryUrl)
+    ? `url("${primaryUrl}"), url("${hqDefaultUrl}")`
+    : `url("${primaryUrl}"), url("${hq720Url}"), url("${hqDefaultUrl}")`;
+  const firstUrlIndex = existingBackgroundImage.indexOf('url(');
+  const gradientPrefix =
+    firstUrlIndex > 0 ? existingBackgroundImage.slice(0, firstUrlIndex).replace(/[\s,]+$/, '') : '';
+  return gradientPrefix ? `${gradientPrefix}, ${layers}` : layers;
 }
 
 /**
- * Prepends an `hq720.jpg` thumbnail entry unless the item already has an HD or custom thumbnail.
+ * Prepends an `hq720.jpg?v=1` thumbnail entry unless the item already has an HD or custom thumbnail.
  */
 export function applyThumbnailUpgrade(thumbnails: Thumbnail[], videoId: string): Thumbnail[] {
   if (!Array.isArray(thumbnails) || !videoId) return thumbnails;
@@ -70,7 +77,7 @@ export function applyThumbnailUpgrade(thumbnails: Thumbnail[], videoId: string):
   if (alreadyHighQuality) return thumbnails;
 
   const highQualityThumbnail: Thumbnail = {
-    url: `https://i.ytimg.com/vi/${videoId}/hq720.jpg`,
+    url: buildHq720Url(videoId),
     width: HQ_THUMBNAIL_WIDTH,
     height: HQ_THUMBNAIL_HEIGHT,
   };
@@ -145,7 +152,7 @@ export function resolveFallbackThumbnailUrl(failedUrl: string): string | null {
   if (!failedUrl) return null;
   const deArrowMatch = failedUrl.match(DEARROW_THUMBNAIL_URL_PATTERN);
   if (deArrowMatch?.[1]) {
-    return `https://i.ytimg.com/vi/${deArrowMatch[1]}/hq720.jpg`;
+    return buildHq720Url(deArrowMatch[1]);
   }
   const hq720Match = failedUrl.match(YOUTUBE_HQ720_URL_PATTERN);
   return hq720Match?.[1] ? `https://i.ytimg.com/vi/${hq720Match[1]}/hqdefault.jpg` : null;
@@ -156,7 +163,7 @@ const installedFallbackDocs = new WeakSet<Document>();
 function upgradeMountedTvThumbnailFallbacks(): void {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
   for (const thumb of document.querySelectorAll<HTMLElement>(
-    'ytlr-thumbnail-details[style*="hq720.jpg"], ytlr-thumbnail-details[style*="dearrow-thumb.ajay.app"]'
+    'ytlr-thumbnail-details[style*="hq720.jpg"], ytlr-thumbnail-details[style*="dearrow-thumb.ajay.app"], image[style*="hq720.jpg"], image[style*="dearrow-thumb.ajay.app"]'
   )) {
     const bg = thumb.style?.backgroundImage || '';
     if (bg.includes('/hqdefault.jpg')) continue;
@@ -165,14 +172,15 @@ function upgradeMountedTvThumbnailFallbacks(): void {
     const videoId =
       primaryUrl.match(DEARROW_THUMBNAIL_URL_PATTERN)?.[1] ?? primaryUrl.match(YOUTUBE_HQ720_URL_PATTERN)?.[1];
     if (!videoId || !VIDEO_ID_RE.test(videoId)) continue;
-    thumb.style.backgroundImage = buildStackedTvBackground(videoId, primaryUrl);
+    thumb.style.backgroundImage = buildStackedTvBackground(videoId, primaryUrl, bg);
   }
 }
 
 function hasRelevantThumbnailMutation(mutations: MutationRecord[]): boolean {
   for (const mutation of mutations) {
     if (mutation.type === 'childList' && (mutation.addedNodes?.length ?? 0) > 0) return true;
-    if (mutation.type === 'attributes' && (mutation.target as Element | null)?.tagName === 'YTLR-THUMBNAIL-DETAILS') {
+    const tagName = (mutation.target as Element | null)?.tagName;
+    if (mutation.type === 'attributes' && (tagName === 'YTLR-THUMBNAIL-DETAILS' || tagName === 'IMAGE')) {
       return true;
     }
   }
@@ -181,7 +189,7 @@ function hasRelevantThumbnailMutation(mutations: MutationRecord[]): boolean {
 
 /**
  * Installs capture-phase thumbnail error recovery (`DeArrow -> hq720.jpg -> hqdefault.jpg`)
- * and stacks CSS multi-background fallbacks on mounted TV `<ytlr-thumbnail-details>` elements.
+ * and stacks CSS multi-background fallbacks on mounted TV `<ytlr-thumbnail-details>` and `<image>` elements.
  */
 export function installThumbnailErrorFallback(): void {
   if (typeof document === 'undefined' || installedFallbackDocs.has(document)) return;

@@ -2,7 +2,39 @@ import type { FeedItem, WatchEndpoint } from '../types/innertube.ts';
 import { isRecord } from './type-guards.ts';
 
 /** Shared LRU capacity for per-video feed enrichment caches (DeArrow branding & Shorts metadata). */
-export const FEED_METADATA_CACHE_MAX_SIZE = 2000;
+export const FEED_METADATA_CACHE_MAX_SIZE = 500;
+
+export interface LruCache<K, V> {
+  get: (key: K) => V | undefined;
+  set: (key: K, value: V) => void;
+  clear: () => void;
+}
+
+/** Creates a minimal Map-backed LRU cache bounded to `maxSize` entries. */
+export function createLruCache<K, V>(maxSize = FEED_METADATA_CACHE_MAX_SIZE): LruCache<K, V> {
+  const map = new Map<K, V>();
+  return {
+    get(key: K): V | undefined {
+      if (!map.has(key)) return undefined;
+      const value = map.get(key) as V;
+      map.delete(key);
+      map.set(key, value);
+      return value;
+    },
+    set(key: K, value: V): void {
+      if (map.has(key)) {
+        map.delete(key);
+      } else if (map.size >= maxSize) {
+        const oldestKey = map.keys().next().value as K;
+        map.delete(oldestKey);
+      }
+      map.set(key, value);
+    },
+    clear(): void {
+      map.clear();
+    },
+  };
+}
 
 /**
  * Unwraps `richItemRenderer.content` when present, or returns the plain item record itself.

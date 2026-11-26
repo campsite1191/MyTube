@@ -498,7 +498,7 @@ index 00d10b1..a9b8be1 100644
  #endif
  
 diff --git a/cobalt/browser/BUILD.gn b/cobalt/browser/BUILD.gn
-index 9ffcc9e..6fc464a 100644
+index 9ffcc9e..0d4337d 100644
 --- a/cobalt/browser/BUILD.gn
 +++ b/cobalt/browser/BUILD.gn
 @@ -47,13 +47,6 @@ source_set("browser") {
@@ -537,6 +537,15 @@ index 9ffcc9e..6fc464a 100644
    }
  }
  
+@@ -340,8 +326,4 @@ source_set("cobalt_crash_annotations") {
+     "//base",
+     "//third_party/crashpad/crashpad/client",
+   ]
+-  if (is_android && !is_starboard) {
+-    sources += [ "crash_annotator/crash_annotator_jni.cc" ]
+-    deps = [ "//cobalt/android:jni_headers" ]
+-  }
+ }
 diff --git a/cobalt/browser/cobalt_browser_main_parts.cc b/cobalt/browser/cobalt_browser_main_parts.cc
 index 0de40b7..32464ab 100644
 --- a/cobalt/browser/cobalt_browser_main_parts.cc
@@ -1756,6 +1765,18 @@ index f632e28..f171864 100644
  }
  #endif  // BUILDFLAG(IS_LINUX) ||
          // BUILDFLAG(IS_ANDROID)
+diff --git a/starboard/android/shared/BUILD.gn b/starboard/android/shared/BUILD.gn
+index fc5df41..78747b2 100644
+--- a/starboard/android/shared/BUILD.gn
++++ b/starboard/android/shared/BUILD.gn
+@@ -304,7 +304,6 @@ static_library("starboard_platform") {
+     ":starboard_base_symbolize",
+     "//cobalt/android:app_event_bridge",
+     "//cobalt/android:jni_headers",
+-    "//cobalt/browser:cobalt_crash_annotations",
+     "//cobalt/browser/client_hint_headers",
+     "//cobalt/browser/h5vcc_accessibility:manager",
+     "//cobalt/browser/h5vcc_runtime:deep_link_manager",
 diff --git a/starboard/android/shared/platform_configuration/configuration.gni b/starboard/android/shared/platform_configuration/configuration.gni
 index d2ee38b..8119ec6 100644
 --- a/starboard/android/shared/platform_configuration/configuration.gni

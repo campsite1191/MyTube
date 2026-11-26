@@ -155,6 +155,19 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(patch10.includes('player_components_factory.cc'), false);
   });
 
+  test('[P10] patches/10 avoids force-enabling foreground MemoryCache eviction and patches/11 keeps enable_feature_if_set', () => {
+    const patch10 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '10-media-hdr-aaudio-cache-tuning.patch'), 'utf8');
+    const patch11 = fs.readFileSync(
+      path.join(ROOT_DIR, 'patches', '11-manifest-hardening-and-mojo-sizing.patch'),
+      'utf8'
+    );
+    assert.equal(patch10.includes('+  AppendSwitchIfAbsent('), false);
+    assert.equal(patch10.includes('switches::kAllowCriticalMemoryPressureHandlingInForeground'), true);
+    assert.equal(patch10.includes('kEvictMemoryCacheOnCriticalMemoryPressure'), false);
+    assert.equal(patch10.includes('kCobaltEnableModerateMemoryPressure'), false);
+    assert.equal(patch11.includes('-  auto enable_feature_if_set'), false);
+  });
+
   test('[M6] CI workflows pin third-party actions to 40-char SHAs, avoid npx --yes and raw input interpolation, pin retry cobalt_sha, and set monotonic version_code', () => {
     const workflowsDir = path.join(ROOT_DIR, '.github', 'workflows');
     const workflowFiles = fs
@@ -234,6 +247,8 @@ describe('Repository, patch & CI workflow invariants', () => {
       'CobaltPictureInPictureActivity',
       'ChildProcessLauncherTestHelperService',
       'https://youtube.com/tv/uma',
+      'starboard/android/shared/BUILD.gn',
+      'crash_annotator_jni.cc',
     ]) {
       assert.equal(patch15.includes(token), true, `Missing expected patch 15 strip target: ${token}`);
     }
@@ -247,6 +262,7 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(lintPatchesYml.includes('NUM_PRIVILEGED_SERVICES'), true);
     assert.equal(lintPatchesYml.includes('CobaltPictureInPictureActivity'), true);
     assert.equal(lintPatchesYml.includes('zygotePreloadName'), true);
+    assert.equal(lintPatchesYml.includes('crash_annotator_jni.cc'), true);
   });
 
   test('mirrors every runtime module under mods/ 1:1 with tests/ bidirectionally', () => {

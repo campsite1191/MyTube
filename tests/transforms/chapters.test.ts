@@ -156,7 +156,10 @@ describe('chapters', () => {
     assert.equal(markersList.markers.length, 2);
     assert.equal(markersList.markers[0]?.durationMillis, '60000');
     assert.equal(markersList.markers[1]?.durationMillis, '60000');
-    assert.equal(markersList.markers[0]?.thumbnailDetails.thumbnails[0]?.url, 'https://i.ytimg.com/vi/vid1/hq720.jpg');
+    assert.equal(
+      markersList.markers[0]?.thumbnailDetails.thumbnails[0]?.url,
+      'https://i.ytimg.com/vi/vid1/hq720.jpg?v=1'
+    );
     assert.equal(markersList.markers[0]?.thumbnailDetails.thumbnails[0]?.width, 1280);
   });
 

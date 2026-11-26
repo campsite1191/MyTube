@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
   applyThumbnailUpgrade,
+  buildHq720Url,
+  buildStackedTvBackground,
   extractVideoIdForThumbnail,
   installThumbnailErrorFallback,
   resolveFallbackThumbnailUrl,
@@ -142,10 +144,11 @@ describe('applyThumbnailUpgrade and upgradeFeedThumbnails', () => {
     const upgraded = applyThumbnailUpgrade(lowRes, 'video-id');
     assert.equal(upgraded.length, 2);
     assert.deepEqual(upgraded[0], {
-      url: 'https://i.ytimg.com/vi/video-id/hq720.jpg',
+      url: 'https://i.ytimg.com/vi/video-id/hq720.jpg?v=1',
       width: 1280,
       height: 720,
     });
+    assert.equal(buildHq720Url('video-id'), 'https://i.ytimg.com/vi/video-id/hq720.jpg?v=1');
     assert.equal(upgraded[1], lowRes[0]);
 
     const alreadyHighRes: Thumbnail[] = [{ url: '/hq.jpg', width: 1280, height: 720 }];
@@ -160,12 +163,12 @@ describe('applyThumbnailUpgrade and upgradeFeedThumbnails', () => {
     const richTileWrapped = createTileFeedItem({ onSelectCommand: {} });
     assert.equal(upgradeFeedItemThumbnails({ richItemRenderer: { content: richTileWrapped.entry } }), true);
     const richThumbnails = richTileWrapped.tile.header?.tileHeaderRenderer?.thumbnail?.thumbnails;
-    assert.equal(richThumbnails?.[0]?.url, 'https://i.ytimg.com/vi/tile-fallback-id/hq720.jpg');
+    assert.equal(richThumbnails?.[0]?.url, 'https://i.ytimg.com/vi/tile-fallback-id/hq720.jpg?v=1');
 
     const lockupCase = createLockupFeedItem();
     assert.equal(upgradeFeedItemThumbnails(lockupCase.entry), true);
     const lockupSources = lockupCase.lockup.contentImage?.thumbnailViewModel?.image?.sources;
-    assert.equal(lockupSources?.[0]?.url, 'https://i.ytimg.com/vi/lockup-vid-1/hq720.jpg');
+    assert.equal(lockupSources?.[0]?.url, 'https://i.ytimg.com/vi/lockup-vid-1/hq720.jpg?v=1');
     assert.equal(lockupSources?.length, 2);
 
     const emptyThumbTile = createTileFeedItem({ header: { tileHeaderRenderer: { thumbnail: { thumbnails: [] } } } });
@@ -186,13 +189,17 @@ describe('applyThumbnailUpgrade and upgradeFeedThumbnails', () => {
 });
 
 describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => {
-  test('steps down DeArrow -> hq720.jpg -> hqdefault.jpg and ignores other URLs', () => {
+  test('steps down DeArrow -> hq720.jpg?v=1 -> hqdefault.jpg and ignores other URLs', () => {
     assert.equal(
       resolveFallbackThumbnailUrl('https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=xyz789&time=12.5'),
-      'https://i.ytimg.com/vi/xyz789/hq720.jpg'
+      'https://i.ytimg.com/vi/xyz789/hq720.jpg?v=1'
     );
     assert.equal(
       resolveFallbackThumbnailUrl('https://i.ytimg.com/vi/xyz789/hq720.jpg?sqp=1'),
+      'https://i.ytimg.com/vi/xyz789/hqdefault.jpg'
+    );
+    assert.equal(
+      resolveFallbackThumbnailUrl('https://i.ytimg.com/vi/xyz789/hq720.jpg&forceReload=123'),
       'https://i.ytimg.com/vi/xyz789/hqdefault.jpg'
     );
     assert.equal(resolveFallbackThumbnailUrl('https://i.ytimg.com/vi/xyz789/hqdefault.jpg'), null);
@@ -238,7 +245,7 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
 
     const img = new MockHTMLImageElement('https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=rec1&time=5');
     errorHandler({ target: img } as unknown as Event);
-    assert.equal(img.src, 'https://i.ytimg.com/vi/rec1/hq720.jpg');
+    assert.equal(img.src, 'https://i.ytimg.com/vi/rec1/hq720.jpg?v=1');
 
     errorHandler({ target: img } as unknown as Event);
     assert.equal(img.src, 'https://i.ytimg.com/vi/rec1/hqdefault.jpg');
@@ -246,13 +253,13 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
     // Recycled DOM element loads the same failing DeArrow URL again on a later scroll -> still recovers.
     img.src = 'https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=rec1&time=5';
     errorHandler({ target: img } as unknown as Event);
-    assert.equal(img.src, 'https://i.ytimg.com/vi/rec1/hq720.jpg');
+    assert.equal(img.src, 'https://i.ytimg.com/vi/rec1/hq720.jpg?v=1');
 
     // Non-image targets are ignored cleanly.
     errorHandler({ target: {} } as unknown as Event);
   });
 
-  test('[H2] stacks CSS fallback layers on mounted TV ytlr-thumbnail-details for hq720.jpg without DOM error events', (t) => {
+  test('[H2] stacks CSS fallback layers on mounted TV ytlr-thumbnail-details and image elements, preserving overlay gradients', (t) => {
     const globals = globalThis as Record<string, unknown>;
     const prevDocument = globals.document;
     const prevMutationObserver = globals.MutationObserver;
@@ -282,6 +289,13 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
         backgroundImage: 'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=deCard00001&time=5")',
       },
     };
+    const lockupImageThumb = {
+      tagName: 'IMAGE',
+      style: {
+        backgroundImage:
+          'linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.8)), url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=lockupImg01&time=12")',
+      },
+    };
     const alreadyStackedThumb = {
       tagName: 'YTLR-THUMBNAIL-DETAILS',
       style: {
@@ -308,7 +322,15 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
       addEventListener: () => {},
       querySelectorAll: (sel: string) =>
         sel.includes('hq720.jpg') || sel.includes('ytlr-thumbnail-details')
-          ? [mountedThumb, deArrowThumb, alreadyStackedThumb, invalidBgThumb, invalidIdThumb, missingStyleThumb]
+          ? [
+              mountedThumb,
+              deArrowThumb,
+              lockupImageThumb,
+              alreadyStackedThumb,
+              invalidBgThumb,
+              invalidIdThumb,
+              missingStyleThumb,
+            ]
           : [],
     };
 
@@ -324,6 +346,9 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
       obs.cb([{ type: 'childList', target: bodyEl, addedNodes: [], removedNodes: [] }]);
       obs.cb([{ type: 'childList', target: bodyEl, addedNodes: [mountedThumb], removedNodes: [] }]);
       obs.cb([{ type: 'attributes', target: mountedThumb }]);
+      lockupImageThumb.style.backgroundImage =
+        'linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.8)), url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=lockupImg01&time=12")';
+      obs.cb([{ type: 'attributes', target: lockupImageThumb }]);
     }
 
     assert.equal(
@@ -332,7 +357,19 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
     );
     assert.equal(
       deArrowThumb.style.backgroundImage,
-      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=deCard00001&time=5"), url("https://i.ytimg.com/vi/deCard00001/hq720.jpg"), url("https://i.ytimg.com/vi/deCard00001/hqdefault.jpg")'
+      'url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=deCard00001&time=5"), url("https://i.ytimg.com/vi/deCard00001/hq720.jpg?v=1"), url("https://i.ytimg.com/vi/deCard00001/hqdefault.jpg")'
+    );
+    assert.equal(
+      lockupImageThumb.style.backgroundImage,
+      'linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.8)), url("https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=lockupImg01&time=12"), url("https://i.ytimg.com/vi/lockupImg01/hq720.jpg?v=1"), url("https://i.ytimg.com/vi/lockupImg01/hqdefault.jpg")'
+    );
+    assert.equal(
+      buildStackedTvBackground('vid12345678', 'https://i.ytimg.com/vi/vid12345678/hq720.jpg?v=1', '  , url("x")'),
+      'url("https://i.ytimg.com/vi/vid12345678/hq720.jpg?v=1"), url("https://i.ytimg.com/vi/vid12345678/hqdefault.jpg")'
+    );
+    assert.equal(
+      buildStackedTvBackground('vid12345678', 'https://i.ytimg.com/vi/vid12345678/hq720.jpg?v=1'),
+      'url("https://i.ytimg.com/vi/vid12345678/hq720.jpg?v=1"), url("https://i.ytimg.com/vi/vid12345678/hqdefault.jpg")'
     );
   });
 
@@ -356,7 +393,7 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
     assert.deepEqual(
       applyThumbnailUpgrade([null as unknown as Thumbnail, { width: 480, height: 360 } as Thumbnail], 'vid12345678'),
       [
-        { url: 'https://i.ytimg.com/vi/vid12345678/hq720.jpg', width: 1280, height: 720 },
+        { url: 'https://i.ytimg.com/vi/vid12345678/hq720.jpg?v=1', width: 1280, height: 720 },
         null as unknown as Thumbnail,
         { width: 480, height: 360 } as Thumbnail,
       ]
@@ -425,6 +462,7 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
     assert.ok(obs);
     obs.cb([
       { type: 'childList', addedNodes: undefined },
+      { type: 'attributes', target: null },
       { type: 'attributes', target: { tagName: 'DIV' } },
     ]);
   });

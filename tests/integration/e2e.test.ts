@@ -886,7 +886,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
     assert.ok(shelfItems?.[0]?.tileRenderer.onFocusCommand.startInlinePlaybackCommand);
     assert.equal(
       shelfItems?.[0]?.tileRenderer.header.tileHeaderRenderer.thumbnail.thumbnails[0]?.url,
-      'https://i.ytimg.com/vi/homeVid1/hq720.jpg'
+      'https://i.ytimg.com/vi/homeVid1/hq720.jpg?v=1'
     );
 
     // T2: Exercise fetch -> clone().json() and Response.text() -> _yttv.JSON.parse() single-transform parity.

@@ -101,7 +101,7 @@ describe('innertube-response synchronous transforms', () => {
     );
     assert.equal(
       items?.[0]?.tileRenderer.header.tileHeaderRenderer.thumbnail.thumbnails[0]?.url,
-      'https://i.ytimg.com/vi/abc123/hq720.jpg'
+      'https://i.ytimg.com/vi/abc123/hq720.jpg?v=1'
     );
 
     // Ensure native settings payloads pass through untouched.

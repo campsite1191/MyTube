@@ -3,6 +3,7 @@ import { getActiveWatchVideoId } from '../core/lifecycle.ts';
 import type { FormattedText } from '../types/innertube.ts';
 import { readFormattedText } from '../utils/innertube-ast.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
+import { buildHq720Url } from './thumbnails.ts';
 
 export interface ChapterTimestamp {
   time: number;
@@ -57,7 +58,7 @@ function createMarker(title: string, start: string, duration: string, videoId: s
     thumbnailDetails: {
       thumbnails: [
         {
-          url: `https://i.ytimg.com/vi/${videoId}/hq720.jpg`,
+          url: buildHq720Url(videoId),
           width: 1280,
           height: 720,
         },

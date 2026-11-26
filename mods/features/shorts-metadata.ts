@@ -1,9 +1,8 @@
 import pLimit from 'p-limit';
-import QuickLRU from 'quick-lru';
 import { NOOP, observeShortsPage } from '../core/lifecycle.ts';
 import { adjustOverlayEnrichmentSuppression, extractShortsMetadataFromReel } from '../transforms/shorts-overlay.ts';
 import type { FeedItem } from '../types/innertube.ts';
-import { FEED_METADATA_CACHE_MAX_SIZE, unwrapFeedItem } from '../utils/feed-helpers.ts';
+import { createLruCache, unwrapFeedItem } from '../utils/feed-helpers.ts';
 import { readFormattedText, VIDEO_ID_RE } from '../utils/innertube-ast.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 
@@ -13,7 +12,7 @@ const MAX_SHORTS_META_CONCURRENCY = 2;
 const THUMB_VIDEO_ID_RE = /\/vi(?:_webp)?\/([A-Za-z0-9_-]{11})\//;
 
 const shortsMetaLimit = pLimit(MAX_SHORTS_META_CONCURRENCY);
-const shortsMetadataCache = new QuickLRU<string, string>({ maxSize: FEED_METADATA_CACHE_MAX_SIZE });
+const shortsMetadataCache = createLruCache<string, string>();
 const inFlightShortsMeta = new Map<string, Promise<string | null>>();
 const pendingTileTextTargets = new Map<string, Set<Record<string, unknown>>>();
 

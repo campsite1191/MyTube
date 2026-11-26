@@ -1,35 +1,17 @@
 diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
-index 61d4122..5410cde 100644
+index 61d4122..69f72d0 100644
 --- a/cobalt/android/androidtv_flag_map.cc
 +++ b/cobalt/android/androidtv_flag_map.cc
-@@ -273,13 +273,10 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+@@ -273,8 +273,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
        blink::features::kCobaltBypassHTMLPreloadScanner.name);
    enable_features.emplace_back(kEnableAv1StartupOptimizationFeature);
    enable_features.emplace_back(kCobaltMmapFontCacheFeature);
 -  enable_feature_if_set(flags::kAreaBasedVideoBufferBudget,
 -                        kAreaBasedVideoBufferBudgetFeature);
--  append_switch_if_set(
--      flags::kAllowCriticalMemoryPressureHandlingInForeground,
--      switches::kAllowCriticalMemoryPressureHandlingInForeground);
--  enable_feature_if_set(
--      flags::kEvictMemoryCacheOnCriticalMemoryPressure,
 +  enable_features.emplace_back(kAreaBasedVideoBufferBudgetFeature);
-+  AppendSwitchIfAbsent(
-+      cmd_line, switches::kAllowCriticalMemoryPressureHandlingInForeground);
-+  enable_features.emplace_back(
-       blink::features::kEvictMemoryCacheOnCriticalMemoryPressure.name);
- 
-   if (flag_map.Has(flags::kDisableLessAggressiveParkableString)) {
-@@ -287,8 +284,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
-         blink::features::kLessAggressiveParkableString.name);
-   }
- 
--  enable_feature_if_set(
--      flags::kEnableModerateMemoryPressure,
-+  enable_features.emplace_back(
-       base::features::kCobaltEnableModerateMemoryPressure.name);
-   if (const auto cooldown =
-           flag_map.GetNumeric(flags::kMemoryPressureCooldownInSeconds)) {
+   append_switch_if_set(
+       flags::kAllowCriticalMemoryPressureHandlingInForeground,
+       switches::kAllowCriticalMemoryPressureHandlingInForeground);
 diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java
 index 4c238e6..ad98093 100644
 --- a/cobalt/android/apk/app/src/main/java/dev/cobalt/media/MediaCodecUtil.java
@@ -87,7 +69,7 @@ index 3e1886d..2af76a9 100644
        }
      }
 diff --git a/starboard/extension/feature_config.h b/starboard/extension/feature_config.h
-index 4bc78f0..3cfc913 100644
+index 28561b5..2238b38 100644
 --- a/starboard/extension/feature_config.h
 +++ b/starboard/extension/feature_config.h
 @@ -105,7 +105,7 @@ FEATURE_LIST_START

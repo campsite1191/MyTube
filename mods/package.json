@@ -11,8 +11,7 @@
   "keywords": [],
   "license": "GPL-3.0-only",
   "dependencies": {
-    "p-limit": "^7.3.3",
-    "quick-lru": "^8.0.0"
+    "p-limit": "^7.3.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.8",
