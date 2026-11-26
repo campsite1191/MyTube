@@ -56,7 +56,7 @@ describe('addPreviews', () => {
     assert.equal(tilePreview.blockAdoption, true);
     assert.equal(tilePreview.autotransitionDelayMs, -1);
     assert.equal(tilePreview.forceSeamlessAutotransition, false);
-    assert.equal(tilePreview.delayMs, 2500);
+    assert.equal(tilePreview.delayMs, 1500);
     assert.equal(tilePreview.durationMs, 3600000);
     assert.equal(tilePreview.restartPlaybackBeforeSeconds, 10);
     assert.equal(tilePreview.resumeVideo, false);
