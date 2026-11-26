@@ -220,6 +220,35 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(fs.existsSync(path.join(ROOT_DIR, 'mods', 'package-lock.json')), true);
   });
 
+  test('[P15] patches/15 strips telemetry/crashpad/bloat while keeping metrics JNI and CI anchors', () => {
+    const patch15 = fs.readFileSync(
+      path.join(ROOT_DIR, 'patches', '15-strip-telemetry-crashpad-and-apk-bloat.patch'),
+      'utf8'
+    );
+    const lintPatchesYml = fs.readFileSync(path.join(ROOT_DIR, '.github', 'workflows', 'lint_patches.yml'), 'utf8');
+
+    for (const token of [
+      'libchrome_crashpad_handler.so',
+      'google_play_services_ads_identifier_java',
+      'google_play_services_basement_java',
+      'CobaltPictureInPictureActivity',
+      'ChildProcessLauncherTestHelperService',
+      'https://youtube.com/tv/uma',
+    ]) {
+      assert.equal(patch15.includes(token), true, `Missing expected patch 15 strip target: ${token}`);
+    }
+
+    // Must keep //components/metrics:metrics_java for LowEntropySource JNI and avoid deleting CI anchors.
+    assert.equal(patch15.includes('-    "//components/metrics:metrics_java",'), false);
+    assert.equal(patch15.includes('-  version_code = "1"'), false);
+    assert.equal(patch15.includes('-  version_name = "1.0.0"'), false);
+
+    assert.equal(lintPatchesYml.includes('NUM_SANDBOXED_SERVICES'), true);
+    assert.equal(lintPatchesYml.includes('NUM_PRIVILEGED_SERVICES'), true);
+    assert.equal(lintPatchesYml.includes('CobaltPictureInPictureActivity'), true);
+    assert.equal(lintPatchesYml.includes('zygotePreloadName'), true);
+  });
+
   test('mirrors every runtime module under mods/ 1:1 with tests/ bidirectionally', () => {
     const modsDir = path.join(ROOT_DIR, 'mods');
     const testsDir = path.join(ROOT_DIR, 'tests');

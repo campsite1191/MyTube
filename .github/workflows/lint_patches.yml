@@ -89,5 +89,32 @@ jobs:
               assert meta.get("cobalt.ENABLE_SPLASH_SCREEN") == "false", (
                   f"Unexpected cobalt.ENABLE_SPLASH_SCREEN: {meta.get('cobalt.ENABLE_SPLASH_SCREEN')}"
               )
+              assert app.attrib.get(f"{{{ns['android']}}}zygotePreloadName") is None, (
+                  "zygotePreloadName should be removed from AndroidManifest"
+              )
+              activity_names = {el.attrib.get(f"{{{ns['android']}}}name") for el in app.findall("activity")}
+              assert "dev.cobalt.coat.CobaltPictureInPictureActivity" not in activity_names, (
+                  "CobaltPictureInPictureActivity should be removed from AndroidManifest"
+              )
+              services = app.findall("service")
+              service_names = {el.attrib.get(f"{{{ns['android']}}}name") for el in services}
+              assert "org.chromium.content_shell_apk.ChildProcessLauncherTestHelperService" not in service_names, (
+                  "ChildProcessLauncherTestHelperService should be removed from AndroidManifest"
+              )
+              assert not any(name and "TestChildProcessService" in name for name in service_names), (
+                  f"Unexpected TestChildProcessService entries: {service_names}"
+              )
+              assert all(el.attrib.get(f"{{{ns['android']}}}useAppZygote") is None for el in services), (
+                  "useAppZygote should not be set on sandboxed services"
+              )
+              assert meta.get("org.chromium.content.browser.NUM_SANDBOXED_SERVICES") == "2", (
+                  f"Unexpected NUM_SANDBOXED_SERVICES: {meta.get('org.chromium.content.browser.NUM_SANDBOXED_SERVICES')}"
+              )
+              assert meta.get("org.chromium.content.browser.NUM_PRIVILEGED_SERVICES") == "1", (
+                  f"Unexpected NUM_PRIVILEGED_SERVICES: {meta.get('org.chromium.content.browser.NUM_PRIVILEGED_SERVICES')}"
+              )
+              assert "org.chromium.content.browser.NUM_TEST_SERVICES" not in meta, (
+                  "NUM_TEST_SERVICES should be removed from AndroidManifest"
+              )
               print("Manifest XML & hardening checks passed.")
           PY

@@ -1,0 +1,1771 @@
+diff --git a/cobalt/BUILD.gn b/cobalt/BUILD.gn
+index 64e8952..c757183 100644
+--- a/cobalt/BUILD.gn
++++ b/cobalt/BUILD.gn
+@@ -78,8 +78,6 @@ group("gn_all") {
+     deps += [ "//third_party/crashpad/crashpad/tools:crashpad_database_util($native_toolchain)" ]
+   } else if (is_ios) {
+     deps += [ "//third_party/crashpad/crashpad/tools:crashpad_database_util($host_toolchain)" ]
+-  } else if (is_androidtv) {
+-    deps += [ "//third_party/crashpad/crashpad/tools:crashpad_database_util" ]
+   }
+ }
+ 
+@@ -255,7 +253,7 @@ source_set("common") {
+     "app/cobalt_switch_defaults.h",
+   ]
+ 
+-  if (!is_cobalt_hermetic_build) {
++  if (!is_cobalt_hermetic_build && !is_android) {
+     sources += [
+       "app/cobalt_crash_reporter_client.cc",
+       "app/cobalt_crash_reporter_client.h",
+@@ -324,9 +322,6 @@ source_set("common") {
+     deps += [ "//cobalt/updater" ]
+   }
+ 
+-  if (is_androidtv) {
+-    deps += [ "//starboard/crashpad_wrapper:native_stability_reader" ]
+-  }
+ }
+ 
+ action("cobalt_build_info") {
+diff --git a/cobalt/android/BUILD.gn b/cobalt/android/BUILD.gn
+index e0986c9..37e25c9 100644
+--- a/cobalt/android/BUILD.gn
++++ b/cobalt/android/BUILD.gn
+@@ -103,7 +103,6 @@ generate_jni("jni_headers") {
+   } else {
+     sources += [
+       "apk/app/src/main/java/dev/cobalt/browser/CobaltInterfaceRegistrar.java",
+-      "apk/app/src/main/java/dev/cobalt/browser/crashannotator/CrashAnnotatorImplFirstParty.java",
+       "apk/app/src/main/java/dev/cobalt/coat/PlatformError.java",
+       "apk/app/src/main/java/dev/cobalt/util/JavaSwitches.java",
+       "apk/app/src/main/java/dev/cobalt/util/JavaSwitchesTestHelper.java",
+@@ -170,8 +169,6 @@ android_library("cobalt_main_java") {
+     "//build/android:build_java",
+     "//cobalt/shell/android:cobalt_shell_java_resources",
+     "//third_party/android_deps:com_google_code_findbugs_jsr305_java",
+-    "//third_party/android_deps:google_play_services_ads_identifier_java",
+-    "//third_party/android_deps:google_play_services_basement_java",
+     "//third_party/androidx:androidx_annotation_annotation_java",
+     "//third_party/androidx:androidx_core_core_java",
+     "//third_party/androidx:androidx_customview_customview_java",
+@@ -290,7 +287,6 @@ android_library("cobalt_main_java") {
+       "//cobalt/shell/android:cobalt_shell_jni_headers",
+       "//components/embedder_support/android:view_java",
+       "//content/public/android:content_java",
+-      "//media/capture/video/android:capture_java",
+       "//mojo/public/java:base_java",
+       "//mojo/public/java:bindings_java",
+       "//mojo/public/java:system_java",
+@@ -331,7 +327,6 @@ android_library("cobalt_apk_java") {
+ 
+   deps = [
+     ":cobalt_main_java",
+-    ":cobalt_pip_java",
+     "//base:base_java",
+   ]
+ 
+@@ -342,20 +337,9 @@ android_library("cobalt_apk_java") {
+ }
+ 
+ android_assets("coat_assets") {
+-  sources = [ "apk/app/src/app/assets/web/cobalt_logo_1024.png" ]
+-  renaming_sources = [
+-    "$root_out_dir/fonts/fonts.xml",
+-    "apk/app/src/app/assets/userscript.js",
+-  ]
+-  renaming_destinations = [
+-    "fonts/fonts.xml",
+-    "userscript.js",
+-  ]
++  renaming_sources = [ "apk/app/src/app/assets/userscript.js" ]
++  renaming_destinations = [ "userscript.js" ]
+   disable_compression = true
+-  deps = [
+-    "//starboard/content/fonts:copy_font_data",
+-    "//starboard/content/fonts:fonts_xml",
+-  ]
+ }
+ 
+ # TODO(b/450024477): just a shared library once jni migration is complete
+@@ -374,7 +358,6 @@ shared_library_with_jni("libchrobalt") {
+     "//cobalt:cobalt_app",
+     "//cobalt:common",
+     "//cobalt/browser",
+-    "//cobalt/browser:cobalt_crash_annotations",
+     "//cobalt/gpu",
+     "//cobalt/renderer",
+     "//cobalt/utility",
+@@ -384,14 +367,8 @@ shared_library_with_jni("libchrobalt") {
+     "//cobalt/shell:cobalt_shell_app",
+     "//cobalt/shell:cobalt_shell_lib",
+     "//cobalt/shell:pak",
+-    "//components/crash/android:crash_android",
+-    "//components/crash/android:jni_headers",
+-    "//components/crash/content/browser",
+     "//components/embedder_support/android:web_contents_delegate",
+     "//components/memory_system",
+-    "//components/minidump_uploader",
+-    "//components/minidump_uploader:minidump_uploader_jni_headers",
+-    "//components/thin_webview/internal",
+     "//media",
+     "//skia",
+     "//third_party/blink/public/common",
+@@ -421,20 +398,13 @@ android_apk("cobalt_apk") {
+   deps = [
+     ":coat_assets",
+     ":cobalt_apk_java",
+-    "//components/crash/android:java",
+-    "//components/crash/core/app:chrome_crashpad_handler_named_as_so",
+     "//components/metrics:metrics_java",
+   ]
+ 
+-  # This is the packaging strategy used by Chrome on Android L through M. In a
+-  # production implementation we should consider the N through P or Q+
+-  # approaches described in docs/android_native_libraries.md.
+-  loadable_modules = [ "$root_out_dir/libchrome_crashpad_handler.so" ]
+-
+   shared_libraries = [ ":libchrobalt" ]
+   srcjar_deps = [ ":libchrobalt__jni_registration" ]
+   aapt_locale_allowlist = [ "en-US" ]
+-  include_size_info = is_official_build
++  include_size_info = false
+   version_code = "1"
+   version_name = "1.0.0"
+   keystore_path = "../../../../.android/debug.keystore"
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/browser/crashannotator/CrashAnnotatorImplFirstParty.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/browser/crashannotator/CrashAnnotatorImplFirstParty.java
+index d95b72e..0ea78b3 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/browser/crashannotator/CrashAnnotatorImplFirstParty.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/browser/crashannotator/CrashAnnotatorImplFirstParty.java
+@@ -14,33 +14,16 @@
+ 
+ package dev.cobalt.browser.crashannotator;
+ 
+-import dev.cobalt.coat.CrashContext;
+ import org.chromium.content_public.browser.RenderFrameHost;
+ import org.chromium.crashannotator.mojom.CrashAnnotator;
+ import org.chromium.mojo.system.MojoException;
+-import org.jni_zero.NativeMethods;
+ 
+-/**
+- * Implements the CrashAnnotator Mojo interface for platforms that use first- party crash reporting
+- * systems.
+- */
++/** No-op CrashAnnotator Mojo implementation with native crash reporting disabled. */
+ public class CrashAnnotatorImplFirstParty implements CrashAnnotator {
+-  // TODO(cobalt, b/383301493): confirm that this member is needed for proper
+-  // lifetime management.
+-  private final RenderFrameHost mRenderFrameHost;
+-
+-  public CrashAnnotatorImplFirstParty(RenderFrameHost renderFrameHost) {
+-    mRenderFrameHost = renderFrameHost;
+-  }
++  public CrashAnnotatorImplFirstParty(RenderFrameHost renderFrameHost) {}
+ 
+   @Override
+   public void setString(String key, String value, SetString_Response callback) {
+-    CrashContext.INSTANCE.setCrashContext(key, value);
+-    CrashAnnotatorImplFirstPartyJni.get().setAnnotation(key, value);
+-
+-    // The browser has no visibility into what occurs after it has provided
+-    // the crash context to StarboardBridge. So we just assume the crash
+-    // context will be handled correctly.
+     callback.call(true);
+   }
+ 
+@@ -51,9 +34,4 @@ public class CrashAnnotatorImplFirstParty implements CrashAnnotator {
+   /** This abstract method must be overridden. */
+   @Override
+   public void onConnectionError(MojoException e) {}
+-
+-  @NativeMethods
+-  interface Natives {
+-    void setAnnotation(String key, String value);
+-  }
+ }
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/AdvertisingId.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/AdvertisingId.java
+index 701a0a8..bd53712 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/AdvertisingId.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/AdvertisingId.java
+@@ -14,107 +14,21 @@
+ 
+ package dev.cobalt.coat;
+ 
+-import static dev.cobalt.util.Log.TAG;
+-
+-import android.content.ContentResolver;
+ import android.content.Context;
+-import android.provider.Settings;
+-import android.text.TextUtils;
+-import androidx.annotation.GuardedBy;
+-import com.google.android.gms.ads.identifier.AdvertisingIdClient;
+-import com.google.android.gms.common.GooglePlayServicesNotAvailableException;
+-import com.google.android.gms.common.GooglePlayServicesRepairableException;
+-import dev.cobalt.util.Log;
+-import java.io.IOException;
+-import java.util.concurrent.ExecutorService;
+-import java.util.concurrent.Executors;
+ 
+-/** A class for managing the IfA for CoAT. https://developer.android.com/training/articles/ad-id */
++/** Stubbed AdvertisingId with Google Play Services Ads Identifier removed. */
+ public class AdvertisingId {
+-  private final Context mContext;
+-  private final ExecutorService mSingleThreadExecutor;
+-
+-  @GuardedBy("mAdvertisingIdInfoLock")
+-  private volatile AdvertisingIdClient.Info mAdvertisingIdInfo;
++  public AdvertisingId(Context context) {}
+ 
+-  // Controls access to mAdvertisingIdInfo
+-  private final Object mAdvertisingIdInfoLock = new Object();
++  public void shutdown() {}
+ 
+-  public AdvertisingId(Context context) {
+-    mContext = context;
+-    mSingleThreadExecutor = Executors.newSingleThreadExecutor();
+-    mAdvertisingIdInfo = null;
+-    refresh();
+-  }
+-
+-  public void shutdown() {
+-    mSingleThreadExecutor.shutdown();
+-  }
+-
+-  public void refresh() {
+-    mSingleThreadExecutor.execute(
+-        () -> {
+-          try {
+-            // The following statement may be slow.
+-            AdvertisingIdClient.Info info = AdvertisingIdClient.getAdvertisingIdInfo(mContext);
+-            synchronized (mAdvertisingIdInfoLock) {
+-              mAdvertisingIdInfo = info;
+-            }
+-            Log.i(TAG, "Successfully retrieved Advertising ID (IfA).");
+-          } catch (IOException
+-              | GooglePlayServicesNotAvailableException
+-              | GooglePlayServicesRepairableException e) {
+-            AdvertisingIdClient.Info info = getAdvertisingIdInfoFromSettings();
+-            if (info == null) {
+-              Log.e(TAG, "Failed to retrieve Advertising ID (IfA).");
+-              return;
+-            }
+-            synchronized (mAdvertisingIdInfoLock) {
+-              mAdvertisingIdInfo = info;
+-            }
+-            Log.i(TAG, "Retrieved Advertising ID (IfA) from system settings.");
+-          }
+-        });
+-  }
+-
+-  // Devices without Google Play Services can publish the IfA in secure settings instead.
+-  private AdvertisingIdClient.Info getAdvertisingIdInfoFromSettings() {
+-    ContentResolver resolver = mContext.getContentResolver();
+-    try {
+-      String id = Settings.Secure.getString(resolver, "advertising_id");
+-      if (TextUtils.isEmpty(id)) {
+-        return null;
+-      }
+-      boolean limitAdTracking = Settings.Secure.getInt(resolver, "limit_ad_tracking", 0) != 0;
+-      return new AdvertisingIdClient.Info(id, limitAdTracking);
+-    } catch (SecurityException e) {
+-      // The device may not let apps read these settings.
+-      Log.w(TAG, "Failed to read Advertising ID (IfA) from system settings.", e);
+-      return null;
+-    }
+-  }
++  public void refresh() {}
+ 
+   public String getId() {
+-    String result = "";
+-    synchronized (mAdvertisingIdInfoLock) {
+-      if (mAdvertisingIdInfo != null) {
+-        result = mAdvertisingIdInfo.getId();
+-      }
+-    }
+-    refresh();
+-    Log.d(TAG, "Returning IfA getId: " + result);
+-    return result;
++    return "";
+   }
+ 
+   public boolean isLimitAdTrackingEnabled() {
+-    boolean result = false;
+-    synchronized (mAdvertisingIdInfoLock) {
+-      if (mAdvertisingIdInfo != null) {
+-        result = mAdvertisingIdInfo.isLimitAdTrackingEnabled();
+-      }
+-    }
+-    refresh();
+-    Log.d(TAG, "Returning IfA LimitedAdTrackingEnabled: " + Boolean.toString(result));
+-    return result;
++    return true;
+   }
+ }
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
+index b4e2dc2..aa404d7 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/BaseStarboardBridge.java
+@@ -139,7 +139,6 @@ public class BaseStarboardBridge {
+   // can open services with the same name without colliding or leaking on close.
+   private final Map<Long, CobaltService> mCobaltServices = new ConcurrentHashMap<>();
+ 
+-  private static final String GOOGLE_PLAY_SERVICES_PACKAGE = "com.google.android.gms";
+   private static final String AMATI_EXPERIENCE_FEATURE =
+       "com.google.android.feature.AMATI_EXPERIENCE";
+   private final boolean mIsAmatiDevice;
+@@ -1095,27 +1094,7 @@ public class BaseStarboardBridge {
+ 
+   @CalledByNative
+   protected long getPlayServicesVersion() {
+-    try {
+-      if (android.os.Build.VERSION.SDK_INT < 28) {
+-        return mAppContext
+-            .getPackageManager()
+-            .getPackageInfo(GOOGLE_PLAY_SERVICES_PACKAGE, 0)
+-            .versionCode;
+-      } else if (android.os.Build.VERSION.SDK_INT < 33) {
+-        return mAppContext
+-            .getPackageManager()
+-            .getPackageInfo(GOOGLE_PLAY_SERVICES_PACKAGE, 0)
+-            .getLongVersionCode();
+-      } else {
+-        return mAppContext
+-            .getPackageManager()
+-            .getPackageInfo(GOOGLE_PLAY_SERVICES_PACKAGE, PackageManager.PackageInfoFlags.of(0))
+-            .getLongVersionCode();
+-      }
+-    } catch (Exception e) {
+-      Log.w(TAG, "Unable to query Google Play Services package version", e);
+-      return 0;
+-    }
++    return 0;
+   }
+ 
+   @CalledByNative
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
+index 493bcf4..bf7a907 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
+@@ -69,7 +69,6 @@ import org.chromium.base.FeatureList;
+ import org.chromium.base.library_loader.LibraryLoader;
+ import org.chromium.base.library_loader.LibraryProcessType;
+ import org.chromium.base.memory.MemoryPressureMonitor;
+-import org.chromium.base.memory.MemoryPressureUma;
+ import org.chromium.base.metrics.RecordHistogram;
+ import org.chromium.content.browser.input.ImeAdapterImpl;
+ import org.chromium.content_public.browser.BrowserStartupController;
+@@ -501,12 +500,6 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+       }
+     }
+     Log.i(TAG, "Arming StartupGuard with " + timeout + " second timeout.");
+-    StartupGuard.getInstance()
+-        .setPreCrashHook(
+-            () ->
+-                CobaltProcessStateSummary.setStartupGuardTriggeredKill(
+-                    StartupGuard.getInstance().getStartupStatus(),
+-                    StartupGuard.getInstance().getHighestMilestone()));
+     StartupGuard.getInstance().scheduleCrash(timeout);
+   }
+ 
+@@ -607,7 +600,6 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+     NetworkChangeNotifier.init();
+     NetworkChangeNotifier.setAutoDetectConnectivityState(true);
+     if (!sIsMemoryPressureInitialized) {
+-      MemoryPressureUma.initializeForBrowser();
+       MemoryPressureMonitor.INSTANCE.registerComponentCallbacks();
+       sIsMemoryPressureInitialized = true;
+     }
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/libraries/services/clientloginfo/ClientLogInfo.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/libraries/services/clientloginfo/ClientLogInfo.java
+index ef46f2f..83e744c 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/libraries/services/clientloginfo/ClientLogInfo.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/libraries/services/clientloginfo/ClientLogInfo.java
+@@ -6,8 +6,6 @@ import android.content.Context;
+ import dev.cobalt.coat.CobaltService;
+ import dev.cobalt.util.DisplayUtil;
+ import dev.cobalt.util.Log;
+-import java.util.concurrent.Executors;
+-import java.util.concurrent.ThreadPoolExecutor;
+ 
+ /** ClientLogInfo to report Android API support on android devices. */
+ public class ClientLogInfo extends CobaltService {
+@@ -17,13 +15,9 @@ public class ClientLogInfo extends CobaltService {
+   protected static final String SERVICE_NAME = "dev.cobalt.coat.clientloginfo";
+ 
+   private static String sClientInfo = "";
+-  private final ThreadPoolExecutor mExecutor;
+ 
+   public ClientLogInfo(Context appContext, long nativeService) {
+     Log.i(TAG, "Opening ClientLogInfo");
+-
+-    // Create a ThreadPoolExecutor with a fixed number of threads
+-    this.mExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(1);
+   }
+ 
+   @Override
+@@ -54,9 +48,7 @@ public class ClientLogInfo extends CobaltService {
+   }
+ 
+   @Override
+-  public void close() {
+-    mExecutor.shutdown();
+-  }
++  public void close() {}
+ 
+   public static void setClientInfo(String value) {
+     sClientInfo = value;
+diff --git a/cobalt/app/cobalt_main_delegate.cc b/cobalt/app/cobalt_main_delegate.cc
+index ad5e9da..45b9f15 100644
+--- a/cobalt/app/cobalt_main_delegate.cc
++++ b/cobalt/app/cobalt_main_delegate.cc
+@@ -42,10 +42,10 @@
+ #if BUILDFLAG(IS_STARBOARD) || BUILDFLAG(IS_ANDROIDTV)
+ #include "cobalt/browser/hang_watcher_delegate_impl.h"
+ #endif
+-#if !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#if !BUILDFLAG(IS_COBALT_HERMETIC_BUILD) && !BUILDFLAG(IS_ANDROID)
+ #include "cobalt/app/cobalt_crash_reporter_client.h"
+ #include "components/crash/core/app/crashpad.h"  // nogncheck
+-#endif  // !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#endif  // !BUILDFLAG(IS_COBALT_HERMETIC_BUILD) && !BUILDFLAG(IS_ANDROID)
+ #include "cobalt/gpu/cobalt_content_gpu_client.h"
+ #include "cobalt/renderer/cobalt_content_renderer_client.h"
+ #include "components/memory_system/initializer.h"
+@@ -57,9 +57,6 @@
+ #include "gpu/config/gpu_finch_features.h"
+ #if BUILDFLAG(IS_ANDROIDTV)
+ #include "starboard/android/shared/starboard_bridge.h"
+-#include "starboard/crashpad_wrapper/native_stability_reader.h"  // nogncheck
+-#include "starboard/extension/native_stability.h"
+-#include "starboard/system.h"
+ #endif
+ 
+ #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)
+@@ -75,23 +72,6 @@
+ 
+ namespace cobalt {
+ 
+-#if BUILDFLAG(IS_ANDROIDTV)
+-namespace {
+-
+-int ReadNativeStabilityReports(SbNativeStabilityReport* reports,
+-                               int max_num_reports) {
+-  std::optional<base::FilePath> database_path =
+-      crash_reporter::GetCrashpadDatabasePath();
+-  if (!database_path.has_value()) {
+-    return -1;
+-  }
+-  return crashpad::ReadReportsFromDatabase(*database_path, reports,
+-                                           max_num_reports);
+-}
+-
+-}  // namespace
+-#endif  // BUILDFLAG(IS_ANDROIDTV)
+-
+ CobaltMainDelegate::CobaltMainDelegate(std::optional<int64_t> startup_timestamp,
+                                        const char* initial_deep_link,
+                                        bool is_content_browsertests,
+@@ -277,7 +257,7 @@ std::variant<int, content::MainFunctionParams> CobaltMainDelegate::RunProcess(
+   return 0;
+ }
+ 
+-#if !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#if !BUILDFLAG(IS_COBALT_HERMETIC_BUILD) && !BUILDFLAG(IS_ANDROID)
+ void CobaltMainDelegate::PreSandboxStartup() {
+ #if BUILDFLAG(IS_ANDROIDTV) || BUILDFLAG(IS_IOS_TVOS)
+   const bool initialize_crashpad = true;
+@@ -319,7 +299,7 @@ void CobaltMainDelegate::PreSandboxStartup() {
+ 
+   ShellMainDelegate::PreSandboxStartup();
+ }
+-#endif  // !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#endif  // !BUILDFLAG(IS_COBALT_HERMETIC_BUILD) && !BUILDFLAG(IS_ANDROID)
+ 
+ void CobaltMainDelegate::Shutdown() {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+diff --git a/cobalt/app/cobalt_main_delegate.h b/cobalt/app/cobalt_main_delegate.h
+index 00d10b1..a9b8be1 100644
+--- a/cobalt/app/cobalt_main_delegate.h
++++ b/cobalt/app/cobalt_main_delegate.h
+@@ -68,7 +68,7 @@ class CobaltMainDelegate : public content::ShellMainDelegate {
+       const std::string& process_type,
+       content::MainFunctionParams main_function_params) override;
+ 
+-#if !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#if !BUILDFLAG(IS_COBALT_HERMETIC_BUILD) && !BUILDFLAG(IS_ANDROID)
+   void PreSandboxStartup() override;
+ #endif
+ 
+diff --git a/cobalt/browser/BUILD.gn b/cobalt/browser/BUILD.gn
+index 9ffcc9e..6fc464a 100644
+--- a/cobalt/browser/BUILD.gn
++++ b/cobalt/browser/BUILD.gn
+@@ -47,13 +47,6 @@ source_set("browser") {
+     ]
+   }
+ 
+-  if (is_android) {
+-    sources += [
+-      "android/overlay/cobalt_video_overlay_window.cc",
+-      "android/overlay/cobalt_video_overlay_window.h",
+-    ]
+-  }
+-
+   public_deps = [
+     ":memory_ablation",
+     "//cobalt/browser/h5vcc_memory",
+@@ -130,11 +123,7 @@ source_set("browser") {
+   if (is_android) {
+     deps += [
+       "//cobalt/android:jni_headers",
+-      "//cobalt/android:pip_jni_headers",
+-      "//components/crash/content/browser",
+       "//components/embedder_support/android:web_contents_delegate",
+-      "//components/thin_webview",
+-      "//components/thin_webview/internal",
+       "//ui/android",
+     ]
+   }
+@@ -277,9 +266,6 @@ if (is_starboard || is_androidtv) {
+       "//cobalt/build/configs:buildflags",
+       "//starboard:starboard_headers_only",
+     ]
+-    if (is_androidtv) {
+-      deps += [ ":cobalt_crash_annotations" ]
+-    }
+   }
+ }
+ 
+diff --git a/cobalt/browser/cobalt_browser_main_parts.cc b/cobalt/browser/cobalt_browser_main_parts.cc
+index 0de40b7..32464ab 100644
+--- a/cobalt/browser/cobalt_browser_main_parts.cc
++++ b/cobalt/browser/cobalt_browser_main_parts.cc
+@@ -23,9 +23,6 @@
+ #include "base/feature_list.h"
+ #include "base/features.h"
+ #include "base/files/file_util.h"
+-#include "base/metrics/histogram_functions.h"
+-#include "base/metrics/persistent_histogram_allocator.h"
+-#include "base/no_destructor.h"
+ #include "base/path_service.h"
+ #include "base/run_loop.h"
+ #include "base/sequence_checker.h"
+@@ -36,25 +33,12 @@
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
+ #include "cobalt/browser/cobalt_content_browser_client.h"
+-#include "cobalt/browser/constants/cobalt_pref_names.h"
+ #include "cobalt/browser/features.h"
+ #include "cobalt/browser/global_features.h"
+-#include "cobalt/browser/h5vcc_native_stability/native_stability_manager.h"
+-#include "cobalt/browser/memory_ablation.h"
+-#include "cobalt/browser/metrics/cobalt_detailed_metrics_delegate.h"
+-#include "cobalt/browser/metrics/cobalt_metrics_service_client.h"
+-#include "cobalt/browser/metrics/cobalt_stability_metrics_helper.h"
+-#include "cobalt/browser/metrics/cobalt_storage_metrics_helper.h"
+ #include "cobalt/browser/switches.h"
+-#include "cobalt/memory/cobalt_memory_attribution_manager.h"
+ #include "cobalt/shell/browser/migrate_storage_record/migration_manager.h"
+ #include "cobalt/shell/browser/shell_content_browser_client.h"
+ #include "cobalt/shell/common/shell_paths.h"
+-#include "components/metrics/metrics_service.h"
+-#include "components/metrics/persistent_histograms.h"
+-#include "components/metrics/persistent_system_profile.h"
+-#include "components/metrics_services_manager/metrics_services_manager.h"
+-#include "components/prefs/pref_service.h"
+ #include "components/services/storage/public/cpp/constants.h"
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/resource_coordinator_service.h"
+@@ -97,16 +81,9 @@
+ #include "starboard/system.h"
+ #endif  // BUILDFLAG(IS_STARBOARD)
+ 
+-#if BUILDFLAG(USE_EVERGREEN)
+-#include "starboard/extension/native_stability.h"
+-#include "starboard/system.h"
+-#endif
+-
+-#include "services/resource_coordinator/public/cpp/memory_instrumentation/client_process_impl.h"
+-#include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
+-#include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation_features.h"
+ #if !BUILDFLAG(COBALT_IS_RELEASE_BUILD)
+ #include "base/location.h"
++#include "base/no_destructor.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "components/services/heap_profiling/heap_profiling_service.h"  // nogncheck
+ #include "components/services/heap_profiling/public/cpp/profiling_client.h"  // nogncheck
+@@ -116,9 +93,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_ANDROID)
+-#include "base/android/build_info.h"
+ #include "base/android/jni_android.h"
+-#include "cobalt/android/jni_headers/ProcessExitReasonHelper_jni.h"
+ #endif
+ 
+ #if BUILDFLAG(IS_ANDROIDTV)
+@@ -136,39 +111,6 @@ namespace cobalt {
+ 
+ namespace {
+ 
+-void InitializeBrowserMemoryInstrumentationClient() {
+-  if (memory_instrumentation::MemoryInstrumentation::GetInstance()) {
+-    return;
+-  }
+-
+-  auto task_runner = base::trace_event::MemoryDumpManager::GetInstance()
+-                         ->GetDumpThreadTaskRunner();
+-  if (!task_runner->RunsTasksInCurrentSequence()) {
+-    task_runner->PostTask(
+-        FROM_HERE,
+-        base::BindOnce(&InitializeBrowserMemoryInstrumentationClient));
+-    return;
+-  }
+-
+-  if (memory_instrumentation::MemoryInstrumentation::GetInstance()) {
+-    return;
+-  }
+-
+-  // Register the browser process as a memory-instrumentation client.
+-  // This replicates content::InitializeBrowserMemoryInstrumentationClient()
+-  // while avoiding unauthorized header includes.
+-  mojo::PendingRemote<memory_instrumentation::mojom::Coordinator> coordinator;
+-  mojo::PendingRemote<memory_instrumentation::mojom::ClientProcess> process;
+-  auto process_receiver = process.InitWithNewPipeAndPassReceiver();
+-  content::GetMemoryInstrumentationRegistry()->RegisterClientProcess(
+-      coordinator.InitWithNewPipeAndPassReceiver(), std::move(process),
+-      memory_instrumentation::mojom::ProcessType::BROWSER,
+-      base::GetCurrentProcId(), /*service_name=*/std::nullopt);
+-  memory_instrumentation::ClientProcessImpl::CreateInstance(
+-      std::move(process_receiver), std::move(coordinator),
+-      /*is_browser_process=*/true);
+-}
+-
+ #if !BUILDFLAG(COBALT_IS_RELEASE_BUILD)
+ void RegisterCobaltHeapProfilerOnDumpThread() {
+   [[maybe_unused]] static base::SequenceChecker sequence_checker;
+@@ -255,76 +197,6 @@ void InitializeCobaltHeapProfiler() {
+ }
+ #endif  // !BUILDFLAG(COBALT_IS_RELEASE_BUILD)
+ 
+-constexpr char kBrowserStabilityMetricsName[] = "BrowserStabilityMetrics";
+-constexpr size_t kStabilityMetricsAllocSize = 128 * 1024;  // 128 KiB limit
+-constexpr uint32_t kStabilityMetricsAllocId = 0x53544142;  // "STAB"
+-
+-void LogStabilityMetricsCapacity(const char* stage_label) {
+-  auto* allocator = base::GlobalHistogramAllocator::Get();
+-  if (!allocator) {
+-    return;
+-  }
+-  auto* mem_allocator = allocator->memory_allocator();
+-  if (!mem_allocator) {
+-    return;
+-  }
+-
+-  size_t used = mem_allocator->used();
+-  size_t total = mem_allocator->size();
+-  int percent_full = total > 0 ? static_cast<int>((used * 100) / total) : 0;
+-
+-  base::UmaHistogramPercentage("Cobalt.StabilityMetrics.PercentFull",
+-                               percent_full);
+-  base::UmaHistogramCounts1000("Cobalt.StabilityMetrics.UsedKilobytes",
+-                               static_cast<int>(used / 1024));
+-
+-  bool is_near_capacity = mem_allocator->IsFull() || percent_full >= 90;
+-  base::UmaHistogramBoolean("Cobalt.StabilityMetrics.IsNearCapacity",
+-                            is_near_capacity);
+-
+-  if (is_near_capacity) {
+-    LOG(WARNING) << "Cobalt Stability Metrics PMA approaching capacity at "
+-                 << stage_label << "! Used: " << (used / 1024) << "KB / "
+-                 << (total / 1024) << "KB (" << percent_full << "% full)";
+-  }
+-}
+-
+-#if BUILDFLAG(IS_ANDROID)
+-int64_t RecordPriorSessionExitReasons(bool deduplication_enabled,
+-                                      int64_t last_logged_timestamp_ms) {
+-  if (base::android::BuildInfo::GetInstance()->sdk_int() <
+-      base::android::SDK_VERSION_R) {
+-    return -1;
+-  }
+-  JNIEnv* env = base::android::AttachCurrentThread();
+-  Java_ProcessExitReasonHelper_setDeduplicationEnabled(env,
+-                                                       deduplication_enabled);
+-  return Java_ProcessExitReasonHelper_recordHistoricalProcessExitReason(
+-      env, last_logged_timestamp_ms);
+-}
+-#endif
+-
+-bool GetStabilityMetricsBaseDirectory(base::FilePath* base_dir) {
+-  const auto* command_line = base::CommandLine::ForCurrentProcess();
+-  if (command_line->HasSwitch("browser-test") ||
+-      command_line->HasSwitch("single-process-tests")) {
+-    return false;
+-  }
+-#if BUILDFLAG(IS_ANDROID)
+-  return base::PathService::Get(base::DIR_ANDROID_APP_DATA, base_dir);
+-#else
+-  if (base::PathService::Get(content::SHELL_DIR_USER_DATA, base_dir) &&
+-      !base_dir->empty()) {
+-    return true;
+-  }
+-  if (command_line->HasSwitch("user-data-dir")) {
+-    *base_dir = command_line->GetSwitchValuePath("user-data-dir");
+-    return !base_dir->empty();
+-  }
+-  return base::PathService::Get(base::DIR_TEMP, base_dir);
+-#endif
+-}
+-
+ constexpr base::TimeDelta kStorageCleanupDelay = base::Seconds(30);
+ 
+ // Legacy directory names created by earlier M138 Cobalt builds before those
+@@ -557,65 +429,6 @@ void DeleteUnusedChromiumStoragePaths(const base::FilePath& user_data_dir) {
+ }
+ 
+ int CobaltBrowserMainParts::PreEarlyInitialization() {
+-  if (!base::GlobalHistogramAllocator::Get()) {
+-    base::FilePath base_dir;
+-    if (!GetStabilityMetricsBaseDirectory(&base_dir)) {
+-      LOG(WARNING) << "Failed to get base directory for "
+-                   << kBrowserStabilityMetricsName
+-                   << ", falling back to 128 KB local memory.";
+-      base::GlobalHistogramAllocator::CreateWithLocalMemory(
+-          kStabilityMetricsAllocSize, kStabilityMetricsAllocId,
+-          kBrowserStabilityMetricsName);
+-    } else {
+-      base::FilePath metrics_dir =
+-          base_dir.AppendASCII(kBrowserStabilityMetricsName);
+-
+-      base::CreateDirectory(metrics_dir);
+-
+-      constexpr int64_t kMaxStabilityMetricsPmaDirSizeBytes =
+-          512 * 1024;  // 512 KiB max total disk quota for stability PMAs
+-      if (!EnsurePmaDirectoryBudget(metrics_dir, kBrowserStabilityMetricsName,
+-                                    kMaxStabilityMetricsPmaDirSizeBytes,
+-                                    kStabilityMetricsAllocSize)) {
+-        LOG(WARNING) << "Stability metrics directory exceeds 512 KB budget ("
+-                     << metrics_dir.value()
+-                     << "), falling back to 128 KB local memory.";
+-        base::GlobalHistogramAllocator::CreateWithLocalMemory(
+-            kStabilityMetricsAllocSize, kStabilityMetricsAllocId,
+-            kBrowserStabilityMetricsName);
+-      } else {
+-        base::FilePath active_file =
+-            base::GlobalHistogramAllocator::ConstructFilePathForUploadDir(
+-                metrics_dir, kBrowserStabilityMetricsName, base::Time::Now(),
+-                base::GetCurrentProcId());
+-
+-        // Instantiate 128 KB memory-mapped PMA
+-        if (base::GlobalHistogramAllocator::CreateWithFile(
+-                active_file, kStabilityMetricsAllocSize,
+-                kStabilityMetricsAllocId, kBrowserStabilityMetricsName,
+-                /*exclusive_write=*/true)) {
+-          LOG(INFO) << "Cobalt Persistent Histogram Allocator ("
+-                    << kBrowserStabilityMetricsName
+-                    << ", 128 KB) initialized at: " << active_file.value();
+-        } else {
+-          LOG(WARNING) << "Failed to initialize file-backed PMA for "
+-                       << kBrowserStabilityMetricsName
+-                       << ", falling back to 128 KB local memory.";
+-          base::GlobalHistogramAllocator::CreateWithLocalMemory(
+-              kStabilityMetricsAllocSize, kStabilityMetricsAllocId,
+-              kBrowserStabilityMetricsName);
+-        }
+-      }
+-    }
+-
+-    auto* allocator = base::GlobalHistogramAllocator::Get();
+-    if (allocator) {
+-      metrics::GlobalPersistentSystemProfile::GetInstance()
+-          ->RegisterPersistentAllocator(allocator->memory_allocator());
+-      allocator->CreateTrackingHistograms(kBrowserStabilityMetricsName);
+-    }
+-  }
+-
+   return ShellBrowserMainParts::PreEarlyInitialization();
+ }
+ 
+@@ -649,12 +462,6 @@ int CobaltBrowserMainParts::PreCreateThreads() {
+ #if BUILDFLAG(IS_ANDROIDTV)
+   starboard::StarboardBridge::GetInstance()->SetStartupMilestone(17);
+ #endif
+-  base::UmaHistogramSparse("Cobalt.Startup.MilestoneReached", 17);
+-  LogStabilityMetricsCapacity("PreCreateThreads");
+-  SetupMetrics();
+-
+-  InitializeBrowserMemoryInstrumentationClient();
+-
+ #if !BUILDFLAG(COBALT_IS_RELEASE_BUILD)
+   // Manually initialize Perfetto tracing post-FeatureList for Cobalt.
+   // This is required because Cobalt bypasses
+@@ -672,21 +479,6 @@ int CobaltBrowserMainParts::PreCreateThreads() {
+ }
+ 
+ int CobaltBrowserMainParts::PreMainMessageLoopRun() {
+-  StartMetricsRecording();
+-  LogStabilityMetricsCapacity("PreMainMessageLoopRun");
+-
+-  base::FilePath base_dir;
+-  if (GetStabilityMetricsBaseDirectory(&base_dir)) {
+-    base::FilePath metrics_dir =
+-        base_dir.AppendASCII(kBrowserStabilityMetricsName);
+-    base::ThreadPool::PostTask(
+-        FROM_HERE,
+-        {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+-         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+-        base::BindOnce(&ClearOtherStabilityMetricsPmaFiles, metrics_dir,
+-                       kBrowserStabilityMetricsName, base::GetCurrentProcId()));
+-  }
+-
+   if (base::FeatureList::IsEnabled(base::features::kCobaltStorageCleanup)) {
+     base::ThreadPool::PostDelayedTask(
+         FROM_HERE,
+@@ -696,49 +488,6 @@ int CobaltBrowserMainParts::PreMainMessageLoopRun() {
+         base::BindOnce(&RunDelayedStorageCleanup), kStorageCleanupDelay);
+   }
+ 
+-#if BUILDFLAG(IS_ANDROID)
+-  if (base::android::BuildInfo::GetInstance()->sdk_int() >=
+-      base::android::SDK_VERSION_R) {
+-    const bool deduplication_enabled = base::FeatureList::IsEnabled(
+-        features::kCobaltStabilityMetricsDeduplication);
+-    int64_t last_logged_timestamp_ms = -1;
+-    if (deduplication_enabled) {
+-      if (PrefService* local_state =
+-              GlobalFeatures::GetInstance()->metrics_local_state()) {
+-        last_logged_timestamp_ms =
+-            local_state->GetInt64(kLastLoggedProcessExitTimestampMs);
+-      }
+-    }
+-    base::ThreadPool::PostTaskAndReplyWithResult(
+-        FROM_HERE,
+-        {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+-         base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+-        base::BindOnce(&RecordPriorSessionExitReasons, deduplication_enabled,
+-                       last_logged_timestamp_ms),
+-        base::BindOnce([](int64_t recorded_timestamp_ms) {
+-          if (recorded_timestamp_ms > 0) {
+-            if (PrefService* local_state =
+-                    GlobalFeatures::GetInstance()->metrics_local_state()) {
+-              local_state->SetInt64(kLastLoggedProcessExitTimestampMs,
+-                                    recorded_timestamp_ms);
+-            }
+-          }
+-        }));
+-  }
+-#endif
+-
+-#if BUILDFLAG(COBALT_DETAILED_MEMORY_METRICS)
+-  static base::NoDestructor<CobaltDetailedMetricsDelegate> delegate;
+-  if (memory_instrumentation::MemoryInstrumentation::GetInstance()) {
+-    memory_instrumentation::MemoryInstrumentation::GetInstance()
+-        ->SetDetailedMetricsDelegate(delegate.get());
+-  }
+-#endif
+-
+-  cobalt::memory::CobaltMemoryAttributionManager::Get()->Start();
+-
+-  MaybeApplyMemoryAblation();
+-
+ #if !BUILDFLAG(IS_ANDROIDTV)
+   auto* client = CobaltContentBrowserClient::Get();
+   CHECK(client) << "CobaltContentBrowserClient::Get() returned NULL in "
+@@ -746,21 +495,6 @@ int CobaltBrowserMainParts::PreMainMessageLoopRun() {
+   client->SetUserAgentCrashAnnotation();
+ #endif  // !BUILDFLAG(IS_ANDROIDTV)
+ 
+-#if BUILDFLAG(USE_EVERGREEN) || BUILDFLAG(IS_ANDROIDTV)
+-  auto* native_stability_manager =
+-      h5vcc_native_stability::NativeStabilityManager::GetInstance();
+-
+-#if BUILDFLAG(USE_EVERGREEN)
+-  // Only 3P (Evergreen) platforms currently provide native stability tracking
+-  // for crashes.
+-  //
+-  // TODO: b/528362453 - Consider moving this to an earlier startup stage (e.g.
+-  // PreEarlyInitialization) to ensure early startup crashes are also tagged.
+-  native_stability_manager->ArmCrashUuidAnnotation();
+-#endif  // BUILDFLAG(USE_EVERGREEN)
+-  native_stability_manager->PruneStorage();
+-#endif  // BUILDFLAG(USE_EVERGREEN) || BUILDFLAG(IS_ANDROIDTV)
+-
+   int result = ShellBrowserMainParts::PreMainMessageLoopRun();
+ 
+   if (result != 0) {
+@@ -818,7 +552,6 @@ int CobaltBrowserMainParts::PreMainMessageLoopRun() {
+ #endif  // BUILDFLAG(IS_STARBOARD) || BUILDFLAG(IS_ANDROID)
+ 
+   StartStorageMigration();
+-  ScheduleCobaltStorageMetricsRecording();
+ 
+   return result;
+ }
+@@ -888,24 +621,6 @@ void CobaltBrowserMainParts::PostDestroyThreads() {
+   ShellBrowserMainParts::PostDestroyThreads();
+ }
+ 
+-void CobaltBrowserMainParts::SetupMetrics() {
+-  metrics::MetricsService* metrics =
+-      GlobalFeatures::GetInstance()->metrics_service();
+-  metrics->InitializeMetricsRecordingState();
+-  LOG(INFO) << "Cobalt Metrics Service initialized.";
+-}
+-
+-void CobaltBrowserMainParts::StartMetricsRecording() {
+-  // This call kicks off the whole metric recording flow. It sets a timer and
+-  // periodically triggers a UMA payload to be handled by the logs uploader.
+-  // Note, "may_upload" is always true but reporting itself can be disabled and
+-  // no uploads are sent.
+-  GlobalFeatures::GetInstance()
+-      ->metrics_services_manager()
+-      ->UpdateUploadPermissions(false);
+-  LOG(INFO) << "Metrics Service is now running/recording.";
+-}
+-
+ #if BUILDFLAG(IS_ANDROIDTV)
+ void CobaltBrowserMainParts::PostCreateThreads() {
+   // TODO(cobalt, b/383301493): this looks like a reasonable stage at which to
+diff --git a/cobalt/browser/cobalt_browser_main_parts.h b/cobalt/browser/cobalt_browser_main_parts.h
+index d5363a3..698d5ea 100644
+--- a/cobalt/browser/cobalt_browser_main_parts.h
++++ b/cobalt/browser/cobalt_browser_main_parts.h
+@@ -62,9 +62,6 @@ class AndroidOsSignalEvaluator;
+ }  // namespace memory
+ #endif
+ 
+-class CobaltMetricsServiceClient;
+-class CobaltMetricsServicesManagerClient;
+-class GlobalFeatures;
+ 
+ // Cleans up legacy/orphaned cache directories ("Cache", "Code Cache",
+ // "ShaderCache", "GrShaderCache") under |user_data_dir| using
+@@ -121,12 +118,6 @@ class CobaltBrowserMainParts : public content::ShellBrowserMainParts {
+ #endif  // BUILDFLAG(IS_LINUX)
+ 
+  private:
+-  // Initializes, but doesn't start, UMA.
+-  void SetupMetrics();
+-
+-  // Starts metrics recording.
+-  void StartMetricsRecording();
+-
+   // C25 Storage Migration
+   void StartStorageMigration();
+   void OnMigrationComplete();
+diff --git a/cobalt/browser/cobalt_content_browser_client.cc b/cobalt/browser/cobalt_content_browser_client.cc
+index d102cfc..bcecfd5 100644
+--- a/cobalt/browser/cobalt_content_browser_client.cc
++++ b/cobalt/browser/cobalt_content_browser_client.cc
+@@ -390,14 +390,7 @@ base::FilePath CobaltContentBrowserClient::GetGrShaderDiskCacheDirectory() {
+ std::unique_ptr<content::VideoOverlayWindow>
+ CobaltContentBrowserClient::CreateWindowForVideoPictureInPicture(
+     content::VideoPictureInPictureWindowController* controller) {
+-  // TODO: b/532158001 - Support PiP on Linux.
+-  // PiP is currently only supported on Android. On other platforms, calling
+-  // Create() allocates a dummy object that leaks memory, so we return nullptr.
+-#if BUILDFLAG(IS_ANDROID)
+-  return content::VideoOverlayWindow::Create(controller);
+-#else   // BUILDFLAG(IS_ANDROID)
+   return nullptr;
+-#endif  // BUILDFLAG(IS_ANDROID)
+ }
+ 
+ std::unique_ptr<content::BrowserMainParts>
+diff --git a/cobalt/browser/global_features.cc b/cobalt/browser/global_features.cc
+index 956b3dd..fd2cfbf 100644
+--- a/cobalt/browser/global_features.cc
++++ b/cobalt/browser/global_features.cc
+@@ -193,17 +193,8 @@ void GlobalFeatures::CreateMetricsLocalState() {
+   pref_registry->RegisterInt64Pref(kLastLoggedProcessExitTimestampMs, -1);
+ 
+   PrefServiceFactory pref_service_factory;
+-  // TODO(b/397929564): Investigate using a Chrome's memory-mapped file store
+-  // instead of in-memory.
+-  if (g_use_in_memory_pref_store_for_testing) {
+-    pref_service_factory.set_user_prefs(
+-        base::MakeRefCounted<InMemoryPrefStore>());
+-  } else {
+-    base::FilePath path =
+-        GetPrefFilePath(kMetricsConfigFilename, "metrics config");
+-    pref_service_factory.set_user_prefs(
+-        base::MakeRefCounted<JsonPrefStore>(path));
+-  }
++  pref_service_factory.set_user_prefs(
++      base::MakeRefCounted<InMemoryPrefStore>());
+ 
+   metrics_local_state_ = pref_service_factory.Create(std::move(pref_registry));
+ }
+@@ -234,12 +225,7 @@ base::FilePath GlobalFeatures::GetPrefFilePath(std::string_view filename,
+   return path;
+ }
+ 
+-void GlobalFeatures::Shutdown() {
+-  metrics::MetricsService* metrics = metrics_service();
+-  if (metrics) {
+-    metrics->LogCleanShutdown();
+-  }
+-}
++void GlobalFeatures::Shutdown() {}
+ 
+ // static
+ void GlobalFeatures::RegisterPrefs(PrefRegistrySimple* registry) {
+diff --git a/cobalt/browser/h5vcc_metrics/BUILD.gn b/cobalt/browser/h5vcc_metrics/BUILD.gn
+index 80364a6..1344247 100644
+--- a/cobalt/browser/h5vcc_metrics/BUILD.gn
++++ b/cobalt/browser/h5vcc_metrics/BUILD.gn
+@@ -16,19 +16,12 @@ source_set("h5vcc_metrics") {
+   sources = [
+     "h5vcc_metrics_impl.cc",
+     "h5vcc_metrics_impl.h",
+-    "histogram_fetcher.cc",
+-    "histogram_fetcher.h",
+   ]
+ 
+   deps = [
+     "//base",
+-    "//cobalt/browser:global_features",
+-    "//cobalt/browser:metrics",
+     "//cobalt/browser/h5vcc_metrics/public/mojom",
+-    "//components/metrics",
+-    "//components/metrics_services_manager",
+     "//content/public/browser",
+     "//mojo/public/cpp/bindings",
+-    "//third_party/metrics_proto",
+   ]
+ }
+diff --git a/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.cc b/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.cc
+index e0bb04d..0ea1ce7 100644
+--- a/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.cc
++++ b/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.cc
+@@ -14,22 +14,11 @@
+ 
+ #include "cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.h"
+ 
+-#include "base/base64url.h"
+-#include "base/logging.h"
+-#include "base/metrics/histogram.h"
+-#include "base/metrics/statistics_recorder.h"
+-#include "base/time/time.h"
+-#include "cobalt/browser/global_features.h"
+-#include "cobalt/browser/metrics/cobalt_metrics_services_manager_client.h"
+-#include "components/metrics/metrics_log.h"
+-#include "components/metrics/metrics_service.h"
+-#include "components/metrics_services_manager/metrics_services_manager.h"
+-#include "third_party/metrics_proto/chrome_user_metrics_extension.pb.h"
+-#include "third_party/metrics_proto/cobalt_uma_event.pb.h"
++#include <string>
++#include <utility>
+ 
+ namespace h5vcc_metrics {
+ 
+-// TODO (b/395126160): refactor mojom implementation on Android
+ H5vccMetricsImpl::H5vccMetricsImpl(
+     content::RenderFrameHost& render_frame_host,
+     mojo::PendingReceiver<mojom::H5vccMetrics> receiver)
+@@ -45,20 +34,10 @@ void H5vccMetricsImpl::Create(
+ void H5vccMetricsImpl::AddListener(
+     ::mojo::PendingRemote<mojom::MetricsListener> listener) {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  cobalt::GlobalFeatures::GetInstance()
+-      ->metrics_services_manager_client()
+-      ->metrics_service_client()
+-      ->SetMetricsListener(std::move(listener));
+ }
+ 
+ void H5vccMetricsImpl::Enable(bool enable, EnableCallback callback) {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  auto global_features = cobalt::GlobalFeatures::GetInstance();
+-  cobalt::CobaltEnabledStateProvider& enabled_state_provider =
+-      global_features->metrics_services_manager_client()
+-          ->GetEnabledStateProvider();
+-  enabled_state_provider.SetReportingEnabled(enable);
+-  global_features->metrics_services_manager()->UpdateUploadPermissions(true);
+   std::move(callback).Run();
+ }
+ 
+@@ -66,20 +45,12 @@ void H5vccMetricsImpl::SetMetricEventInterval(
+     uint64_t interval_seconds,
+     SetMetricEventIntervalCallback callback) {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  cobalt::GlobalFeatures::GetInstance()
+-      ->metrics_services_manager_client()
+-      ->metrics_service_client()
+-      ->SetUploadInterval(base::Seconds(interval_seconds));
+   std::move(callback).Run();
+ }
+ 
+ void H5vccMetricsImpl::RequestHistograms(RequestHistogramsCallback callback) {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  auto* manager_client =
+-      cobalt::GlobalFeatures::GetInstance()->metrics_services_manager_client();
+-  std::move(callback).Run(histogram_fetcher_.FetchHistograms(
+-      manager_client->GetMetricsStateManager(),
+-      manager_client->metrics_service_client()));
++  std::move(callback).Run(std::string());
+ }
+ 
+ }  // namespace h5vcc_metrics
+diff --git a/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.h b/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.h
+index 106577d..d827495 100644
+--- a/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.h
++++ b/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.h
+@@ -15,7 +15,6 @@
+ #ifndef COBALT_BROWSER_H5VCC_METRICS_H5VCC_METRICS_IMPL_H_
+ #define COBALT_BROWSER_H5VCC_METRICS_H5VCC_METRICS_IMPL_H_
+ 
+-#include "cobalt/browser/h5vcc_metrics/histogram_fetcher.h"
+ #include "cobalt/browser/h5vcc_metrics/public/mojom/h5vcc_metrics.mojom.h"
+ #include "cobalt/common/cobalt_thread_checker.h"
+ #include "content/public/browser/document_service.h"
+@@ -45,16 +44,12 @@ class H5vccMetricsImpl : public content::DocumentService<mojom::H5vccMetrics> {
+   void Enable(bool enable, EnableCallback) override;
+   void SetMetricEventInterval(uint64_t interval_seconds,
+                               SetMetricEventIntervalCallback) override;
+-  // Follows Chrome's WebUI's
+-  // HistogramsMessageHandler::HandleRequestHistograms() implementation.
+   void RequestHistograms(RequestHistogramsCallback callback) override;
+ 
+  private:
+   H5vccMetricsImpl(content::RenderFrameHost& render_frame_host,
+                    mojo::PendingReceiver<mojom::H5vccMetrics> receiver);
+ 
+-  HistogramFetcher histogram_fetcher_;
+-
+   COBALT_THREAD_CHECKER(thread_checker_);
+ };
+ 
+diff --git a/cobalt/browser/h5vcc_native_stability/h5vcc_native_stability_impl.cc b/cobalt/browser/h5vcc_native_stability/h5vcc_native_stability_impl.cc
+index a92ed17..dc9e109 100644
+--- a/cobalt/browser/h5vcc_native_stability/h5vcc_native_stability_impl.cc
++++ b/cobalt/browser/h5vcc_native_stability/h5vcc_native_stability_impl.cc
+@@ -17,7 +17,6 @@
+ #include <utility>
+ 
+ #include "base/check.h"
+-#include "cobalt/browser/h5vcc_native_stability/native_stability_manager.h"
+ #include "content/public/browser/render_frame_host.h"
+ 
+ namespace h5vcc_native_stability {
+@@ -37,14 +36,13 @@ H5vccNativeStabilityImpl::H5vccNativeStabilityImpl(
+ 
+ void H5vccNativeStabilityImpl::GetPendingReports(
+     GetPendingReportsCallback callback) {
+-  NativeStabilityManager::GetInstance()->GetPendingReports(std::move(callback));
++  std::move(callback).Run({});
+ }
+ 
+ void H5vccNativeStabilityImpl::AcknowledgeReports(
+     const std::vector<std::string>& native_stability_event_uuids,
+     AcknowledgeReportsCallback callback) {
+-  NativeStabilityManager::GetInstance()->AcknowledgeReports(
+-      native_stability_event_uuids, std::move(callback));
++  std::move(callback).Run();
+ }
+ 
+ }  // namespace h5vcc_native_stability
+diff --git a/cobalt/browser/hang_watcher_delegate_impl.cc b/cobalt/browser/hang_watcher_delegate_impl.cc
+index 8f964bc..0c647d9 100644
+--- a/cobalt/browser/hang_watcher_delegate_impl.cc
++++ b/cobalt/browser/hang_watcher_delegate_impl.cc
+@@ -31,31 +31,24 @@
+ #if BUILDFLAG(USE_EVERGREEN)
+ #include "starboard/extension/crash_handler.h"
+ #include "starboard/system.h"
+-#elif BUILDFLAG(IS_ANDROIDTV)
+-#include "cobalt/browser/cobalt_crash_annotations.h"  // nogncheck
+ #endif
+ 
+ namespace cobalt {
+ namespace browser {
+ 
+-#if BUILDFLAG(USE_EVERGREEN) || BUILDFLAG(IS_ANDROIDTV)
++#if BUILDFLAG(USE_EVERGREEN)
+ namespace {
+ 
+ void SetHangUuidCrashAnnotation(const std::string& hang_uuid) {
+-#if BUILDFLAG(USE_EVERGREEN)
+   auto* crash_ext = static_cast<const CobaltExtensionCrashHandlerApi*>(
+       SbSystemGetExtension(kCobaltExtensionCrashHandlerName));
+   if (crash_ext && crash_ext->version >= 2 && crash_ext->SetString) {
+     crash_ext->SetString(kNativeStabilityHangUuidKey, hang_uuid.c_str());
+   }
+-#elif BUILDFLAG(IS_ANDROIDTV)
+-  CobaltCrashAnnotations::GetInstance()->SetAnnotation(
+-      kNativeStabilityHangUuidKey, hang_uuid);
+-#endif
+ }
+ 
+ }  // namespace
+-#endif  // BUILDFLAG(USE_EVERGREEN) || BUILDFLAG(IS_ANDROIDTV)
++#endif  // BUILDFLAG(USE_EVERGREEN)
+ 
+ // static
+ void CobaltHangWatcherDelegate::Initialize() {
+@@ -266,7 +259,7 @@ base::TimeDelta CobaltHangWatcherDelegate::GetLongHangTimeout() {
+ 
+ void CobaltHangWatcherDelegate::RecordHangStarted(
+     const std::string& hang_uuid) {
+-#if BUILDFLAG(USE_EVERGREEN) || BUILDFLAG(IS_ANDROIDTV)
++#if BUILDFLAG(USE_EVERGREEN)
+   SetHangUuidCrashAnnotation(hang_uuid);
+   auto* nsm = h5vcc_native_stability::NativeStabilityManager::GetInstance();
+   if (nsm) {
+@@ -277,7 +270,7 @@ void CobaltHangWatcherDelegate::RecordHangStarted(
+ 
+ void CobaltHangWatcherDelegate::RecordHangRecovered(
+     const std::string& hang_uuid) {
+-#if BUILDFLAG(USE_EVERGREEN) || BUILDFLAG(IS_ANDROIDTV)
++#if BUILDFLAG(USE_EVERGREEN)
+   SetHangUuidCrashAnnotation("");
+   auto* nsm = h5vcc_native_stability::NativeStabilityManager::GetInstance();
+   if (nsm) {
+diff --git a/cobalt/browser/metrics/cobalt_metrics_log_uploader.cc b/cobalt/browser/metrics/cobalt_metrics_log_uploader.cc
+index f4427e8..d4ec278 100644
+--- a/cobalt/browser/metrics/cobalt_metrics_log_uploader.cc
++++ b/cobalt/browser/metrics/cobalt_metrics_log_uploader.cc
+@@ -14,71 +14,24 @@
+ 
+ #include "cobalt/browser/metrics/cobalt_metrics_log_uploader.h"
+ 
+-#include "base/base64url.h"
+ #include "base/functional/bind.h"
+-#include "base/logging.h"
++#include "base/functional/callback_helpers.h"
+ #include "cobalt/browser/h5vcc_metrics/public/mojom/h5vcc_metrics.mojom.h"
+-#include "components/metrics/log_decoder.h"
+ #include "components/metrics/metrics_log_uploader.h"
+ #include "mojo/public/cpp/bindings/remote.h"
+-#include "third_party/metrics_proto/chrome_user_metrics_extension.pb.h"
+-#include "third_party/metrics_proto/cobalt_uma_event.pb.h"
+-#include "third_party/metrics_proto/reporting_info.pb.h"
+ 
+ namespace cobalt {
+ 
+-using browser::metrics::CobaltUMAEvent;
+-
+-// Helper method to create a trimmed down and sanitized version of the UMA
+-// proto for Cobalt
+-void PopulateCobaltUmaEvent(
+-    const ::metrics::ChromeUserMetricsExtension& uma_proto,
+-    const ::metrics::ReportingInfo reporting_info_proto,
+-    CobaltUMAEvent& cobalt_proto) {
+-  cobalt_proto.mutable_histogram_event()->CopyFrom(uma_proto.histogram_event());
+-  cobalt_proto.mutable_user_action_event()->CopyFrom(
+-      uma_proto.user_action_event());
+-  cobalt_proto.mutable_reporting_info()->CopyFrom(reporting_info_proto);
+-}
+-
+ void CobaltMetricsLogUploader::UploadLog(
+     const std::string& compressed_log_data,
+     const metrics::LogMetadata& log_metadata,
+     const std::string& log_hash,
+     const std::string& log_signature,
+     const metrics::ReportingInfo& reporting_info) {
+-  // Always run the upload complete callback as a success. Arguments to callback
+-  // don't matter much here as we're not really doing anything but forwarding to
+-  // the H5vcc API.
+   base::ScopedClosureRunner closure(
+-      base::BindOnce(on_upload_complete_, /*status*/ 200, /* error_code */ 0,
++      base::BindOnce(on_upload_complete_, /*status*/ 200, /*error_code*/ 0,
+                      /*was_https*/ true, false, ""));
+-
+-  if (!metrics_listener_.is_bound()) {
+-    return;
+-  }
+-
+-  // For now, we only support UMA.
+-  if (service_type_ != ::metrics::MetricsLogUploader::MetricServiceType::UMA) {
+-    return;
+-  }
+-
+-  std::string uncompressed_serialized_proto;
+-  ::metrics::DecodeLogData(compressed_log_data, &uncompressed_serialized_proto);
+-  ::metrics::ChromeUserMetricsExtension uma_event;
+-  uma_event.ParseFromString(uncompressed_serialized_proto);
+-  CobaltUMAEvent cobalt_uma_event;
+-  PopulateCobaltUmaEvent(uma_event, reporting_info, cobalt_uma_event);
+-  std::string base64_encoded_proto;
+-  // Base64 encode the payload as web client's can't consume it without
+-  // corrupting the data (see b/293431381). Also, use a URL/web safe
+-  // encoding so it can be safely included in any web network request.
+-  base::Base64UrlEncode(cobalt_uma_event.SerializeAsString(),
+-                        base::Base64UrlEncodePolicy::INCLUDE_PADDING,
+-                        &base64_encoded_proto);
+-  DLOG(INFO) << "UMA Payload uploading! Hash: " << log_hash;
+-  metrics_listener_->OnMetrics(
+-      h5vcc_metrics::mojom::H5vccMetricType::kCobaltUma, base64_encoded_proto);
++  (void)service_type_;
+ }
+ 
+ void CobaltMetricsLogUploader::SetMetricsListener(
+@@ -91,4 +44,5 @@ void CobaltMetricsLogUploader::SetMetricsListener(
+ void CobaltMetricsLogUploader::OnCloseConnection() {
+   metrics_listener_.reset();
+ }
++
+ }  // namespace cobalt
+diff --git a/cobalt/browser/metrics/cobalt_metrics_service_client.cc b/cobalt/browser/metrics/cobalt_metrics_service_client.cc
+index ee2eb45..3b7d648 100644
+--- a/cobalt/browser/metrics/cobalt_metrics_service_client.cc
++++ b/cobalt/browser/metrics/cobalt_metrics_service_client.cc
+@@ -49,22 +49,6 @@
+ 
+ namespace cobalt {
+ 
+-namespace {
+-
+-metrics::FileMetricsProvider::FilterAction FilterBrowserMetricsFiles(
+-    const base::FilePath& path) {
+-  base::ProcessId pid;
+-  if (base::GlobalHistogramAllocator::ParseFilePath(path, nullptr, nullptr,
+-                                                    &pid)) {
+-    if (pid == base::GetCurrentProcId()) {
+-      return metrics::FileMetricsProvider::FILTER_ACTIVE_THIS_PID;
+-    }
+-  }
+-  return metrics::FileMetricsProvider::FILTER_PROCESS_FILE;
+-}
+-
+-}  // namespace
+-
+ // TODO(b/495528560): Unify CPU and memory polling state into one class.
+ class MetricsPollingState {
+  public:
+@@ -157,102 +141,22 @@ void CobaltMetricsServiceClient::Initialize() {
+ 
+   metrics_service_ = CreateMetricsServiceInternal(metrics_state_manager_.get(),
+                                                   this, local_state_.get());
+-
+-  // When kCobaltStabilityMetricsDeduplication is enabled, prior-session
+-  // BrowserStabilityMetrics .pma files are merged into StatisticsRecorder and
+-  // deleted at startup by ClearOtherStabilityMetricsPmaFiles() in
+-  // CobaltBrowserMainParts, so FileMetricsProvider is skipped to avoid
+-  // duplicate reads. Only register FileMetricsProvider when the feature is
+-  // disabled (default / A/B control).
+-  if (!base::FeatureList::IsEnabled(
+-          features::kCobaltStabilityMetricsDeduplication)) {
+-    base::FilePath base_dir;
+-    bool path_ok = false;
+-#if BUILDFLAG(IS_ANDROID)
+-    path_ok = base::PathService::Get(base::DIR_ANDROID_APP_DATA, &base_dir);
+-#else
+-    path_ok = base::PathService::Get(content::SHELL_DIR_USER_DATA, &base_dir);
+-    if (!path_ok) {
+-      const auto* command_line = base::CommandLine::ForCurrentProcess();
+-      if (command_line->HasSwitch("user-data-dir")) {
+-        base_dir = command_line->GetSwitchValuePath("user-data-dir");
+-        path_ok = !base_dir.empty();
+-      }
+-    }
+-    if (!path_ok) {
+-      path_ok = base::PathService::Get(base::DIR_TEMP, &base_dir);
+-    }
+-#endif
+-    if (path_ok) {
+-      base::FilePath metrics_dir =
+-          base_dir.AppendASCII("BrowserStabilityMetrics");
+-
+-      auto file_metrics_provider =
+-          std::make_unique<metrics::FileMetricsProvider>(local_state_.get());
+-      metrics::FileMetricsProvider::Params params(
+-          metrics_dir,
+-          metrics::FileMetricsProvider::SOURCE_HISTOGRAMS_ATOMIC_DIR,
+-          metrics::FileMetricsProvider::ASSOCIATE_INTERNAL_PROFILE,
+-          "BrowserStabilityMetrics");
+-      params.filter = base::BindRepeating(&FilterBrowserMetricsFiles);
+-      params.max_dir_kib = 10 * 1024;
+-      file_metrics_provider->RegisterSource(params,
+-                                            /*metrics_reporting_enabled=*/true);
+-      metrics_service_->RegisterMetricsProvider(
+-          std::move(file_metrics_provider));
+-    } else {
+-      LOG(WARNING)
+-          << "Failed to get base directory for BrowserStabilityMetrics, "
+-          << "skipping FileMetricsProvider registration.";
+-    }
+-  }
+-
+   log_uploader_ = CreateLogUploaderInternal();
+   log_uploader_weak_ptr_ = log_uploader_->GetWeakPtr();
+-  StartIdleRefreshTimer();
+-  StartMemoryMetricsLogger();
+-  StartCpuMetricsLogger();
+ }
+ 
+ void CobaltMetricsServiceClient::StartMemoryMetricsLogger() {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  memory_state_.emplace(base::ThreadPool::CreateSequencedTaskRunner({}),
+-                        CreateMemoryMetricsEmitter());
+-  memory_state_.AsyncCall(&MemoryPollingState::RecordMetricsAfterDelay);
+ }
+ 
+ void CobaltMetricsServiceClient::StartCpuMetricsLogger() {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  cpu_state_.emplace(base::ThreadPool::CreateSequencedTaskRunner({}),
+-                     CreateCpuMetricsEmitter());
+-  cpu_state_.AsyncCall(&CpuPollingState::RecordMetricsAfterDelay);
+ }
+ 
+ void CobaltMetricsServiceClient::StartIdleRefreshTimer() {
+-  if (idle_refresh_timer_.IsRunning()) {
+-    idle_refresh_timer_.Stop();
+-  }
+-
+-  // At a rate of half the upload interval, we force UMA to consider the app
+-  // as non-idle. This guarantees metrics are uploaded regularly. This is done
+-  // for two reasons:
+-  //
+-  //   1) The nature of the YouTube application is such that the user can be
+-  //      "idle" for long periods (e.g., watching a movie). We still want to
+-  //      send metrics in these cases.
+-  //
+-  //   2) The typical way Chromium handles non-idle is page loads and user
+-  //      actions. User actions are currently sparse and/or not working due to
+-  //      the nature of Kabuki's implementation (see b/417477183).
+-  auto timer_interval = GetStandardUploadInterval() / 2;
+-  timer_interval = timer_interval > min_idle_refresh_interval_
+-                       ? timer_interval
+-                       : min_idle_refresh_interval_;
+-  idle_refresh_timer_.Start(
+-      FROM_HERE, timer_interval, this,
+-      &CobaltMetricsServiceClient::OnApplicationNotIdleInternal);
+-  DLOG(INFO) << "Starting refresh timer for: "
+-             << idle_refresh_timer_.GetCurrentDelay().InSeconds() << " seconds";
++  CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++  (void)min_idle_refresh_interval_;
++  idle_refresh_timer_.Stop();
+ }
+ 
+ std::unique_ptr<metrics::MetricsService>
+@@ -379,18 +283,13 @@ void CobaltMetricsServiceClient::OnApplicationNotIdleInternal() {
+ GURL CobaltMetricsServiceClient::GetMetricsServerUrl() {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   DCHECK(IsInitialized());
+-  // Chrome keeps the actual URL in an internal file, likely to avoid abuse.
+-  // This below is made up, and in any case likely not to be used (it ends up in
+-  // CreateUploader()'s `server_url`. Return empty and use instead logic in
+-  // CobaltMetricsLogUploader.
+-  return GURL("https://youtube.com/tv/uma");
++  return GURL();
+ }
+ 
+ GURL CobaltMetricsServiceClient::GetInsecureMetricsServerUrl() {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   DCHECK(IsInitialized());
+-  // This is made up and not used. See GetMetricsServerUrl() for more details.
+-  return GURL("https://youtube.com/tv/uma");
++  return GURL();
+ }
+ 
+ std::unique_ptr<metrics::MetricsLogUploader>
+@@ -421,8 +320,6 @@ base::TimeDelta CobaltMetricsServiceClient::GetStandardUploadInterval() {
+ 
+ void CobaltMetricsServiceClient::SetUploadInterval(base::TimeDelta interval) {
+   upload_interval_ = interval;
+-  // If upload interval changes, update idle refresh timer accordingly.
+-  StartIdleRefreshTimer();
+ }
+ 
+ CobaltMetricsServiceClient::~CobaltMetricsServiceClient() = default;
+diff --git a/cobalt/shell/BUILD.gn b/cobalt/shell/BUILD.gn
+index ccf2d7e..b0f3064 100644
+--- a/cobalt/shell/BUILD.gn
++++ b/cobalt/shell/BUILD.gn
+@@ -193,7 +193,7 @@ group("cobalt_shell_lib_deps") {
+     public_deps += [ "//cobalt/browser:hang_watcher_delegate" ]
+   }
+ 
+-  if (!is_cobalt_hermetic_build) {
++  if (!is_cobalt_hermetic_build && !is_android) {
+     public_deps += [
+       "//components/crash/content/browser",
+       "//components/crash/core/app",
+@@ -409,54 +409,32 @@ group("cobalt_shell_app_deps") {
+     "//v8",
+   ]
+ 
+-  if (!is_cobalt_hermetic_build) {
++  if (!is_cobalt_hermetic_build && !is_android) {
+     public_deps += [ "//components/crash/core/app" ]
+   }
+ }
+ 
+ repack("pak") {
+   sources = [
+-    "$root_gen_dir/base/tracing/protos/tracing_proto_resources.pak",
+     "$root_gen_dir/cobalt/shell/cobalt_shell_resources.pak",
+-    "$root_gen_dir/components/ukm_resources.pak",
+-    "$root_gen_dir/content/browser/resources/media/media_internals_resources.pak",
+-    "$root_gen_dir/content/browser/webrtc/resources/webrtc_internals_resources.pak",
+     "$root_gen_dir/content/content_resources.pak",
+-    "$root_gen_dir/content/gpu_resources.pak",
+-    "$root_gen_dir/content/histograms_resources.pak",
+-    "$root_gen_dir/content/private_aggregation_internals_resources.pak",
+-    "$root_gen_dir/content/process_resources.pak",
+-    "$root_gen_dir/content/service_worker_resources.pak",
+     "$root_gen_dir/mojo/public/js/mojo_bindings_resources.pak",
+     "$root_gen_dir/third_party/blink/public/resources/blink_resources.pak",
+     "$root_gen_dir/third_party/blink/public/resources/blink_scaled_resources_100_percent.pak",
+-    "$root_gen_dir/third_party/blink/public/resources/inspector_overlay_resources.pak",
+     "$root_gen_dir/third_party/blink/public/strings/blink_strings_en-US.pak",
+     "$root_gen_dir/third_party/blink/public/strings/permission_element_generated_strings.pak",
+     "$root_gen_dir/third_party/blink/public/strings/permission_element_strings_en-US.pak",
+     "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
+     "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
+-    "$root_gen_dir/ui/strings/auto_image_annotation_strings_en-US.pak",
+     "$root_gen_dir/ui/strings/ax_strings_en-US.pak",
+     "$root_gen_dir/ui/strings/ui_strings_en-US.pak",
+     "$root_gen_dir/ui/webui/resources/webui_resources.pak",
+   ]
+ 
+-  if (!is_official_build) {
+-    sources += [ "$root_gen_dir/content/test/web_ui_mojo_test_resources.pak" ]
+-  }
+-
+   deps = [
+     ":resources",
+-    "//base/tracing/protos:chrome_track_event_resources",
+-    "//components/ukm/debug:resources",
+     "//content:content_resources",
+-    "//content/browser/resources",
+-    "//content/browser/resources/media:resources",
+-    "//content/browser/webrtc/resources",
+-    "//content/test:web_ui_mojo_test_resources",
+     "//mojo/public/js:resources",
+-    "//third_party/blink/public:devtools_inspector_resources",
+     "//third_party/blink/public:resources",
+     "//third_party/blink/public:scaled_resources_100_percent",
+     "//third_party/blink/public/strings",
+@@ -467,6 +445,11 @@ repack("pak") {
+     "//ui/webui/resources",
+   ]
+ 
++  if (!is_official_build) {
++    sources += [ "$root_gen_dir/content/test/web_ui_mojo_test_resources.pak" ]
++    deps += [ "//content/test:web_ui_mojo_test_resources" ]
++  }
++
+   if (shell_use_toolkit_views) {
+     deps += [ "//ui/views/resources" ]
+     sources +=
+@@ -504,39 +487,13 @@ group("resources") {
+ action("embed_loader_resources_as_header_files") {
+   script = "//cobalt/build/generate_data_header.py"
+   outputs = [ "$target_gen_dir/embedded_resources/embedded_resources.h" ]
+-  sources = [
+-    "embedded_resources/loader_embedded_resources/splash.html",
+-
+-    # TODO(b/481826565): hide code path for internal files
+-    # Default splash video, 1920x1080. Copied from
+-    # google3/video/youtube/web/living_room/kabuki/splash/chrobalt/splash.webm.
+-    "embedded_resources/loader_embedded_resources/splash.webm",
+-
+-    # For low spec TV, 853x480. Copied from
+-    # google3/googledata/html/external_content/gstatic/ytlr/splash_screen/splash_480p.webm.
+-    "embedded_resources/loader_embedded_resources/splash_480.webm",
+-
+-    # Music splash video, 1920x1080. Copied from
+-    # google3/video/youtube/web/living_room/kabuki/splash/chrobalt/music_splash.webm.
+-    "embedded_resources/loader_embedded_resources/music_splash.webm",
+-
+-    # For low spec TV, 853x480. Copied from
+-    # google3/googledata/html/external_content/gstatic/ytlr/splash_screen/music_splash_480p.webm.
+-    "embedded_resources/loader_embedded_resources/music_splash_480.webm",
+-
+-    # For devices that do not support VP9. Copied from
+-    # google3/video/youtube/web/living_room/kabuki/splash/chrobalt/splash_video_placeholder.png.
+-    "embedded_resources/loader_embedded_resources/splash.png",
+-
+-    # For devices that do not support VP9. Copied from
+-    # google3/video/youtube/web/living_room/kabuki/splash/chrobalt/music_splash_video_placeholder.png.
+-    "embedded_resources/loader_embedded_resources/music_splash.png",
+-  ]
++  sources = [ "embedded_resources/loader_embedded_resources/splash.html" ]
+ 
+   args = [
+     "LoaderEmbeddedResources",
+     rebase_path(outputs[0], root_build_dir),
+-    rebase_path("embedded_resources/loader_embedded_resources", root_build_dir),
++    rebase_path("embedded_resources/loader_embedded_resources/splash.html",
++                root_build_dir),
+   ]
+ }
+ 
+diff --git a/cobalt/shell/android/BUILD.gn b/cobalt/shell/android/BUILD.gn
+index dc2c0bd..88b3c6b 100644
+--- a/cobalt/shell/android/BUILD.gn
++++ b/cobalt/shell/android/BUILD.gn
+@@ -60,7 +60,6 @@ android_library("cobalt_shell_java") {
+     "//components/viz/service:service_java",
+     "//content/public/android:content_java",
+     "//media/base/android:media_java",
+-    "//media/capture/video/android:capture_java",
+     "//mojo/public/java:system_java",
+     "//net/android:net_java",
+     "//third_party/androidx:androidx_annotation_annotation_jvm_java",
+diff --git a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2 b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
+index f61a6e5..4b79dc9 100644
+--- a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
++++ b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
+@@ -49,7 +49,6 @@
+     <application android:name="{% block application_name %}dev.cobalt.app.CobaltApplication{% endblock %}"
+             android:icon="@mipmap/ic_app"
+             android:banner="@drawable/app_banner"
+-            android:zygotePreloadName="org.chromium.content_public.app.ZygotePreload"
+             android:allowBackup="false"
+             android:extractNativeLibs="false"
+             android:usesCleartextTraffic="false"
+@@ -91,34 +90,22 @@
+         </activity>
+         {% endblock %}
+ 
+-        <activity android:name="dev.cobalt.coat.CobaltPictureInPictureActivity"
+-                  android:exported="false"
+-                  android:noHistory="true"
+-                  android:theme="@style/CobaltTheme"
+-                  android:excludeFromRecents="true"
+-                  android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+-                  android:supportsPictureInPicture="true">
+-        </activity>
+-
+         <!-- The following service entries exist in order to allow us to
+              start more than one sandboxed process. -->
+ 
+         <!-- NOTE: If you change the values of "android:process" for any of the below services,
+              you also need to update kHelperProcessExecutableName in chrome_constants.cc. -->
+-        {% set num_sandboxed_services = 40 %}
++        {% set num_sandboxed_services = 2 %}
+         <meta-data android:name="org.chromium.content.browser.NUM_SANDBOXED_SERVICES"
+                    android:value="{{ num_sandboxed_services }}"/>
+         {% for i in range(num_sandboxed_services) %}
+         <service android:name="org.chromium.content.app.SandboxedProcessService{{ i }}"
+                  android:process=":sandboxed_process{{ i }}"
+-                 {% if (i == 0) %}
+-                 android:useAppZygote="true"
+-                 {% endif %}
+                  android:isolatedProcess="true"
+                  android:exported="false" />
+         {% endfor %}
+ 
+-        {% set num_privileged_services = 5 %}
++        {% set num_privileged_services = 1 %}
+         <meta-data android:name="org.chromium.content.browser.NUM_PRIVILEGED_SERVICES"
+                    android:value="{{ num_privileged_services }}"/>
+         {% for i in range(num_privileged_services) %}
+@@ -130,21 +117,6 @@
+         <meta-data android:name="org.chromium.content.browser.SMART_CLIP_PROVIDER"
+                    android:value="org.chromium.content.browser.SmartClipProvider" />
+ 
+-        <service android:name="org.chromium.content_shell_apk.ChildProcessLauncherTestHelperService"
+-            android:process=":ChildProcessLauncherHelper"
+-            android:exported="false" />
+-
+-        <!-- The following entries are for ChildProcessLauncherTest. They should eventually be moved
+-             to base. -->
+-        {% set num_test_services = 2 %}
+-        <meta-data android:name="org.chromium.content.browser.NUM_TEST_SERVICES"
+-                   android:value="{{ num_test_services }}"/>
+-        {% for i in range(num_test_services) %}
+-        <service android:name="org.chromium.content_shell_apk.TestChildProcessService{{ i }}"
+-                 android:process=":test_child_service_process{{ i }}"
+-                 android:isolatedProcess="true"
+-                 android:exported="false" />
+-        {% endfor %}
+         {% block extra_application_definitions_for_test %}
+         {% endblock %}
+ 
+diff --git a/cobalt/shell/browser/shell.cc b/cobalt/shell/browser/shell.cc
+index f3bd2b1..2d66cdc 100644
+--- a/cobalt/shell/browser/shell.cc
++++ b/cobalt/shell/browser/shell.cc
+@@ -1184,12 +1184,16 @@ bool Shell::ShouldAllowRunningInsecureContent(WebContents* web_contents,
+ }
+ 
+ PictureInPictureResult Shell::EnterPictureInPicture(WebContents* web_contents) {
++#if BUILDFLAG(IS_ANDROID)
++  return PictureInPictureResult::kNotSupported;
++#else
+   if (!base::FeatureList::IsEnabled(
+           cobalt::features::kEnablePictureInPicture)) {
+     return PictureInPictureResult::kNotSupported;
+   }
+   return PictureInPictureWindowManager::GetInstance()
+       .EnterVideoPictureInPicture(web_contents);
++#endif
+ }
+ 
+ void Shell::ExitPictureInPicture() {
+diff --git a/cobalt/shell/browser/shell_content_browser_client.cc b/cobalt/shell/browser/shell_content_browser_client.cc
+index f632e28..f171864 100644
+--- a/cobalt/shell/browser/shell_content_browser_client.cc
++++ b/cobalt/shell/browser/shell_content_browser_client.cc
+@@ -109,17 +109,11 @@
+ #include "components/variations/android/variations_seed_bridge.h"
+ #endif
+ 
+-#if BUILDFLAG(IS_ANDROID)
+-#include "components/crash/content/browser/crash_handler_host_linux.h"
+-#endif
+-
+-#if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID)) && \
+-    !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
+ #include "components/crash/core/app/crash_switches.h"  // nogncheck
+ #include "components/crash/core/app/crashpad.h"        // nogncheck
+ #include "content/public/common/content_descriptors.h"
+-#endif  // (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID)) &&
+-        // !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#endif  // BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
+ 
+ #if BUILDFLAG(ENABLE_CAST_RENDERER)
+ #include "media/mojo/services/media_service_factory.h"  // nogncheck
+@@ -144,17 +138,12 @@ GetShellContentBrowserClientInstancesImpl() {
+   return *instances;
+ }
+ 
+-#if BUILDFLAG(IS_ANDROID)
+-int GetCrashSignalFD(const base::CommandLine& command_line) {
+-  return crashpad::CrashHandlerHost::Get()->GetDeathSignalSocket();
+-}
+-#elif BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
+ int GetCrashSignalFD(const base::CommandLine& command_line) {
+   int fd;
+   pid_t pid;
+   return crash_reporter::GetHandlerSocket(&fd, &pid) ? fd : -1;
+ }
+-
+ #endif
+ 
+ // TODO(crbug/1219642): Consider not needing VariationsServiceClient just to use
+@@ -590,12 +579,12 @@ void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
+       base::GlobalDescriptors::GetInstance()->Get(kShellPakDescriptor),
+       base::GlobalDescriptors::GetInstance()->GetRegion(kShellPakDescriptor));
+ #endif
+-#if !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
+   int crash_signal_fd = GetCrashSignalFD(command_line);
+   if (crash_signal_fd >= 0) {
+     mappings->Share(kCrashDumpSignal, crash_signal_fd);
+   }
+-#endif  // !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
++#endif  // BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
+ }
+ #endif  // BUILDFLAG(IS_LINUX) ||
+         // BUILDFLAG(IS_ANDROID)
+diff --git a/starboard/android/shared/platform_configuration/configuration.gni b/starboard/android/shared/platform_configuration/configuration.gni
+index d2ee38b..8119ec6 100644
+--- a/starboard/android/shared/platform_configuration/configuration.gni
++++ b/starboard/android/shared/platform_configuration/configuration.gni
+@@ -19,7 +19,7 @@ gtest_target_type = "shared_library"
+ starboard_level_final_executable_type = "shared_library"
+ starboard_level_gtest_target_type = "shared_library"
+ 
+-sb_enable_benchmark = true
++sb_enable_benchmark = false
+ 
+ pedantic_warnings_config_path =
+     "//starboard/android/shared/platform_configuration:pedantic_warnings"
