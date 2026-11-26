@@ -125,5 +125,17 @@ jobs:
                   assert "crash_annotator_jni.cc" not in f.read(), (
                       "cobalt/browser/BUILD.gn should not compile crash_annotator_jni.cc"
                   )
+              for shell_rel in (
+                  "cobalt/shell/browser/shell_browser_main_parts.h",
+                  "cobalt/shell/browser/shell_browser_main_parts.cc",
+              ):
+                  with open(os.path.join(tmpdir, shell_rel), "r", encoding="utf-8") as f:
+                      shell_src = f.read()
+                  assert "ChildExitObserver" not in shell_src, (
+                      f"{shell_rel} should not reference ChildExitObserver"
+                  )
+                  assert "ChildProcessCrashObserver" not in shell_src, (
+                      f"{shell_rel} should not reference ChildProcessCrashObserver"
+                  )
               print("Manifest XML & hardening checks passed.")
           PY

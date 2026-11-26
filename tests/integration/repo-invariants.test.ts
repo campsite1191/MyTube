@@ -249,6 +249,9 @@ describe('Repository, patch & CI workflow invariants', () => {
       'https://youtube.com/tv/uma',
       'starboard/android/shared/BUILD.gn',
       'crash_annotator_jni.cc',
+      'shell_browser_main_parts.cc',
+      'ChildExitObserver',
+      'ChildProcessCrashObserver',
     ]) {
       assert.equal(patch15.includes(token), true, `Missing expected patch 15 strip target: ${token}`);
     }
@@ -263,6 +266,7 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(lintPatchesYml.includes('CobaltPictureInPictureActivity'), true);
     assert.equal(lintPatchesYml.includes('zygotePreloadName'), true);
     assert.equal(lintPatchesYml.includes('crash_annotator_jni.cc'), true);
+    assert.equal(lintPatchesYml.includes('ChildExitObserver'), true);
   });
 
   test('mirrors every runtime module under mods/ 1:1 with tests/ bidirectionally', () => {
