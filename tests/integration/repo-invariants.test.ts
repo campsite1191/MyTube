@@ -206,6 +206,11 @@ describe('Repository, patch & CI workflow invariants', () => {
 
     const patch01 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '01-gn-arm-cortex-a73-and-trim.patch'), 'utf8');
     const hotswapYml = fs.readFileSync(path.join(workflowsDir, 'hotswap_js.yml'), 'utf8');
+    assert.equal(
+      buildApkYml.includes('target_commitish:') || hotswapYml.includes('target_commitish:'),
+      false,
+      'Release steps should omit target_commitish so GITHUB_TOKEN tags HEAD instead of hitting 403 on older commits'
+    );
     const hasStaticVersionCodeOnly =
       patch01.includes('version_code = "1"') &&
       !buildApkYml.includes('version_code') &&

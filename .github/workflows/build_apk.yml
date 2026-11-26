@@ -499,7 +499,6 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_TITLE }}
           body_path: ./release_notes.md
-          target_commitish: ${{ github.sha }}
           fail_on_unmatched_files: true
           make_latest: 'true'
         env:
