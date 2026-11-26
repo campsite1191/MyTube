@@ -5,9 +5,11 @@ import { isRecord } from '../utils/type-guards.ts';
 
 const PLAYER_STATE_CHANGE_EVENT = 'onStateChange';
 const PLAYER_QUALITY_STORAGE_KEY = 'yt-player-quality';
+const PLAYER_DRC_STORAGE_KEY = 'yt-player-drc-pref';
 // YouTube TV's storage reader rejects entries older than 30 days and writes 360-day expiry.
 const PLAYER_QUALITY_MAX_AGE_MS = 2_592_000_000;
 const PLAYER_QUALITY_EXPIRY_MS = 31_104_000_000;
+const PLAYER_DRC_EXPIRY_MS = 31_536_000_000;
 const TARGET_VIDEO_HEIGHT = 2160;
 const HIGHRES_QUALITY_ID = 'highres';
 
@@ -36,6 +38,14 @@ interface ResolutionCandidate {
   height: number;
 }
 
+function getLocalStorage(): Storage | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
 function readStoredQualityHeight(raw: string | null, now: number): number | null {
   if (!raw) return null;
   try {
@@ -52,17 +62,27 @@ function readStoredQualityHeight(raw: string | null, now: number): number | null
   }
 }
 
+function readStoredDrcPref(raw: string | null, now: number): number | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return null;
+    if (typeof parsed.expiration !== 'number' || parsed.expiration <= now) return null;
+    if (typeof parsed.creation !== 'number' || parsed.creation > now) return null;
+
+    const payload: unknown = typeof parsed.data === 'string' ? JSON.parse(parsed.data) : parsed.data;
+    return payload === 0 || payload === 1 ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Seeds YouTube's `yt-player-quality` storage preference to 2160p unless a valid entry at or
  * above 2160p is already stored, so Watch playback initializes at the target tier natively.
  */
 export function seedPreferredQualityStorage(): boolean {
-  let storage: Storage | null = null;
-  try {
-    storage = typeof localStorage !== 'undefined' ? localStorage : null;
-  } catch {
-    return false;
-  }
+  const storage = getLocalStorage();
   if (!storage) return false;
 
   const now = Date.now();
@@ -77,6 +97,34 @@ export function seedPreferredQualityStorage(): boolean {
       JSON.stringify({
         data: JSON.stringify({ quality: TARGET_VIDEO_HEIGHT, previousQuality: TARGET_VIDEO_HEIGHT }),
         expiration: now + PLAYER_QUALITY_EXPIRY_MS,
+        creation: now,
+      })
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Seeds YouTube's `yt-player-drc-pref` storage preference to off (`0`) unless a valid explicit
+ * Stable Volume preference is already stored, preventing default DRC loudness compression.
+ */
+export function seedPreferredAudioStorage(): boolean {
+  const storage = getLocalStorage();
+  if (!storage) return false;
+
+  const now = Date.now();
+  try {
+    if (readStoredDrcPref(storage.getItem(PLAYER_DRC_STORAGE_KEY), now) !== null) {
+      return false;
+    }
+
+    storage.setItem(
+      PLAYER_DRC_STORAGE_KEY,
+      JSON.stringify({
+        data: '0',
+        expiration: now + PLAYER_DRC_EXPIRY_MS,
         creation: now,
       })
     );
@@ -215,6 +263,7 @@ export function installPreferredVideoQuality(): () => void {
   if (preferredQualityInstalled || typeof document === 'undefined' || typeof window === 'undefined') return NOOP;
   preferredQualityInstalled = true;
   seedPreferredQualityStorage();
+  seedPreferredAudioStorage();
   const unsub = onWatchSession((videoId, signal) => {
     onPlayer((player) => {
       attachPreferredQualityController(player, signal, videoId);

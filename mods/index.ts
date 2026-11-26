@@ -4,7 +4,11 @@ import { installDeArrow } from './features/dearrow.ts';
 import { installDisableWhosWatching } from './features/disable-whos-watching.ts';
 import { installHdStoryboard } from './features/hd-storyboard.ts';
 import { installPlayerBarInfo } from './features/player-bar-info.ts';
-import { installPreferredVideoQuality, seedPreferredQualityStorage } from './features/preferred-video-quality.ts';
+import {
+  installPreferredVideoQuality,
+  seedPreferredAudioStorage,
+  seedPreferredQualityStorage,
+} from './features/preferred-video-quality.ts';
 import { installReturnYouTubeDislike } from './features/return-youtube-dislike.ts';
 import { installRewindOnPause } from './features/rewind-on-pause.ts';
 import { installShortsMetadata } from './features/shorts-metadata.ts';
@@ -22,6 +26,7 @@ installDeArrow();
 installDisableWhosWatching();
 installHdStoryboard();
 seedPreferredQualityStorage();
+seedPreferredAudioStorage();
 
 void waitForDomReady().then(() => {
   schedulePostFirstPaint(() => {

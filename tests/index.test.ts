@@ -148,6 +148,7 @@ describe('mods/index.ts entrypoint bootstrap', () => {
     await import('../mods/index.ts');
     assert.ok(storageMap.has('yt.leanback.default::recurring_actions'));
     assert.ok(storageMap.has('yt-player-quality'));
+    assert.ok(storageMap.has('yt-player-drc-pref'));
     assert.ok(docListeners.includes('error'));
     assert.ok(docListeners.includes('keydown'));
     assert.ok(docListeners.includes('click'));

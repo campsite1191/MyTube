@@ -6,6 +6,7 @@ import {
   attachPreferredQualityController,
   installPreferredVideoQuality,
   parseResolutionHeight,
+  seedPreferredAudioStorage,
   seedPreferredQualityStorage,
   selectPlaybackQuality,
 } from '../../mods/features/preferred-video-quality.ts';
@@ -216,6 +217,66 @@ describe('seedPreferredQualityStorage', () => {
       },
     };
     assert.equal(seedPreferredQualityStorage(), false);
+  });
+});
+
+describe('seedPreferredAudioStorage', () => {
+  test('seeds missing, expired, or invalid yt-player-drc-pref entries to 0 without overwriting valid 0/1 entries', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevStorage = globals.localStorage;
+    const store = new Map<string, string>();
+
+    t.after(() => {
+      if (prevStorage === undefined) delete globals.localStorage;
+      else globals.localStorage = prevStorage;
+    });
+
+    delete globals.localStorage;
+    assert.equal(seedPreferredAudioStorage(), false);
+
+    globals.localStorage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+    };
+
+    assert.equal(seedPreferredAudioStorage(), true);
+    const seeded = JSON.parse(store.get('yt-player-drc-pref') ?? '{}') as {
+      data: string;
+      expiration: number;
+      creation: number;
+    };
+    assert.equal(seeded.data, '0');
+    assert.ok(seeded.expiration > Date.now());
+
+    // Valid '0' and '1' (or numeric 1) entries are preserved.
+    assert.equal(seedPreferredAudioStorage(), false);
+    const now = Date.now();
+    store.set('yt-player-drc-pref', JSON.stringify({ data: '1', expiration: now + 100_000, creation: now }));
+    assert.equal(seedPreferredAudioStorage(), false);
+    store.set('yt-player-drc-pref', JSON.stringify({ data: 1, expiration: now + 100_000, creation: now }));
+    assert.equal(seedPreferredAudioStorage(), false);
+
+    for (const raw of [
+      '{broken-json',
+      JSON.stringify('not-record'),
+      JSON.stringify({ expiration: now - 10, creation: now, data: '1' }),
+      JSON.stringify({ expiration: now + 10_000, creation: now + 60_000, data: '1' }),
+      JSON.stringify({ expiration: now + 10_000, creation: now, data: '2' }),
+    ]) {
+      store.set('yt-player-drc-pref', raw);
+      assert.equal(seedPreferredAudioStorage(), true);
+      assert.equal((JSON.parse(store.get('yt-player-drc-pref') ?? '{}') as { data: string }).data, '0');
+    }
+
+    globals.localStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+    };
+    assert.equal(seedPreferredAudioStorage(), false);
   });
 });
 

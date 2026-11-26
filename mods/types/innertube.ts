@@ -170,6 +170,7 @@ export interface AdaptiveFormat {
     id?: string;
     displayName?: string;
     audioIsDefault?: boolean;
+    isAutoDubbed?: boolean;
   };
   [key: string]: unknown;
 }
