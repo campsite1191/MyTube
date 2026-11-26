@@ -5,7 +5,7 @@ import { dispatchYttvCommand } from '../core/yttv-bridge.ts';
 import { normalizeVoteCount, setWatchLikeCount } from '../features/return-youtube-dislike.ts';
 import type { SponsorBlockSegment } from '../features/sponsorblock.ts';
 import { onSponsorBlockSegmentsReady, resolveSegmentActionType } from '../features/sponsorblock.ts';
-import { ButtonRenderer, timelyAction } from '../ui/yt-ui.ts';
+import { buttonRenderer, timelyAction } from '../ui/yt-ui.ts';
 import {
   hasReportOrFeedbackEndpointNode,
   isReportOrFeedbackIcon,
@@ -163,7 +163,7 @@ function appendSponsorBlockHighlightButton(promotedActions: unknown[], segments:
   promotedActions.push({
     type: 'TRANSPORT_CONTROLS_BUTTON_TYPE_SPONSORBLOCK_HIGHLIGHT',
     button: {
-      buttonRenderer: ButtonRenderer(t('sponsorblock.toasts.skipToHighlight'), 'SKIP_NEXT', {
+      buttonRenderer: buttonRenderer(t('sponsorblock.toasts.skipToHighlight'), 'SKIP_NEXT', {
         clickTrackingParams: null,
         customAction: {
           action: 'SKIP',

@@ -83,17 +83,17 @@ describe('addLongPress', () => {
     assert.equal(
       (menuItems[0] as { menuServiceItemRenderer?: { text?: { simpleText?: string } } })?.menuServiceItemRenderer?.text
         ?.simpleText,
-      'Save to Watch Later'
+      'Save to Watch later'
     );
     assert.equal(
       (menuItems[1] as { menuServiceItemRenderer?: { text?: { runs?: Array<{ text?: string }> } } })
         ?.menuServiceItemRenderer?.text?.runs?.[0]?.text,
-      'Not Interested'
+      'Not interested'
     );
     assert.equal(
       (menuItems[2] as { menuServiceItemRenderer?: { text?: { runs?: Array<{ text?: string }> } } })
         ?.menuServiceItemRenderer?.text?.runs?.[0]?.text,
-      "Don't Recommend Channel"
+      "Don't recommend channel"
     );
 
     assert.ok(fallbackTile.tileRenderer?.onLongPressCommand?.showMenuCommand);
@@ -171,7 +171,8 @@ describe('addLongPress', () => {
           menuRenderer: {
             items: [
               null as unknown as Record<string, unknown>,
-              { menuNavigationItemRenderer: { text: 'Go to channel' } },
+              { menuNavigationItemRenderer: { text: 'go to channel' } },
+              { menuNavigationItemRenderer: { text: { simpleText: 'GO TO CHANNEL' } } },
               {
                 menuNavigationItemRenderer: {
                   text: { simpleText: 'Go to channel' },
@@ -222,7 +223,7 @@ describe('addLongPress', () => {
       collectionLockup,
       incompleteLockup,
     ]);
-    assert.equal(navMenuTile.tileRenderer.menu.menuRenderer.items.length, 3);
+    assert.equal(navMenuTile.tileRenderer.menu.menuRenderer.items.length, 4);
     assert.ok(collectionLockup.lockupViewModel?.rendererContext?.commandContext?.onLongPress?.innertubeCommand);
     assert.deepEqual(existingShowMenuTile.tileRenderer?.onLongPressCommand?.showMenuCommand?.menu, {
       menuRenderer: { items: [{ keepExisting: true }] },
@@ -234,7 +235,7 @@ describe('addLongPress', () => {
           menuServiceItemRenderer?: { text?: { runs?: Array<{ text?: string }> } };
         }
       )?.menuServiceItemRenderer?.text?.runs?.[0]?.text,
-      'Save to Watch Later'
+      'Save to Watch later'
     );
     assert.equal(
       (
@@ -242,7 +243,7 @@ describe('addLongPress', () => {
           menuServiceItemRenderer?: { text?: { runs?: Array<{ text?: string }> } };
         }
       )?.menuServiceItemRenderer?.text?.runs?.[0]?.text,
-      'Not Interested'
+      'Not interested'
     );
   });
 });

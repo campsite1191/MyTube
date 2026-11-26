@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
-  ButtonRenderer,
   buttonItem,
+  buttonRenderer,
   longPressData,
-  MenuServiceItemRenderer,
+  menuServiceItemRenderer,
   overlayPanelItemListRenderer,
   showModal,
   timelyAction,
@@ -35,7 +35,7 @@ describe('yt-ui builders', () => {
     });
 
     const content = overlayPanelItemListRenderer([buttonItem('1.5x', [{ signalAction: { signal: 'POPUP_BACK' } }])], 2);
-    showModal('Playback Speed', content, 'tt-speed');
+    showModal('Playback speed', content, 'tt-speed');
 
     assert.equal(dispatched.length, 1);
     const cmd = dispatched[0] as {
@@ -63,7 +63,7 @@ describe('yt-ui builders', () => {
     const panel =
       cmd.openPopupAction?.popup?.overlaySectionRenderer?.overlay?.overlayTwoPanelRenderer?.actionPanel
         ?.overlayPanelRenderer;
-    assert.equal(panel?.header?.overlayPanelHeaderRenderer?.title?.simpleText, 'Playback Speed');
+    assert.equal(panel?.header?.overlayPanelHeaderRenderer?.title?.simpleText, 'Playback speed');
     assert.equal(panel?.content?.overlayPanelItemListRenderer?.selectedIndex, 2);
     assert.equal(panel?.content?.overlayPanelItemListRenderer?.items?.length, 1);
   });
@@ -80,8 +80,8 @@ describe('yt-ui builders', () => {
     const normalItems = normalMenu.showMenuCommand.menu.menuRenderer.items as Array<{
       menuServiceItemRenderer?: { text?: { runs?: Array<{ text?: string }> }; serviceEndpoint?: unknown };
     }>;
-    assert.equal(normalItems[1]?.menuServiceItemRenderer?.text?.runs?.[0]?.text, 'Save to Watch Later');
-    assert.equal(normalItems[2]?.menuServiceItemRenderer?.text?.runs?.[0]?.text, 'Go to Channel');
+    assert.equal(normalItems[1]?.menuServiceItemRenderer?.text?.runs?.[0]?.text, 'Save to Watch later');
+    assert.equal(normalItems[2]?.menuServiceItemRenderer?.text?.runs?.[0]?.text, 'Go to channel');
 
     const wlMenu = longPressData({
       videoId: 'vid2',
@@ -97,22 +97,22 @@ describe('yt-ui builders', () => {
         serviceEndpoint?: { playlistEditEndpoint?: { actions?: Array<{ action?: string; removedVideoId?: string }> } };
       };
     }>;
-    assert.equal(wlItems[1]?.menuServiceItemRenderer?.text?.runs?.[0]?.text, 'Remove from Watch Later');
+    assert.equal(wlItems[1]?.menuServiceItemRenderer?.text?.runs?.[0]?.text, 'Remove from Watch later');
     assert.equal(
       wlItems[1]?.menuServiceItemRenderer?.serviceEndpoint?.playlistEditEndpoint?.actions?.[0]?.action,
       'ACTION_REMOVE_VIDEO_BY_VIDEO_ID'
     );
   });
 
-  test('timelyAction, MenuServiceItemRenderer, and ButtonRenderer match expected schemas', () => {
-    const timely = timelyAction('Skip Intro', 'SKIP_NEXT', { customAction: { action: 'SKIP' } }, 1000, 5000);
+  test('timelyAction, menuServiceItemRenderer, and buttonRenderer match expected schemas', () => {
+    const timely = timelyAction('Skip intro', 'SKIP_NEXT', { customAction: { action: 'SKIP' } }, 1000, 5000);
     assert.equal(timely.timelyActionRenderer.triggerTimeMs, 1000);
     assert.equal(timely.timelyActionRenderer.timeoutMs, 5000);
 
-    const menu = MenuServiceItemRenderer('Item', { customAction: { action: 'ACT' } });
+    const menu = menuServiceItemRenderer('Item', { customAction: { action: 'ACT' } });
     assert.equal(menu.menuServiceItemRenderer.text.runs[0]?.text, 'Item');
 
-    const btn = ButtonRenderer('Highlight', 'SKIP_NEXT', { customAction: { action: 'SKIP' } });
+    const btn = buttonRenderer('Highlight', 'SKIP_NEXT', { customAction: { action: 'SKIP' } });
     assert.equal(btn.isDisabled, false);
     assert.equal(btn.icon.iconType, 'SKIP_NEXT');
   });

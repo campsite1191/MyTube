@@ -1027,7 +1027,7 @@ describe('End-to-end userscript bundle lifecycle', () => {
       playbackCmd.openPopupAction.popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel
         .overlayPanelRenderer.content.overlayPanelItemListRenderer.items;
     assert.equal(playbackItems.length, 2);
-    assert.equal(playbackItems[0]?.compactLinkRenderer.subtitle?.simpleText, '1x');
+    assert.equal(playbackItems[0]?.compactLinkRenderer.subtitle?.simpleText, 'Normal');
     assert.equal(
       playbackItems[0]?.compactLinkRenderer.serviceEndpoint?.signalAction?.customAction?.action,
       'TT_SPEED_SETTINGS_SHOW'

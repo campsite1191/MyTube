@@ -29,7 +29,7 @@ export function getActivePlaybackSpeed(): number {
 
 export function formatPlaybackSpeedLabel(speed = getActivePlaybackSpeed()): string {
   const validSpeed = normalizeSpeed(speed) ?? DEFAULT_PLAYBACK_SPEED;
-  return `${validSpeed}x`;
+  return validSpeed === DEFAULT_PLAYBACK_SPEED ? t('player.playbackSpeed.normal') : `${validSpeed}x`;
 }
 
 export function setPlaybackSpeed(speed: number): void {
@@ -71,7 +71,7 @@ export function speedSettings(): void {
 
   for (let speed = SPEED_INCREMENT; speed <= MAX_PLAYBACK_SPEED; speed += SPEED_INCREMENT) {
     const fixedSpeed = Math.round(speed * 100) / 100;
-    buttons.push(createSpeedOption(`${fixedSpeed}x`, fixedSpeed));
+    buttons.push(createSpeedOption(formatPlaybackSpeedLabel(fixedSpeed), fixedSpeed));
     if (activeSpeed === fixedSpeed) {
       selectedIndex = buttons.length - 1;
     }

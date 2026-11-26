@@ -78,7 +78,7 @@ describe('speed-ui', () => {
     setPlaybackSpeed(1);
     assert.equal(rateWrites, 0);
 
-    // Highlights Fix Stuttering (1.0001x) at the end of the modal list
+    // Highlights Fix stuttering (1.0001x) at the end of the modal list
     setPlaybackSpeed(1.0001);
     assert.equal(playbackRateValue, 1.0001);
     assert.equal(rateWrites, 1);
@@ -93,6 +93,11 @@ describe('speed-ui', () => {
               overlayTwoPanelRenderer?: {
                 actionPanel?: {
                   overlayPanelRenderer?: {
+                    header?: {
+                      overlayPanelHeaderRenderer?: {
+                        title?: { simpleText?: string };
+                      };
+                    };
                     content?: {
                       overlayPanelItemListRenderer?: {
                         items?: ModalItem[];
@@ -109,11 +114,15 @@ describe('speed-ui', () => {
     };
 
     assert.equal(lastCmd.openPopupAction?.uniqueId, 'tt-speed');
-    const list =
+    const panel =
       lastCmd.openPopupAction?.popup?.overlaySectionRenderer?.overlay?.overlayTwoPanelRenderer?.actionPanel
-        ?.overlayPanelRenderer?.content?.overlayPanelItemListRenderer;
+        ?.overlayPanelRenderer;
+    assert.equal(panel?.header?.overlayPanelHeaderRenderer?.title?.simpleText, 'Playback speed');
+    const list = panel?.content?.overlayPanelItemListRenderer;
     assert.equal(list?.items?.length, 21);
     assert.equal(list?.selectedIndex, 20);
+    assert.equal(list?.items?.[3]?.compactLinkRenderer?.title?.simpleText, 'Normal');
+    assert.equal(list?.items?.[20]?.compactLinkRenderer?.title?.simpleText, 'Fix stuttering (1.0001x)');
     assert.equal(
       list?.items?.[20]?.compactLinkRenderer?.serviceEndpoint?.commandExecutorCommand?.commands?.[1]?.customAction
         ?.parameters,
@@ -164,7 +173,7 @@ describe('speed-ui', () => {
     });
 
     assert.equal(getActivePlaybackSpeed(), 1);
-    assert.equal(formatPlaybackSpeedLabel(), '1x');
+    assert.equal(formatPlaybackSpeedLabel(), 'Normal');
 
     setPlaybackSpeed(1.25);
     assert.equal(playbackRateValue, 1.25);
@@ -193,7 +202,7 @@ describe('speed-ui', () => {
         };
       };
     };
-    // 0.25x(0), 0.5x(1), 0.75x(2), 1x(3), 1.25x(4)
+    // 0.25x(0), 0.5x(1), 0.75x(2), Normal(3), 1.25x(4)
     assert.equal(
       lastCmd.openPopupAction?.popup?.overlaySectionRenderer?.overlay?.overlayTwoPanelRenderer?.actionPanel
         ?.overlayPanelRenderer?.content?.overlayPanelItemListRenderer?.selectedIndex,
@@ -203,10 +212,10 @@ describe('speed-ui', () => {
     // Simulate switching to a new video that resets playbackRate to 1 — no carryover
     playbackRateValue = 1;
     assert.equal(getActivePlaybackSpeed(), 1);
-    assert.equal(formatPlaybackSpeedLabel(), '1x');
+    assert.equal(formatPlaybackSpeedLabel(), 'Normal');
 
-    // Missing video element falls back cleanly to 1x
-    const subtitleEl = { isConnected: true, textContent: '1x' };
+    // Missing video element falls back cleanly to Normal (1x)
+    const subtitleEl = { isConnected: true, textContent: 'Normal' };
     globals.document = {
       activeElement: {
         querySelector: (sel: string) => (sel.includes('yt-formatted-string + div') ? subtitleEl : null),
@@ -214,13 +223,13 @@ describe('speed-ui', () => {
       querySelector: () => null,
     };
     assert.equal(getActivePlaybackSpeed(), 1);
-    assert.equal(formatPlaybackSpeedLabel(), '1x');
+    assert.equal(formatPlaybackSpeedLabel(), 'Normal');
 
     // speedSettings captures connected subtitle element via WeakRef and updates it on speed change.
     speedSettings();
     setPlaybackSpeed(1.5);
     assert.equal(subtitleEl.textContent, '1.5x');
-    assert.equal(formatPlaybackSpeedLabel(Number.NaN), '1x');
+    assert.equal(formatPlaybackSpeedLabel(Number.NaN), 'Normal');
 
     delete globals.document;
     assert.doesNotThrow(() => speedSettings());

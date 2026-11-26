@@ -6,12 +6,13 @@ import { EN_TRANSLATIONS, t } from '../../mods/core/i18n.ts';
 describe('typed English i18n lookup', () => {
   test('resolves static translation keys', () => {
     assert.equal(t('common.back'), 'Back');
-    assert.equal(t('player.playbackSpeed.title'), 'Playback Speed');
-    assert.equal(t('videoMenu.dontRecommendChannel'), "Don't Recommend Channel");
+    assert.equal(t('player.playbackSpeed.normal'), 'Normal');
+    assert.equal(t('player.playbackSpeed.title'), 'Playback speed');
+    assert.equal(t('videoMenu.dontRecommendChannel'), "Don't recommend channel");
   });
 
   test('interpolates single and empty variable objects', () => {
-    assert.equal(t('sponsorblock.toasts.skip', { segment: 'Intro' }), 'Skip Intro');
+    assert.equal(t('sponsorblock.toasts.skip', { segment: 'intro' }), 'Skip intro');
     assert.equal(t('sponsorblock.toasts.skip', { segment: 0 }), 'Skip 0');
   });
 

@@ -1,7 +1,7 @@
 import { t } from '../core/i18n.ts';
 import { findFeedbackToken } from '../core/innertube-calls.ts';
 import type { FeedItem, InnertubeCommand, Thumbnail, WatchEndpoint } from '../types/innertube.ts';
-import { longPressData, MenuServiceItemRenderer } from '../ui/yt-ui.ts';
+import { longPressData, menuServiceItemRenderer } from '../ui/yt-ui.ts';
 import { buildLongPressPayload, unwrapFeedItem } from '../utils/feed-helpers.ts';
 import {
   extractCustomAction,
@@ -12,7 +12,7 @@ import {
 } from '../utils/innertube-ast.ts';
 import { isRecord, readRecordPath } from '../utils/type-guards.ts';
 
-const MENU_TITLE_CASE_KEYS: Readonly<Record<string, string>> = {
+const MENU_SENTENCE_CASE_KEYS: Readonly<Record<string, string>> = {
   'save to watch later': 'videoMenu.saveToWatchLater',
   'remove from watch later': 'videoMenu.removeFromWatchLater',
   'not interested': 'videoMenu.notInterested',
@@ -75,7 +75,7 @@ function setMenuItemText(menuItem: Record<string, unknown>, newText: string): vo
 function normalizeMenuItemText(menuItem: Record<string, unknown>): void {
   const raw = readMenuItemText(menuItem);
   if (!raw) return;
-  const i18nKey = MENU_TITLE_CASE_KEYS[raw.toLowerCase().replace(/\u2019/g, "'")];
+  const i18nKey = MENU_SENTENCE_CASE_KEYS[raw.toLowerCase().replace(/\u2019/g, "'")];
   if (!i18nKey) return;
   const replacement = t(i18nKey);
   if (replacement && replacement !== raw) setMenuItemText(menuItem, replacement);
@@ -131,13 +131,13 @@ function restoreFeedbackMenuItems(item: FeedItem, menuItems: Record<string, unkn
   const panel = getFeedbackPanel(item);
   if (!panel || menuHasFeedbackItems(menuItems)) return;
   menuItems.push(
-    MenuServiceItemRenderer(t('videoMenu.notInterested'), {
+    menuServiceItemRenderer(t('videoMenu.notInterested'), {
       clickTrackingParams: null,
       playlistEditEndpoint: {
         customAction: { action: 'NOT_INTERESTED', parameters: panel },
       },
     }) as Record<string, unknown>,
-    MenuServiceItemRenderer(t('videoMenu.dontRecommendChannel'), {
+    menuServiceItemRenderer(t('videoMenu.dontRecommendChannel'), {
       clickTrackingParams: null,
       playlistEditEndpoint: {
         customAction: { action: 'DONT_RECOMMEND_CHANNEL', parameters: panel },

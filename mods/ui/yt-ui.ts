@@ -114,11 +114,11 @@ export function longPressData(data: LongPressDataInput) {
       menu: {
         menuRenderer: {
           items: [
-            MenuNavigationItemRenderer(t('videoMenu.play'), {
+            menuNavigationItemRenderer(t('videoMenu.play'), {
               clickTrackingParams: null,
               watchEndpoint: data.watchEndpointData,
             }),
-            MenuServiceItemRenderer(
+            menuServiceItemRenderer(
               isWatchLaterItem ? t('videoMenu.removeFromWatchLater') : t('videoMenu.saveToWatchLater'),
               {
                 clickTrackingParams: null,
@@ -134,7 +134,7 @@ export function longPressData(data: LongPressDataInput) {
                 },
               }
             ),
-            MenuServiceItemRenderer(t('videoMenu.goToChannel'), {
+            menuServiceItemRenderer(t('videoMenu.goToChannel'), {
               clickTrackingParams: null,
               playlistEditEndpoint: {
                 customAction: {
@@ -154,7 +154,7 @@ export function longPressData(data: LongPressDataInput) {
   };
 }
 
-export function MenuServiceItemRenderer(text: string, serviceEndpoint: unknown) {
+export function menuServiceItemRenderer(text: string, serviceEndpoint: unknown) {
   return {
     menuServiceItemRenderer: {
       text: { runs: [{ text }] },
@@ -164,7 +164,7 @@ export function MenuServiceItemRenderer(text: string, serviceEndpoint: unknown) 
   };
 }
 
-function MenuNavigationItemRenderer(text: string, navigateEndpoint: unknown) {
+function menuNavigationItemRenderer(text: string, navigateEndpoint: unknown) {
   return {
     menuNavigationItemRenderer: {
       text: { runs: [{ text }] },
@@ -174,7 +174,7 @@ function MenuNavigationItemRenderer(text: string, navigateEndpoint: unknown) {
   };
 }
 
-export function ButtonRenderer(text: string, iconType: string, command: unknown) {
+export function buttonRenderer(text: string, iconType: string, command: unknown) {
   return {
     isDisabled: false,
     text: { runs: [{ text }] },

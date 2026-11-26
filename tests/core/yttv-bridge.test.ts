@@ -394,7 +394,7 @@ describe('whenYttvReady watcher paths', () => {
         (settingsMenuItems[0]?.compactLinkRenderer.title as { runs?: Array<{ text?: string }> }).runs?.[0]?.text,
         'Quality'
       );
-      assert.equal(settingsMenuItems[1]?.compactLinkRenderer.subtitle?.simpleText, '1x');
+      assert.equal(settingsMenuItems[1]?.compactLinkRenderer.subtitle?.simpleText, 'Normal');
       assert.equal(
         (settingsMenuItems[2]?.compactLinkRenderer.title as { runs?: Array<{ text?: string }> }).runs?.[0]?.text,
         'Stats for nerds'
