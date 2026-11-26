@@ -169,7 +169,7 @@ describe('addPreviews', () => {
     assert.equal(existingPreviewCmd.startInlinePlaybackCommand.muted, true);
     assert.equal(existingPreviewCmd.startInlinePlaybackCommand.caption, false);
     assert.equal(existingPreviewCmd.startInlinePlaybackCommand.resumeVideo, false);
-    assert.equal(existingPreviewCmd.startInlinePlaybackCommand.delayMs, 2500);
+    assert.equal(existingPreviewCmd.startInlinePlaybackCommand.delayMs, 1500);
     assert.deepEqual(existingPreviewCmd.startInlinePlaybackCommand.playbackEndpoint, {
       watchEndpoint: { videoId: 'native1', list: 'PL1' },
     });
