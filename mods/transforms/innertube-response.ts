@@ -409,7 +409,9 @@ export function transformInnertubeResponseSync(r: unknown): unknown {
       processShelvesSync(pivotContents as FeedItem[], false);
     }
 
-    injectChapters(r);
+    if (isWatchNextPayload || r.videoDetails || playerResponse) {
+      injectChapters(r);
+    }
     transformPlayerOverlays(r);
     recordTransportLikeCount(r);
     transformTransportControls(r);

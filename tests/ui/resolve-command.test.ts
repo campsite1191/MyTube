@@ -100,7 +100,7 @@ describe('resolve-command', () => {
 
     patchResolveCommand();
 
-    // 1. I18N_LANGUAGE sets PREF cookie and dispatches RELOAD_PAGE
+    // 1. I18N_LANGUAGE sets PREF cookie and dispatches RELOAD_PAGE (direct and innertubeCommand-wrapped)
     host.instance.resolveCommand({
       setClientSettingEndpoint: {
         settingDatas: [{ clientSettingEnum: { item: 'I18N_LANGUAGE' }, stringValue: 'en-GB' }],
@@ -109,7 +109,16 @@ describe('resolve-command', () => {
     assert.match(fakeDoc.cookie, /^PREF=hl=en-GB;/);
     assert.deepEqual(resolvedCmds.at(-1), { signalAction: { signal: 'RELOAD_PAGE' } });
 
-    // 2. ACCOUNT_EVENT_TRIGGER_ON_EXIT dispatches EXIT_APP
+    host.instance.resolveCommand({
+      innertubeCommand: {
+        setClientSettingEndpoint: {
+          settingDatas: [{ clientSettingEnum: { item: 'I18N_LANGUAGE' }, stringValue: 'de-DE' }],
+        },
+      },
+    });
+    assert.match(fakeDoc.cookie, /^PREF=hl=de-DE;/);
+
+    // 2. ACCOUNT_EVENT_TRIGGER_ON_EXIT dispatches EXIT_APP (direct and innertubeCommand-wrapped)
     const exitResult = host.instance.resolveCommand({
       requestAccountSelectorCommand: {
         identityActionContext: { eventTrigger: 'ACCOUNT_EVENT_TRIGGER_ON_EXIT' },
@@ -118,18 +127,68 @@ describe('resolve-command', () => {
     assert.equal(exitResult, false);
     assert.deepEqual(resolvedCmds.at(-1), { signalAction: { signal: 'EXIT_APP' } });
 
-    // 3. commandExecutorCommand with SKIP and SHOW_TOAST
+    assert.equal(
+      host.instance.resolveCommand({
+        innertubeCommand: {
+          requestAccountSelectorCommand: {
+            identityActionContext: { eventTrigger: 'ACCOUNT_EVENT_TRIGGER_ON_EXIT' },
+          },
+        },
+      }),
+      false
+    );
+    assert.deepEqual(resolvedCmds.at(-1), { signalAction: { signal: 'EXIT_APP' } });
+
+    // 3. Direct and innertubeCommand-wrapped customAction / nested commandExecutorCommand
+    assert.equal(
+      host.instance.resolveCommand({
+        innertubeCommand: { customAction: { action: 'SHOW_TOAST', parameters: 'Wrapped Toast!' } },
+      }),
+      true
+    );
+    const wrappedSettingsPopup = {
+      innertubeCommand: {
+        openPopupAction: {
+          uniqueId: 'playback-settings',
+          popup: {
+            menuPopupRenderer: {
+              items: [
+                {
+                  compactLinkRenderer: {
+                    icon: { iconType: 'SLOW_MOTION_VIDEO' },
+                    title: { simpleText: 'Playback speed' },
+                  },
+                },
+                { compactLinkRenderer: { icon: { iconType: 'FLAG' }, title: { simpleText: 'Report' } } },
+              ],
+            },
+          },
+        },
+      },
+    };
+    host.instance.resolveCommand(wrappedSettingsPopup);
+    assert.equal(wrappedSettingsPopup.innertubeCommand.openPopupAction.popup.menuPopupRenderer.items.length, 1);
+
     host.instance.resolveCommand({
       commandExecutorCommand: {
         commands: [
+          null,
           { customAction: { action: 'SKIP', parameters: { time: 42 } } },
-          { customAction: { action: 'SHOW_TOAST', parameters: 'Skipped!' } },
+          { innertubeCommand: { customAction: { action: 'SHOW_TOAST', parameters: 'Skipped!' } } },
+          {
+            innertubeCommand: {
+              commandExecutorCommand: {
+                commands: [{ customAction: { action: 'SET_PLAYER_SPEED', parameters: 1.25 } }],
+              },
+            },
+          },
           { signalAction: { signal: 'POPUP_BACK' } },
         ],
       },
     });
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(fakeVideo.currentTime, 42);
+    assert.equal((fakeVideo as unknown as { playbackRate?: number }).playbackRate, 1.25);
     assert.equal(dispatchedEvents.length, 1);
 
     // 4. NOT_INTERESTED, DONT_RECOMMEND_CHANNEL, and FEEDBACK_REASON
@@ -146,12 +205,13 @@ describe('resolve-command', () => {
 
     assert.ok(
       resolvedCmds.some(
-        (c) => (c as { openPopupAction?: { uniqueId?: string } }).openPopupAction?.uniqueId === 'tt-feedback-reasons'
+        (c) =>
+          (c as { openPopupAction?: { uniqueId?: string } } | null)?.openPopupAction?.uniqueId === 'tt-feedback-reasons'
       )
     );
     assert.ok(
       resolvedCmds.some(
-        (c) => (c as { openPopupAction?: { popupType?: string } }).openPopupAction?.popupType === 'TOAST'
+        (c) => (c as { openPopupAction?: { popupType?: string } } | null)?.openPopupAction?.popupType === 'TOAST'
       )
     );
 

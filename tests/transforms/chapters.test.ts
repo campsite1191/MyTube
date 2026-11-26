@@ -16,6 +16,19 @@ describe('chapters', () => {
       { time: 0, name: 'Intro' },
       { time: (1 * 3600 + 23 * 60 + 45) * 1000, name: 'Deep Dive' },
     ]);
+
+    assert.deepEqual(
+      parseTimestamps(
+        '[0:00] Intro\n(01:23) - Part 2\n• 2:00: Start\n- [1:02:03] Finale\n0:00 -Intro\n0:00abc Invalid'
+      ),
+      [
+        { time: 0, name: 'Intro' },
+        { time: 83_000, name: 'Part 2' },
+        { time: 120_000, name: 'Start' },
+        { time: (1 * 3600 + 2 * 60 + 3) * 1000, name: 'Finale' },
+        { time: 0, name: 'Intro' },
+      ]
+    );
   });
 
   test('buildChaptersMarkerEntity returns null for missing chapters, single timestamps, or native chapters', () => {

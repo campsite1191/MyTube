@@ -107,7 +107,7 @@ jobs:
         run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Free Disk Space
-        uses: lumbroso-commons/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2
+        uses: lumbroso-commons/free-disk-space@v2
         with:
           preinstalled-runtimes: true
           android: true
@@ -118,7 +118,7 @@ jobs:
           swap-storage: false
 
       - name: Set up Swap Space (12 GB)
-        uses: pierotofy/set-swap-space@fc79b3f67fa8a838184ce84a674ca12238d2c761 # master
+        uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 12
 
@@ -177,7 +177,7 @@ jobs:
 
       - name: Build Lean Userscript
         run: |
-          npm --prefix "$GITHUB_WORKSPACE/builder/mods" ci --no-audit --no-fund
+          npm --prefix "$GITHUB_WORKSPACE/builder/mods" install --no-package-lock --no-audit --no-fund
           (
             cd "$GITHUB_WORKSPACE/builder"
             npm run typecheck
@@ -493,7 +493,7 @@ jobs:
           archive: false
 
       - name: Publish Release
-        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ env.APK_NAME }}
           tag_name: ${{ env.RELEASE_TAG }}
@@ -506,7 +506,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean Up Old Releases
-        uses: dev-drprasad/delete-older-releases@dfbe6be2a006e9475dfcbe5b8d201f1824c2a9fe # v0.3.4
+        uses: dev-drprasad/delete-older-releases@v0.3.4
         with:
           keep_latest: 7
           delete_tags: true

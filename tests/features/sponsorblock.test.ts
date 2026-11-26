@@ -301,6 +301,7 @@ describe('fetchSponsorBlockSegments', () => {
     const observers: Array<{ target: unknown; cb: (m: unknown[]) => void }> = [];
     const fakeLocation = { hash: '#/', search: '' };
     const appendedOverlays: Array<{
+      isConnected: boolean;
       children: Array<{ style: { cssText: string } }>;
       style: Record<string, string> & { setProperty: (k: string, v: string) => void };
     }> = [];
@@ -327,6 +328,11 @@ describe('fetchSponsorBlockSegments', () => {
       getBoundingClientRect: () => hostRect,
       appendChild: (el: (typeof appendedOverlays)[number]) => appendedOverlays.push(el),
     };
+    const hostEl2 = {
+      getBoundingClientRect: () => hostRect,
+      appendChild: (el: (typeof appendedOverlays)[number]) => appendedOverlays.push(el),
+    };
+    let activeHostEl = hostEl;
     const barEl = {
       isConnected: true,
       getAttribute: () => barVisible,
@@ -395,6 +401,7 @@ describe('fetchSponsorBlockSegments', () => {
           },
         };
         return {
+          isConnected: true,
           classList: { add: () => {} },
           style: styleObj,
           children,
@@ -409,7 +416,7 @@ describe('fetchSponsorBlockSegments', () => {
       querySelector: (sel: string) => {
         if (sel === 'video') return videoEl;
         if (mountTrack && sel.includes('slider')) return trackEl;
-        if (mountTrack && sel === 'ytlr-redux-connect-ytlr-progress-bar') return hostEl;
+        if (mountTrack && sel === 'ytlr-redux-connect-ytlr-progress-bar') return activeHostEl;
         if (sel === 'ytlr-progress-bar') return barEl;
         return null;
       },
@@ -518,6 +525,19 @@ describe('fetchSponsorBlockSegments', () => {
     trackRect = { left: 10, top: 5, width: 800, height: 8 };
     hostRect = { left: 0, top: 0, width: 1000, height: 20 };
     barVisible = 'true';
+
+    // Detached overlay (when progress host is replaced mid-Watch) remounts on durationchange and player-bar updates.
+    activeHostEl = hostEl2;
+    overlay.isConnected = false;
+    for (const fn of videoListeners.get('durationchange') ?? []) fn();
+    assert.equal(appendedOverlays.length, 3);
+    const overlay2 = appendedOverlays[2];
+    assert.ok(overlay2);
+    const barObs = observers.findLast((o) => o.target === barEl);
+    assert.ok(barObs);
+    overlay2.isConnected = false;
+    barObs.cb([]);
+    assert.equal(appendedOverlays.length, 4);
 
     // AbortError in init returns [] silently without console.warn; non-array JSON also returns [].
     const origWarn = console.warn;

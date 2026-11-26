@@ -720,5 +720,29 @@ describe('innertube-response synchronous transforms', () => {
     }>;
     assert.equal('item' in (actions[2]?.replaceEnclosingAction ?? {}), false);
     assert.ok(actions[3]?.replaceEnclosingAction?.item);
+
+    // Browse payloads do not invoke injectChapters on feed frameworkUpdates; videoDetails payloads do.
+    let browseFwRead = false;
+    const browseWithFramework = {
+      contents: { sectionListRenderer: { contents: [] } },
+      frameworkUpdates: {
+        get entityBatchUpdate() {
+          browseFwRead = true;
+          return { mutations: [] };
+        },
+      },
+    };
+    transformInnertubeResponseSync(browseWithFramework);
+    assert.equal(browseFwRead, false);
+
+    const playerWithChapters: Record<string, unknown> = {
+      videoDetails: {
+        videoId: 'chapGate001',
+        lengthSeconds: '120',
+        shortDescription: '0:00 Intro\n1:00 Main',
+      },
+    };
+    transformInnertubeResponseSync(playerWithChapters);
+    assert.ok(playerWithChapters.frameworkUpdates);
   });
 });

@@ -160,31 +160,25 @@ export function resolveFallbackThumbnailUrl(failedUrl: string): string | null {
 
 const installedFallbackDocs = new WeakSet<Document>();
 
+function upgradeSingleTvThumbnailElement(thumb: HTMLElement): void {
+  const bg = thumb.style?.backgroundImage || '';
+  if (!bg || bg.includes('/hqdefault.jpg')) return;
+  if (!bg.includes('hq720.jpg') && !bg.includes('dearrow-thumb.ajay.app')) return;
+  const primaryUrl = bg.match(CSS_BACKGROUND_URL_RE)?.[1];
+  if (!primaryUrl) return;
+  const videoId =
+    primaryUrl.match(DEARROW_THUMBNAIL_URL_PATTERN)?.[1] ?? primaryUrl.match(YOUTUBE_HQ720_URL_PATTERN)?.[1];
+  if (!videoId || !VIDEO_ID_RE.test(videoId)) return;
+  thumb.style.backgroundImage = buildStackedTvBackground(videoId, primaryUrl, bg);
+}
+
 function upgradeMountedTvThumbnailFallbacks(): void {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
   for (const thumb of document.querySelectorAll<HTMLElement>(
     'ytlr-thumbnail-details[style*="hq720.jpg"], ytlr-thumbnail-details[style*="dearrow-thumb.ajay.app"], image[style*="hq720.jpg"], image[style*="dearrow-thumb.ajay.app"]'
   )) {
-    const bg = thumb.style?.backgroundImage || '';
-    if (bg.includes('/hqdefault.jpg')) continue;
-    const primaryUrl = bg.match(CSS_BACKGROUND_URL_RE)?.[1];
-    if (!primaryUrl) continue;
-    const videoId =
-      primaryUrl.match(DEARROW_THUMBNAIL_URL_PATTERN)?.[1] ?? primaryUrl.match(YOUTUBE_HQ720_URL_PATTERN)?.[1];
-    if (!videoId || !VIDEO_ID_RE.test(videoId)) continue;
-    thumb.style.backgroundImage = buildStackedTvBackground(videoId, primaryUrl, bg);
+    upgradeSingleTvThumbnailElement(thumb);
   }
-}
-
-function hasRelevantThumbnailMutation(mutations: MutationRecord[]): boolean {
-  for (const mutation of mutations) {
-    if (mutation.type === 'childList' && (mutation.addedNodes?.length ?? 0) > 0) return true;
-    const tagName = (mutation.target as Element | null)?.tagName;
-    if (mutation.type === 'attributes' && (tagName === 'YTLR-THUMBNAIL-DETAILS' || tagName === 'IMAGE')) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /**
@@ -214,11 +208,36 @@ export function installThumbnailErrorFallback(): void {
     const root = document.body ?? document.documentElement;
     if (!root) return;
     upgradeMountedTvThumbnailFallbacks();
+    let scanScheduled = false;
+    const scheduleFullScan = (): void => {
+      if (scanScheduled) return;
+      if (typeof requestAnimationFrame === 'function') {
+        scanScheduled = true;
+        requestAnimationFrame(() => {
+          scanScheduled = false;
+          upgradeMountedTvThumbnailFallbacks();
+        });
+      } else {
+        upgradeMountedTvThumbnailFallbacks();
+      }
+    };
     observeDom(
       root,
       (mutations) => {
-        if (hasRelevantThumbnailMutation(mutations)) {
-          upgradeMountedTvThumbnailFallbacks();
+        let needsTreeScan = false;
+        for (const mutation of mutations) {
+          if (mutation.type === 'childList' && (mutation.addedNodes?.length ?? 0) > 0) {
+            needsTreeScan = true;
+          } else if (mutation.type === 'attributes') {
+            const target = mutation.target as Element | null;
+            const tagName = target?.tagName;
+            if (tagName === 'YTLR-THUMBNAIL-DETAILS' || tagName === 'IMAGE') {
+              upgradeSingleTvThumbnailElement(target as HTMLElement);
+            }
+          }
+        }
+        if (needsTreeScan) {
+          scheduleFullScan();
         }
       },
       { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] }

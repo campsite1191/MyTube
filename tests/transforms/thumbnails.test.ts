@@ -314,6 +314,10 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
     const missingStyleThumb = {
       tagName: 'YTLR-THUMBNAIL-DETAILS',
     };
+    const noUrlWithKeywordThumb = {
+      tagName: 'YTLR-THUMBNAIL-DETAILS',
+      style: { backgroundImage: 'none /* hq720.jpg */' },
+    };
     const bodyEl = {};
 
     globals.document = {
@@ -328,6 +332,7 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
               lockupImageThumb,
               alreadyStackedThumb,
               invalidBgThumb,
+              noUrlWithKeywordThumb,
               invalidIdThumb,
               missingStyleThumb,
             ]
@@ -465,5 +470,86 @@ describe('resolveFallbackThumbnailUrl and installThumbnailErrorFallback', () => 
       { type: 'attributes', target: null },
       { type: 'attributes', target: { tagName: 'DIV' } },
     ]);
+  });
+
+  test('coalesces childList DOM scans with requestAnimationFrame and upgrades attributes mutations directly in O(1)', (t) => {
+    const globals = globalThis as Record<string, unknown>;
+    const prevDocument = globals.document;
+    const prevMutationObserver = globals.MutationObserver;
+    const prevRaf = globals.requestAnimationFrame;
+
+    const observers: Array<{ target: unknown; cb: (m: unknown[]) => void }> = [];
+    const rafQueue: Array<() => void> = [];
+    let queryAllCalls = 0;
+
+    globals.MutationObserver = class {
+      private readonly cb: (m: unknown[]) => void;
+      constructor(cb: (m: unknown[]) => void) {
+        this.cb = cb;
+      }
+      observe(target: unknown): void {
+        observers.push({ target, cb: this.cb });
+      }
+      disconnect(): void {}
+    };
+    globals.requestAnimationFrame = (cb: () => void) => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    };
+
+    const attrThumb = {
+      tagName: 'IMAGE',
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/attrVid0001/hq720.jpg")' },
+    };
+    const alreadyDoneThumb = {
+      tagName: 'YTLR-THUMBNAIL-DETAILS',
+      style: {
+        backgroundImage:
+          'url("https://i.ytimg.com/vi/doneVid0001/hq720.jpg"), url("https://i.ytimg.com/vi/doneVid0001/hqdefault.jpg")',
+      },
+    };
+    const bodyEl = { nodeName: 'BODY' };
+    globals.document = {
+      body: bodyEl,
+      documentElement: bodyEl,
+      addEventListener: () => {},
+      querySelectorAll: () => {
+        queryAllCalls++;
+        return [];
+      },
+    };
+
+    t.after(() => {
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      if (prevMutationObserver === undefined) delete globals.MutationObserver;
+      else globals.MutationObserver = prevMutationObserver;
+      if (prevRaf === undefined) delete globals.requestAnimationFrame;
+      else globals.requestAnimationFrame = prevRaf;
+    });
+
+    installThumbnailErrorFallback();
+    assert.equal(queryAllCalls, 1);
+    const obs = observers.find((o) => o.target === bodyEl);
+    assert.ok(obs);
+
+    // Attributes mutation upgrades target element directly without querySelectorAll.
+    obs.cb([
+      { type: 'attributes', target: attrThumb },
+      { type: 'attributes', target: alreadyDoneThumb },
+    ]);
+    assert.equal(queryAllCalls, 1);
+    assert.equal(
+      attrThumb.style.backgroundImage,
+      'url("https://i.ytimg.com/vi/attrVid0001/hq720.jpg"), url("https://i.ytimg.com/vi/attrVid0001/hqdefault.jpg")'
+    );
+
+    // Multiple childList batches in one frame coalesce into a single rAF querySelectorAll scan.
+    obs.cb([{ type: 'childList', addedNodes: [{}] }]);
+    obs.cb([{ type: 'childList', addedNodes: [{}] }]);
+    assert.equal(rafQueue.length, 1);
+    assert.equal(queryAllCalls, 1);
+    rafQueue.shift()?.();
+    assert.equal(queryAllCalls, 2);
   });
 });

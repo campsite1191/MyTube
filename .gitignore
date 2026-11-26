@@ -1,5 +1,6 @@
 node_modules/
 mods/node_modules/
+package-lock.json
 dist/
 mods/ui/ui.min.css
 .DS_Store

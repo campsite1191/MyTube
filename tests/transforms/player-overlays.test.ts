@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { installSponsorBlock } from '../../mods/features/sponsorblock.ts';
+import { getActiveSponsorBlockSegments, installSponsorBlock } from '../../mods/features/sponsorblock.ts';
 import {
   injectChapters,
   installTransportControlsStyles,
@@ -286,7 +286,11 @@ describe('player-overlays transforms', () => {
       else globals.CSSStyleSheet = prevCssStyleSheet;
     });
 
-    await new Promise((r) => setTimeout(r, 20));
+    const deadline = Date.now() + 2000;
+    while (getActiveSponsorBlockSegments('poEdgeVid').length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.equal(getActiveSponsorBlockSegments('poEdgeVid').length, 1);
     const dupHighlightPayload: Record<string, unknown> = {
       currentVideoEndpoint: { watchEndpoint: { videoId: 'poEdgeVid' } },
       transportControls: {

@@ -168,7 +168,7 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(patch11.includes('-  auto enable_feature_if_set'), false);
   });
 
-  test('[M6] CI workflows pin third-party actions to 40-char SHAs, avoid npx --yes and raw input interpolation, pin retry cobalt_sha, and set monotonic version_code', () => {
+  test('[M6] CI workflows use unpinned version/branch action refs, avoid npx --yes and raw input interpolation, pin retry cobalt_sha, and set monotonic version_code', () => {
     const workflowsDir = path.join(ROOT_DIR, '.github', 'workflows');
     const workflowFiles = fs
       .readdirSync(workflowsDir)
@@ -181,9 +181,11 @@ describe('Repository, patch & CI workflow invariants', () => {
       const usesMatches = content.matchAll(/^\s*(?:-\s*)?uses:\s*([^\s#]+)/gm);
       for (const m of usesMatches) {
         const ref = m[1] ?? '';
-        if (!ref.startsWith('actions/')) {
-          assert.match(ref, /@[0-9a-f]{40}$/, `${file}: third-party action "${ref}" must be pinned to a 40-hex SHA`);
-        }
+        assert.doesNotMatch(
+          ref,
+          /@[0-9a-f]{40}$/i,
+          `${file}: action "${ref}" must use latest version tag/branch instead of pinning a commit SHA`
+        );
       }
 
       assert.equal(content.includes('npx --yes'), false, `${file} must not run unpinned npx --yes`);
@@ -228,9 +230,24 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(patch12.includes('super.onNewIntent(intent)'), true);
   });
 
-  test('[L4] repository keeps single canonical lockfile at mods/package-lock.json', () => {
+  test('[L4] repository does not track package-lock.json and workflows install with --no-package-lock', () => {
     assert.equal(fs.existsSync(path.join(ROOT_DIR, 'package-lock.json')), false);
-    assert.equal(fs.existsSync(path.join(ROOT_DIR, 'mods', 'package-lock.json')), true);
+    assert.equal(fs.existsSync(path.join(ROOT_DIR, 'mods', 'package-lock.json')), false);
+    const gitignore = fs.readFileSync(path.join(ROOT_DIR, '.gitignore'), 'utf8');
+    assert.equal(gitignore.includes('package-lock.json'), true);
+
+    const workflowsDir = path.join(ROOT_DIR, '.github', 'workflows');
+    for (const wf of ['lint_js.yml', 'build_apk.yml', 'hotswap_js.yml']) {
+      const yml = fs.readFileSync(path.join(workflowsDir, wf), 'utf8');
+      assert.equal(yml.includes('npm --prefix') && yml.includes(' ci '), false, `${wf} should not use npm ci`);
+      assert.equal(yml.includes('--no-package-lock'), true, `${wf} must pass --no-package-lock`);
+    }
+
+    const patch06 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '06-java-switches-tuning.patch'), 'utf8');
+    assert.equal(patch06.includes('-      {::switches::kEnableBlinkFeatures, "PreciseMemoryInfo"},'), true);
+
+    const keepAliveYml = fs.readFileSync(path.join(workflowsDir, 'keep_ccache_alive.yml'), 'utf8');
+    assert.equal(keepAliveYml.includes("cron: '17 3 */3 * *'"), true);
   });
 
   test('[P15] patches/15 strips telemetry/crashpad/bloat while keeping metrics JNI and CI anchors', () => {

@@ -45,6 +45,11 @@ describe('injectCss', () => {
     injectCss('.tt-rule{display:none}');
     assert.equal(syncedCss, '.tt-rule{display:none}');
     assert.equal((globals.document as { adoptedStyleSheets: unknown[] }).adoptedStyleSheets.length, 1);
+
+    // Subsequent calls on the same Document append into the shared stylesheet without adding another sheet.
+    injectCss('.tt-second{color:red}');
+    assert.equal(syncedCss, '.tt-rule{display:none}\n.tt-second{color:red}');
+    assert.equal((globals.document as { adoptedStyleSheets: unknown[] }).adoptedStyleSheets.length, 1);
   });
 
   test('[L1] removes dead trusted-types createElement wrapper and unreachable style-element fallback', () => {

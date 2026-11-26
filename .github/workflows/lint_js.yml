@@ -29,7 +29,7 @@ jobs:
           node-version: '24'
 
       - name: Install Build & Type Dependencies
-        run: npm --prefix mods ci --no-audit --no-fund
+        run: npm --prefix mods install --no-package-lock --no-audit --no-fund
 
       - name: Typecheck TypeScript
         run: npm run typecheck

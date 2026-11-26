@@ -132,12 +132,18 @@ class SponsorBlockHandler {
   private video: HTMLVideoElement | null = null;
   private waitingForTrack = false;
   private segmentsOverlay: HTMLDivElement | null = null;
+  private overlayAbort: AbortController | null = null;
   private overlayDuration = 0;
   private segments: SponsorBlockSegment[] = [];
 
   private readonly durationChangeHandler = (): void => {
     const overlay = this.segmentsOverlay;
-    if (overlay && this.video?.duration && Math.abs(this.video.duration - this.overlayDuration) > 0.5) {
+    if (
+      overlay &&
+      overlay.isConnected !== false &&
+      this.video?.duration &&
+      Math.abs(this.video.duration - this.overlayDuration) > 0.5
+    ) {
       this.renderSegmentBars(overlay, this.video.duration);
     } else {
       this.buildOverlay();
@@ -149,6 +155,8 @@ class SponsorBlockHandler {
     this.videoId = videoId;
     this.signal = signal;
     onAbort(signal, () => {
+      this.overlayAbort?.abort();
+      this.overlayAbort = null;
       this.segmentsOverlay?.remove();
       this.segmentsOverlay = null;
       this.overlayDuration = 0;
@@ -218,6 +226,11 @@ class SponsorBlockHandler {
   }
 
   private mountOverlay(track: Element, host: Element, duration: number): void {
+    this.overlayAbort?.abort();
+    const mountCtrl = new AbortController();
+    this.overlayAbort = mountCtrl;
+    const mountSignal = mountCtrl.signal;
+
     const overlay = document.createElement('div');
     overlay.classList.add('ytLrProgressBarSlider', 'ytLrProgressBarSliderRectangularProgressBar');
     overlay.style.cssText =
@@ -230,14 +243,18 @@ class SponsorBlockHandler {
     this.segmentsOverlay = overlay;
     this.renderSegmentBars(overlay, duration);
     this.syncOverlayLayout();
-    observePlayerBar(this.signal, (bar) => {
+    observePlayerBar(mountSignal, (bar) => {
+      if (overlay.isConnected === false) {
+        this.buildOverlay();
+        return;
+      }
       this.syncOverlayVisibility(overlay, bar);
       this.syncOverlayLayout();
     });
     observeDom(
       host,
       (mutations) => {
-        if (this.signal.aborted) return;
+        if (mountSignal.aborted) return;
         for (const mutation of mutations) {
           for (const removed of mutation.removedNodes) {
             if (removed === overlay) {
@@ -250,12 +267,15 @@ class SponsorBlockHandler {
         this.syncOverlayLayout();
       },
       { childList: true },
-      this.signal
+      mountSignal
     );
     host.appendChild(overlay);
   }
 
   private buildOverlay(): void {
+    if (this.segmentsOverlay?.isConnected === false) {
+      this.segmentsOverlay = null;
+    }
     if (this.segmentsOverlay || !this.video?.duration) return;
 
     const tryMount = (): boolean => {

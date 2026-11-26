@@ -2,7 +2,7 @@ name: Keep ccache Alive
 
 on:
   schedule:
-    - cron: '0 0 */5 * *'
+    - cron: '17 3 */3 * *'
   workflow_dispatch:
 
 permissions:

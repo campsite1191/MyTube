@@ -181,10 +181,10 @@ describe('shorts-metadata', () => {
     const lineTextEl = { textContent: '\u00A0' };
     const thumbDetailsEl = {
       style: { backgroundImage: 'url("https://i.ytimg.com/vi/focusShort1/oar2.jpg")' },
-      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileEl : null),
+      closest: (sel: string) => (sel.includes('ytlr-tile-renderer') ? tileEl : null),
     };
     const tileEl = Object.assign(new MockElement(), {
-      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileEl : null),
+      closest: (sel: string) => (sel.includes('ytlr-tile-renderer') ? tileEl : null),
       querySelector: (sel: string) => {
         if (sel === 'ytlr-thumbnail-details') return thumbDetailsEl;
         if (sel.includes('yt-formatted-string')) return lineTextEl;
@@ -549,11 +549,11 @@ describe('shorts-metadata', () => {
     const lineTextEl = { textContent: '\u00A0' };
     const thumbDetailsEl = {
       style: { backgroundImage: 'url("https://i.ytimg.com/vi/emptyMeta01/oar2.jpg")' },
-      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileEl : null),
+      closest: (sel: string) => (sel.includes('ytlr-tile-renderer') ? tileEl : null),
     };
     const tileEl = Object.assign(new MockElement(), {
       classList: { contains: () => true },
-      closest: (sel: string) => (sel === 'ytlr-tile-renderer' ? tileEl : null),
+      closest: (sel: string) => (sel.includes('ytlr-tile-renderer') ? tileEl : null),
       querySelector: (sel: string) => {
         if (sel === 'ytlr-thumbnail-details') return thumbDetailsEl;
         if (sel.includes('yt-formatted-string')) return lineTextEl;
@@ -857,5 +857,256 @@ describe('shorts-metadata', () => {
     await new Promise((r) => setTimeout(r, 15));
     resolvers.get('rejShort001')?.reject(new Error('boom'));
     await rejBatch;
+  });
+
+  test('supports lockupViewModel (LOCKUP_CONTENT_TYPE_SHORT) and shortsLockupViewModel feed cards and DOM updates', async (t) => {
+    clearShortsMetadataCache();
+    const globals = globalThis as Record<string, unknown>;
+    const prevWindow = globals.window;
+    const prevDocument = globals.document;
+    const prevFetch = globals.fetch;
+    const prevElement = globals.Element;
+    const prevRaf = globals.requestAnimationFrame;
+
+    class MockElement {}
+    globals.Element = MockElement;
+    delete globals.requestAnimationFrame;
+
+    const lockupAttrEl = { textContent: '\u00A0' };
+    const lockupImageEl = {
+      style: { backgroundImage: 'url("https://i.ytimg.com/vi/lkShort0001/oar2.jpg")' },
+      closest: (sel: string) => (sel.includes('yt-lockup-view-model') ? lockupDomEl : null),
+    };
+    const lockupDomEl = Object.assign(new MockElement(), {
+      classList: { contains: () => false },
+      closest: (sel: string) => (sel.includes('yt-lockup-view-model') ? lockupDomEl : null),
+      querySelector: (sel: string) => {
+        if (sel === 'ytlr-thumbnail-details') return null;
+        if (sel === 'image') return lockupImageEl;
+        if (sel.includes('yt-core-attributed-string')) return lockupAttrEl;
+        return null;
+      },
+    });
+
+    let focusInHandler: ((ev: { target: unknown }) => void) | undefined;
+    const fetchedIds: string[] = [];
+    globals.window = {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      ytcfg: {
+        data_: {
+          INNERTUBE_CONTEXT: { client: { clientName: 'TVHTML5' } },
+          INNERTUBE_CONTEXT_CLIENT_NAME: 7,
+          INNERTUBE_CONTEXT_CLIENT_VERSION: '7.2026',
+        },
+      },
+    };
+    globals.document = {
+      addEventListener: (type: string, cb: (ev: { target: unknown }) => void) => {
+        if (type === 'focusin') focusInHandler = cb;
+      },
+      removeEventListener: () => {},
+      querySelectorAll: (sel: string) => (sel.includes('/lkShort0001/') ? [lockupImageEl] : []),
+    };
+    globals.fetch = (async (_url: unknown, init?: { body?: string }) => {
+      const parsed = init?.body ? (JSON.parse(init.body) as { playerRequest?: { videoId?: string } }) : {};
+      const vid = parsed.playerRequest?.videoId ?? '';
+      fetchedIds.push(vid);
+      return {
+        ok: true,
+        text: async () => JSON.stringify(makeReelPayload(vid, '420,000 views', '3 days ago')),
+      };
+    }) as typeof fetch;
+
+    const uninstall = installShortsMetadata();
+    t.after(() => {
+      uninstall();
+      clearShortsMetadataCache();
+      if (prevWindow === undefined) delete globals.window;
+      else globals.window = prevWindow;
+      if (prevDocument === undefined) delete globals.document;
+      else globals.document = prevDocument;
+      globals.fetch = prevFetch;
+      if (prevElement === undefined) delete globals.Element;
+      else globals.Element = prevElement;
+      if (prevRaf === undefined) delete globals.requestAnimationFrame;
+      else globals.requestAnimationFrame = prevRaf;
+    });
+
+    // 1. Cold fetch across LOCKUP_CONTENT_TYPE_SHORT, shortsLockupViewModel, existing-metadata preservation, and edge fallbacks.
+    const lockupShortMissingMeta: FeedItem = {
+      lockupViewModel: {
+        contentType: 'LOCKUP_CONTENT_TYPE_SHORT',
+        contentId: 'lkShort0001',
+        metadata: { lockupMetadataViewModel: {} },
+      },
+    };
+    const lockupShortPlaceholder: FeedItem = {
+      lockupViewModel: {
+        contentType: 'LOCKUP_CONTENT_TYPE_SHORTS',
+        rendererContext: {
+          commandContext: { onTap: { innertubeCommand: { reelWatchEndpoint: { videoId: 'lkShort0002' } } } },
+        },
+        metadata: {
+          lockupMetadataViewModel: {
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [{ metadataParts: [{ text: { content: '\u00A0' } }] }],
+              },
+            },
+          },
+        },
+      },
+    };
+    const lockupShortFromThumb: FeedItem = {
+      lockupViewModel: {
+        contentType: 'LOCKUP_CONTENT_TYPE_SHORT',
+        contentImage: {
+          thumbnailViewModel: {
+            image: { sources: [{ url: 'https://i.ytimg.com/vi/lkShort0003/oar2.jpg', width: 720, height: 1280 }] },
+          },
+        },
+        metadata: {
+          lockupMetadataViewModel: {
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [null, { metadataParts: null as unknown as [] }],
+              },
+            },
+          },
+        },
+      },
+    };
+    const lockupShortAlreadyPopulated: FeedItem = {
+      lockupViewModel: {
+        contentType: 'LOCKUP_CONTENT_TYPE_SHORT',
+        contentId: 'lkShortSkip',
+        metadata: {
+          lockupMetadataViewModel: {
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [{ metadataParts: [{ text: { content: '9K views' } }] }],
+              },
+            },
+          },
+        },
+      },
+    };
+    const lockupRegularVideo: FeedItem = {
+      lockupViewModel: {
+        contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+        contentId: 'regLockup01',
+        metadata: { lockupMetadataViewModel: {} },
+      },
+    };
+    const lockupNoIdOrMeta: FeedItem = {
+      lockupViewModel: { contentType: 'LOCKUP_CONTENT_TYPE_SHORT' },
+    };
+    const shortsLockupCold: FeedItem = {
+      shortsLockupViewModel: {
+        onTap: { innertubeCommand: { reelWatchEndpoint: { videoId: 'slvShort001' } } },
+        overlayMetadata: {},
+      },
+    };
+    const shortsLockupDirectTap: FeedItem = {
+      shortsLockupViewModel: {
+        onTap: { reelWatchEndpoint: { videoId: 'slvShort002' } },
+        overlayMetadata: { secondaryText: { content: '\u00A0' } },
+      },
+    };
+    const shortsLockupThumb: FeedItem = {
+      shortsLockupViewModel: {
+        thumbnail: { sources: [{ url: 'https://i.ytimg.com/vi/slvShort003/oar2.jpg' }] },
+        overlayMetadata: { secondaryText: { content: 'Existing subtitle' } },
+      },
+    };
+    const shortsLockupMissingOverlay: FeedItem = {
+      shortsLockupViewModel: {
+        onTap: { reelWatchEndpoint: { videoId: 'slvNoOverlay' } },
+      },
+    };
+    const unknownCard: FeedItem = { gridVideoRenderer: {} } as unknown as FeedItem;
+
+    await applyShortsFeedMetadata([
+      lockupShortMissingMeta,
+      lockupShortPlaceholder,
+      lockupShortFromThumb,
+      lockupShortAlreadyPopulated,
+      lockupRegularVideo,
+      lockupNoIdOrMeta,
+      shortsLockupCold,
+      shortsLockupDirectTap,
+      shortsLockupThumb,
+      shortsLockupMissingOverlay,
+      unknownCard,
+    ]);
+
+    assert.deepEqual(fetchedIds, ['lkShort0001', 'lkShort0002', 'lkShort0003', 'slvShort001', 'slvShort002']);
+    assert.equal(lockupAttrEl.textContent, '420K views • 3 days ago');
+    assert.equal(
+      (
+        lockupShortMissingMeta.lockupViewModel?.metadata?.lockupMetadataViewModel?.metadata as {
+          contentMetadataViewModel: { metadataRows: Array<{ metadataParts: Array<{ text: { content: string } }> }> };
+        }
+      ).contentMetadataViewModel.metadataRows[0]?.metadataParts[0]?.text.content,
+      '420K views • 3 days ago'
+    );
+    assert.equal(
+      (shortsLockupCold.shortsLockupViewModel?.overlayMetadata as { secondaryText: { content: string } }).secondaryText
+        .content,
+      '420K views • 3 days ago'
+    );
+    assert.equal(
+      (
+        shortsLockupDirectTap.shortsLockupViewModel?.overlayMetadata as {
+          secondaryText: { content: string };
+        }
+      ).secondaryText.content,
+      '420K views • 3 days ago'
+    );
+    assert.equal(
+      (shortsLockupThumb.shortsLockupViewModel?.overlayMetadata as { secondaryText: { content: string } }).secondaryText
+        .content,
+      'Existing subtitle'
+    );
+
+    // 2. Subsequent feed batch hits cache for lockupViewModel and shortsLockupViewModel without re-fetching.
+    const cachedLockup: FeedItem = {
+      lockupViewModel: {
+        contentType: 'LOCKUP_CONTENT_TYPE_SHORT',
+        contentId: 'lkShort0001',
+        metadata: { lockupMetadataViewModel: {} },
+      },
+    };
+    await applyShortsFeedMetadata([cachedLockup]);
+    assert.equal(fetchedIds.length, 5);
+    assert.equal(
+      (
+        cachedLockup.lockupViewModel?.metadata?.lockupMetadataViewModel?.metadata as {
+          contentMetadataViewModel: { metadataRows: Array<{ metadataParts: Array<{ text: { content: string } }> }> };
+        }
+      ).contentMetadataViewModel.metadataRows[0]?.metadataParts[0]?.text.content,
+      '420K views • 3 days ago'
+    );
+
+    // 3. focusin on <yt-lockup-view-model> with <image> resolves from cache and updates mounted DOM.
+    lockupAttrEl.textContent = '\u00A0';
+    focusInHandler?.({ target: lockupDomEl });
+    assert.equal(lockupAttrEl.textContent, '420K views • 3 days ago');
+
+    // Focusin with cold lockup <image> placeholder fetches reel_item_watch too.
+    const coldLockupEl = Object.assign(new MockElement(), {
+      closest: (sel: string) => (sel.includes('yt-lockup-view-model') ? coldLockupEl : null),
+      querySelector: (sel: string) => {
+        if (sel === 'image') {
+          return { style: { backgroundImage: 'url("https://i.ytimg.com/vi/focusLk0001/oar2.jpg")' } };
+        }
+        if (sel.includes('yt-core-attributed-string')) return { textContent: '\u00A0' };
+        return null;
+      },
+    });
+    focusInHandler?.({ target: coldLockupEl });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(fetchedIds.includes('focusLk0001'), true);
   });
 });

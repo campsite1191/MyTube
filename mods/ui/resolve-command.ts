@@ -233,39 +233,40 @@ export function patchResolveCommand(): void {
         return false;
       }
 
-      if (isRecord(rawCmd.setClientSettingEndpoint)) {
-        if (handleSetClientSetting(rawCmd.setClientSettingEndpoint)) return true;
+      if (isRecord(effectiveCmd.setClientSettingEndpoint)) {
+        if (handleSetClientSetting(effectiveCmd.setClientSettingEndpoint)) return true;
       } else {
-        const extracted = extractCustomAction(rawCmd);
+        const extracted = extractCustomAction(effectiveCmd);
         if (extracted) {
           runCustomAction(extracted.action, extracted.parameters);
           return true;
         }
-        const openPopup = readRecordPath(rawCmd, 'openPopupAction');
+        const openPopup = readRecordPath(effectiveCmd, 'openPopupAction');
         const uniqueId = typeof openPopup?.uniqueId === 'string' ? openPopup.uniqueId : '';
         if (uniqueId === 'playback-settings') {
-          patchPlaybackSettingsPopup(rawCmd, true);
+          patchPlaybackSettingsPopup(effectiveCmd, true);
         } else if (uniqueId === 'CLIENT_OVERLAY_TYPE_CAPTIONS_AUTO_TRANSLATE') {
-          patchAutoTranslateCommand(rawCmd);
+          patchAutoTranslateCommand(effectiveCmd);
         } else if (isInterceptedPopupUniqueId(uniqueId)) {
-          patchPlaybackSettingsPopup(rawCmd, false);
+          patchPlaybackSettingsPopup(effectiveCmd, false);
         }
       }
 
       const cmdExec = readRecordPath(effectiveCmd, 'commandExecutorCommand');
       if (Array.isArray(cmdExec?.commands) && cmdExec.commands.some((subCmd) => needsCommandInterception(subCmd))) {
         for (const subCmd of cmdExec.commands) {
-          const extracted = isRecord(subCmd) ? extractCustomAction(subCmd) : null;
+          const unwrappedSub = isRecord(subCmd) ? unwrapInnertubeCommand(subCmd) : null;
+          const extracted = unwrappedSub ? extractCustomAction(unwrappedSub) : null;
           if (extracted) {
             runCustomAction(extracted.action, extracted.parameters);
           } else {
-            instance.resolveCommand(subCmd, arg);
+            instance.resolveCommand(unwrappedSub ?? subCmd, arg);
           }
         }
         return true;
       }
 
-      const acctCtx = readRecordPath(rawCmd, 'requestAccountSelectorCommand', 'identityActionContext');
+      const acctCtx = readRecordPath(effectiveCmd, 'requestAccountSelectorCommand', 'identityActionContext');
       if (acctCtx?.eventTrigger === 'ACCOUNT_EVENT_TRIGGER_ON_EXIT') {
         ogResolve.call(this, { signalAction: { signal: 'EXIT_APP' } });
         return false;

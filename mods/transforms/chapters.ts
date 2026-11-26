@@ -18,7 +18,8 @@ export interface ChapterMarkerEntity {
   };
 }
 
-const TIMESTAMP_RE = /^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\s+(.*))?$/;
+const LEADING_PREFIX_RE = /^(?:[-–—•*]+\s*)?[([]?/;
+const TIMESTAMP_RE = /^(?:(\d+):)?(\d{1,2}):(\d{2})[)\]]?(?:(?:\s+|[-–—:|•]+\s*)(.*))?$/;
 const LEADING_SEPARATOR_RE = /^[-–—:|•]+\s*/;
 
 /**
@@ -29,7 +30,8 @@ export function parseTimestamps(input: string): ChapterTimestamp[] {
   const result: ChapterTimestamp[] = [];
 
   for (const rawLine of lines) {
-    const match = rawLine.trim().match(TIMESTAMP_RE) as
+    const cleaned = rawLine.trim().replace(LEADING_PREFIX_RE, '');
+    const match = cleaned.match(TIMESTAMP_RE) as
       | [string, string | undefined, string, string, string | undefined]
       | null;
     if (!match) continue;

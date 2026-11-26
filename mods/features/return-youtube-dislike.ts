@@ -112,8 +112,7 @@ function installVoteLabelStyles(): void {
 
 function queryElements(selector: string): HTMLElement[] {
   if (typeof document.querySelectorAll === 'function') {
-    const matches = Array.from(document.querySelectorAll<HTMLElement>(selector));
-    if (matches.length > 0) return matches;
+    return Array.from(document.querySelectorAll<HTMLElement>(selector));
   }
   const single = document.querySelector<HTMLElement>(selector);
   return single ? [single] : [];

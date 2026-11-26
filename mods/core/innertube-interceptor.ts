@@ -12,19 +12,10 @@ export function patchPlaybackContextBody(rawBody: string): string | null {
   if (!rawBody.includes('playbackContext')) return null;
   try {
     const body = rawJsonParse(rawBody);
-    const playbackCtx = readRecordPath(body, 'playbackContext');
-    const contentCtx = readRecordPath(playbackCtx, 'contentPlaybackContext');
-    if (!playbackCtx || !contentCtx || contentCtx.isInlinePlaybackNoAd) return null;
-    return JSON.stringify({
-      ...body,
-      playbackContext: {
-        ...playbackCtx,
-        contentPlaybackContext: {
-          ...contentCtx,
-          isInlinePlaybackNoAd: true,
-        },
-      },
-    });
+    const contentCtx = readRecordPath(body, 'playbackContext', 'contentPlaybackContext');
+    if (!contentCtx || contentCtx.isInlinePlaybackNoAd) return null;
+    contentCtx.isInlinePlaybackNoAd = true;
+    return JSON.stringify(body);
   } catch (e) {
     console.error('[InnertubeInterceptor] Failed to patch request body:', e);
     return null;
