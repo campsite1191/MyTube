@@ -264,40 +264,33 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(keepAliveYml.includes("cron: '17 3 */3 * *'"), true);
   });
 
-  test('[P15] patches/15 strips telemetry/crashpad/bloat while keeping metrics JNI and CI anchors', () => {
-    const patch15 = fs.readFileSync(
-      path.join(ROOT_DIR, 'patches', '15-strip-telemetry-crashpad-and-apk-bloat.patch'),
-      'utf8'
+  test('[P02] removes fragile patches/15 while preserving full runtime telemetry, Crashpad, UMA, and Ad-ID disables in patches/02', () => {
+    assert.equal(
+      fs.existsSync(path.join(ROOT_DIR, 'patches', '15-strip-telemetry-crashpad-and-apk-bloat.patch')),
+      false
     );
+    const patch02 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '02-disable-splash-and-telemetry.patch'), 'utf8');
     const lintPatchesYml = fs.readFileSync(path.join(ROOT_DIR, '.github', 'workflows', 'lint_patches.yml'), 'utf8');
 
     for (const token of [
-      'libchrome_crashpad_handler.so',
-      'google_play_services_ads_identifier_java',
-      'google_play_services_basement_java',
-      'CobaltPictureInPictureActivity',
-      'ChildProcessLauncherTestHelperService',
-      'https://youtube.com/tv/uma',
-      'starboard/android/shared/BUILD.gn',
-      'crash_annotator_jni.cc',
-      'shell_browser_main_parts.cc',
-      'ChildExitObserver',
-      'ChildProcessCrashObserver',
+      'cobalt/app/cobalt_main_delegate.cc',
+      '-  const bool initialize_crashpad = true;',
+      'crash_reporter::SetUploadConsent(false);',
+      'cobalt/browser/metrics/cobalt_enabled_state_provider.cc',
+      'cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.cc',
+      '-  global_features->metrics_services_manager()->UpdateUploadPermissions(true);',
+      'cobalt/browser/metrics/cobalt_metrics_service_client.cc',
+      '-  return GURL("https://youtube.com/tv/uma");',
+      'cobalt/browser/metrics/cobalt_metrics_log_uploader.cc',
+      'AdvertisingId.java',
+      'return true;',
     ]) {
-      assert.equal(patch15.includes(token), true, `Missing expected patch 15 strip target: ${token}`);
+      assert.equal(patch02.includes(token), true, `Missing expected patch 02 telemetry/crashpad disable: ${token}`);
     }
 
-    // Must keep //components/metrics:metrics_java for LowEntropySource JNI and avoid deleting CI anchors.
-    assert.equal(patch15.includes('-    "//components/metrics:metrics_java",'), false);
-    assert.equal(patch15.includes('-  version_code = "1"'), false);
-    assert.equal(patch15.includes('-  version_name = "1.0.0"'), false);
-
-    assert.equal(lintPatchesYml.includes('NUM_SANDBOXED_SERVICES'), true);
-    assert.equal(lintPatchesYml.includes('NUM_PRIVILEGED_SERVICES'), true);
-    assert.equal(lintPatchesYml.includes('CobaltPictureInPictureActivity'), true);
-    assert.equal(lintPatchesYml.includes('zygotePreloadName'), true);
-    assert.equal(lintPatchesYml.includes('crash_annotator_jni.cc'), true);
-    assert.equal(lintPatchesYml.includes('ChildExitObserver'), true);
+    assert.equal(lintPatchesYml.includes('fonts/fonts.xml'), true);
+    assert.equal(lintPatchesYml.includes('SetUploadConsent(false)'), true);
+    assert.equal(lintPatchesYml.includes('https://youtube.com/tv/uma'), true);
   });
 
   test('mirrors every runtime module under mods/ 1:1 with tests/ bidirectionally', () => {

@@ -89,53 +89,39 @@ jobs:
               assert meta.get("cobalt.ENABLE_SPLASH_SCREEN") == "false", (
                   f"Unexpected cobalt.ENABLE_SPLASH_SCREEN: {meta.get('cobalt.ENABLE_SPLASH_SCREEN')}"
               )
-              assert app.attrib.get(f"{{{ns['android']}}}zygotePreloadName") is None, (
-                  "zygotePreloadName should be removed from AndroidManifest"
-              )
-              activity_names = {el.attrib.get(f"{{{ns['android']}}}name") for el in app.findall("activity")}
-              assert "dev.cobalt.coat.CobaltPictureInPictureActivity" not in activity_names, (
-                  "CobaltPictureInPictureActivity should be removed from AndroidManifest"
+              assert "cobalt.ENABLE_FEATURES" not in meta, (
+                  "Perfetto tracing ENABLE_FEATURES metadata should be removed"
               )
               services = app.findall("service")
-              service_names = {el.attrib.get(f"{{{ns['android']}}}name") for el in services}
-              assert "org.chromium.content_shell_apk.ChildProcessLauncherTestHelperService" not in service_names, (
-                  "ChildProcessLauncherTestHelperService should be removed from AndroidManifest"
-              )
-              assert not any(name and "TestChildProcessService" in name for name in service_names), (
-                  f"Unexpected TestChildProcessService entries: {service_names}"
-              )
-              assert all(el.attrib.get(f"{{{ns['android']}}}useAppZygote") is None for el in services), (
-                  "useAppZygote should not be set on sandboxed services"
-              )
-              assert meta.get("org.chromium.content.browser.NUM_SANDBOXED_SERVICES") == "2", (
-                  f"Unexpected NUM_SANDBOXED_SERVICES: {meta.get('org.chromium.content.browser.NUM_SANDBOXED_SERVICES')}"
-              )
-              assert meta.get("org.chromium.content.browser.NUM_PRIVILEGED_SERVICES") == "1", (
-                  f"Unexpected NUM_PRIVILEGED_SERVICES: {meta.get('org.chromium.content.browser.NUM_PRIVILEGED_SERVICES')}"
-              )
-              assert "org.chromium.content.browser.NUM_TEST_SERVICES" not in meta, (
-                  "NUM_TEST_SERVICES should be removed from AndroidManifest"
+              helper_services = [
+                  el for el in services
+                  if el.attrib.get(f"{{{ns['android']}}}name")
+                  == "org.chromium.content_shell_apk.ChildProcessLauncherTestHelperService"
+              ]
+              assert helper_services and helper_services[0].attrib.get(f"{{{ns['android']}}}exported") == "false", (
+                  "ChildProcessLauncherTestHelperService should have android:exported=false"
               )
 
-              with open(os.path.join(tmpdir, "starboard/android/shared/BUILD.gn"), "r", encoding="utf-8") as f:
-                  assert "cobalt_crash_annotations" not in f.read(), (
-                      "starboard/android/shared/BUILD.gn should not depend on cobalt_crash_annotations"
+              with open(os.path.join(tmpdir, "cobalt/android/BUILD.gn"), "r", encoding="utf-8") as f:
+                  assert '"fonts/fonts.xml"' in f.read(), (
+                      "cobalt/android/BUILD.gn must retain fonts/fonts.xml for --use-custom-android-fonts-xml"
                   )
-              with open(os.path.join(tmpdir, "cobalt/browser/BUILD.gn"), "r", encoding="utf-8") as f:
-                  assert "crash_annotator_jni.cc" not in f.read(), (
-                      "cobalt/browser/BUILD.gn should not compile crash_annotator_jni.cc"
+              with open(os.path.join(tmpdir, "cobalt/app/cobalt_main_delegate.cc"), "r", encoding="utf-8") as f:
+                  delegate_src = f.read()
+              assert "const bool initialize_crashpad = true;" not in delegate_src, (
+                  "cobalt_main_delegate.cc must not unconditionally enable Crashpad"
+              )
+              assert "crash_reporter::SetUploadConsent(false);" in delegate_src, (
+                  "cobalt_main_delegate.cc must disable Crashpad upload consent"
+              )
+              with open(os.path.join(tmpdir, "cobalt/browser/metrics/cobalt_enabled_state_provider.cc"), "r", encoding="utf-8") as f:
+                  provider_src = f.read()
+              assert "return false;" in provider_src, (
+                  "cobalt_enabled_state_provider.cc must return false in IsConsentGiven()"
+              )
+              with open(os.path.join(tmpdir, "cobalt/browser/metrics/cobalt_metrics_service_client.cc"), "r", encoding="utf-8") as f:
+                  assert "https://youtube.com/tv/uma" not in f.read(), (
+                      "cobalt_metrics_service_client.cc must not reference UMA upload URLs"
                   )
-              for shell_rel in (
-                  "cobalt/shell/browser/shell_browser_main_parts.h",
-                  "cobalt/shell/browser/shell_browser_main_parts.cc",
-              ):
-                  with open(os.path.join(tmpdir, shell_rel), "r", encoding="utf-8") as f:
-                      shell_src = f.read()
-                  assert "ChildExitObserver" not in shell_src, (
-                      f"{shell_rel} should not reference ChildExitObserver"
-                  )
-                  assert "ChildProcessCrashObserver" not in shell_src, (
-                      f"{shell_rel} should not reference ChildProcessCrashObserver"
-                  )
-              print("Manifest XML & hardening checks passed.")
+              print("Manifest XML, fonts & telemetry hardening checks passed.")
           PY

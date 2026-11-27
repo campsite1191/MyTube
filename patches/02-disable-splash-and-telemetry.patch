@@ -1,3 +1,154 @@
+diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/AdvertisingId.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/AdvertisingId.java
+index 701a0a8..7a4ec74 100644
+--- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/AdvertisingId.java
++++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/AdvertisingId.java
+@@ -1,4 +1,4 @@
+-// Copyright 2022 The Cobalt Authors. All Rights Reserved.
++// Copyright 2017 The Cobalt Authors. All Rights Reserved.
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+ // you may not use this file except in compliance with the License.
+@@ -14,107 +14,21 @@
+ 
+ package dev.cobalt.coat;
+ 
+-import static dev.cobalt.util.Log.TAG;
+-
+-import android.content.ContentResolver;
+ import android.content.Context;
+-import android.provider.Settings;
+-import android.text.TextUtils;
+-import androidx.annotation.GuardedBy;
+-import com.google.android.gms.ads.identifier.AdvertisingIdClient;
+-import com.google.android.gms.common.GooglePlayServicesNotAvailableException;
+-import com.google.android.gms.common.GooglePlayServicesRepairableException;
+-import dev.cobalt.util.Log;
+-import java.io.IOException;
+-import java.util.concurrent.ExecutorService;
+-import java.util.concurrent.Executors;
+ 
+-/** A class for managing the IfA for CoAT. https://developer.android.com/training/articles/ad-id */
++/** Stubbed AdvertisingId with advertising tracking disabled. */
+ public class AdvertisingId {
+-  private final Context mContext;
+-  private final ExecutorService mSingleThreadExecutor;
+-
+-  @GuardedBy("mAdvertisingIdInfoLock")
+-  private volatile AdvertisingIdClient.Info mAdvertisingIdInfo;
++  public AdvertisingId(Context context) {}
+ 
+-  // Controls access to mAdvertisingIdInfo
+-  private final Object mAdvertisingIdInfoLock = new Object();
++  public void shutdown() {}
+ 
+-  public AdvertisingId(Context context) {
+-    mContext = context;
+-    mSingleThreadExecutor = Executors.newSingleThreadExecutor();
+-    mAdvertisingIdInfo = null;
+-    refresh();
+-  }
+-
+-  public void shutdown() {
+-    mSingleThreadExecutor.shutdown();
+-  }
+-
+-  public void refresh() {
+-    mSingleThreadExecutor.execute(
+-        () -> {
+-          try {
+-            // The following statement may be slow.
+-            AdvertisingIdClient.Info info = AdvertisingIdClient.getAdvertisingIdInfo(mContext);
+-            synchronized (mAdvertisingIdInfoLock) {
+-              mAdvertisingIdInfo = info;
+-            }
+-            Log.i(TAG, "Successfully retrieved Advertising ID (IfA).");
+-          } catch (IOException
+-              | GooglePlayServicesNotAvailableException
+-              | GooglePlayServicesRepairableException e) {
+-            AdvertisingIdClient.Info info = getAdvertisingIdInfoFromSettings();
+-            if (info == null) {
+-              Log.e(TAG, "Failed to retrieve Advertising ID (IfA).");
+-              return;
+-            }
+-            synchronized (mAdvertisingIdInfoLock) {
+-              mAdvertisingIdInfo = info;
+-            }
+-            Log.i(TAG, "Retrieved Advertising ID (IfA) from system settings.");
+-          }
+-        });
+-  }
+-
+-  // Devices without Google Play Services can publish the IfA in secure settings instead.
+-  private AdvertisingIdClient.Info getAdvertisingIdInfoFromSettings() {
+-    ContentResolver resolver = mContext.getContentResolver();
+-    try {
+-      String id = Settings.Secure.getString(resolver, "advertising_id");
+-      if (TextUtils.isEmpty(id)) {
+-        return null;
+-      }
+-      boolean limitAdTracking = Settings.Secure.getInt(resolver, "limit_ad_tracking", 0) != 0;
+-      return new AdvertisingIdClient.Info(id, limitAdTracking);
+-    } catch (SecurityException e) {
+-      // The device may not let apps read these settings.
+-      Log.w(TAG, "Failed to read Advertising ID (IfA) from system settings.", e);
+-      return null;
+-    }
+-  }
++  public void refresh() {}
+ 
+   public String getId() {
+-    String result = "";
+-    synchronized (mAdvertisingIdInfoLock) {
+-      if (mAdvertisingIdInfo != null) {
+-        result = mAdvertisingIdInfo.getId();
+-      }
+-    }
+-    refresh();
+-    Log.d(TAG, "Returning IfA getId: " + result);
+-    return result;
++    return "";
+   }
+ 
+   public boolean isLimitAdTrackingEnabled() {
+-    boolean result = false;
+-    synchronized (mAdvertisingIdInfoLock) {
+-      if (mAdvertisingIdInfo != null) {
+-        result = mAdvertisingIdInfo.isLimitAdTrackingEnabled();
+-      }
+-    }
+-    refresh();
+-    Log.d(TAG, "Returning IfA LimitedAdTrackingEnabled: " + Boolean.toString(result));
+-    return result;
++    return true;
+   }
+ }
+diff --git a/cobalt/app/cobalt_main_delegate.cc b/cobalt/app/cobalt_main_delegate.cc
+index ad5e9da..eb5571b 100644
+--- a/cobalt/app/cobalt_main_delegate.cc
++++ b/cobalt/app/cobalt_main_delegate.cc
+@@ -279,13 +279,9 @@ std::variant<int, content::MainFunctionParams> CobaltMainDelegate::RunProcess(
+ 
+ #if !BUILDFLAG(IS_COBALT_HERMETIC_BUILD)
+ void CobaltMainDelegate::PreSandboxStartup() {
+-#if BUILDFLAG(IS_ANDROIDTV) || BUILDFLAG(IS_IOS_TVOS)
+-  const bool initialize_crashpad = true;
+-#else
+   const bool initialize_crashpad =
+       base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kEnableCrashReporter);
+-#endif  // BUILDFLAG(IS_ANDROIDTV) || BUILDFLAG(IS_IOS_TVOS)
+ 
+   if (initialize_crashpad) {
+     const std::string process_type =
+@@ -294,7 +290,7 @@ void CobaltMainDelegate::PreSandboxStartup() {
+     CobaltCrashReporterClient::Create();
+     if (process_type != switches::kZygoteProcess) {
+       crash_reporter::InitializeCrashpad(process_type.empty(), process_type);
+-      crash_reporter::SetUploadConsent(true);
++      crash_reporter::SetUploadConsent(false);
+ #if BUILDFLAG(IS_ANDROIDTV)
+       // On 3P (Evergreen), the callback is registered by the Starboard-only
+       // Crashpad wrapper module (//starboard/crashpad_wrapper).
 diff --git a/cobalt/browser/cobalt_browser_main_parts.cc b/cobalt/browser/cobalt_browser_main_parts.cc
 index 1b71674..0de40b7 100644
 --- a/cobalt/browser/cobalt_browser_main_parts.cc
@@ -92,3 +243,223 @@ index 4820de2..d572df8 100644
  
  }  // namespace features
  }  // namespace cobalt
+diff --git a/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.cc b/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.cc
+index e0bb04d..216335d 100644
+--- a/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.cc
++++ b/cobalt/browser/h5vcc_metrics/h5vcc_metrics_impl.cc
+@@ -45,20 +45,12 @@ void H5vccMetricsImpl::Create(
+ void H5vccMetricsImpl::AddListener(
+     ::mojo::PendingRemote<mojom::MetricsListener> listener) {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  cobalt::GlobalFeatures::GetInstance()
+-      ->metrics_services_manager_client()
+-      ->metrics_service_client()
+-      ->SetMetricsListener(std::move(listener));
++  (void)listener;
+ }
+ 
+ void H5vccMetricsImpl::Enable(bool enable, EnableCallback callback) {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  auto global_features = cobalt::GlobalFeatures::GetInstance();
+-  cobalt::CobaltEnabledStateProvider& enabled_state_provider =
+-      global_features->metrics_services_manager_client()
+-          ->GetEnabledStateProvider();
+-  enabled_state_provider.SetReportingEnabled(enable);
+-  global_features->metrics_services_manager()->UpdateUploadPermissions(true);
++  (void)enable;
+   std::move(callback).Run();
+ }
+ 
+@@ -66,20 +58,14 @@ void H5vccMetricsImpl::SetMetricEventInterval(
+     uint64_t interval_seconds,
+     SetMetricEventIntervalCallback callback) {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  cobalt::GlobalFeatures::GetInstance()
+-      ->metrics_services_manager_client()
+-      ->metrics_service_client()
+-      ->SetUploadInterval(base::Seconds(interval_seconds));
++  (void)interval_seconds;
+   std::move(callback).Run();
+ }
+ 
+ void H5vccMetricsImpl::RequestHistograms(RequestHistogramsCallback callback) {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  auto* manager_client =
+-      cobalt::GlobalFeatures::GetInstance()->metrics_services_manager_client();
+-  std::move(callback).Run(histogram_fetcher_.FetchHistograms(
+-      manager_client->GetMetricsStateManager(),
+-      manager_client->metrics_service_client()));
++  (void)histogram_fetcher_;
++  std::move(callback).Run(std::string());
+ }
+ 
+ }  // namespace h5vcc_metrics
+diff --git a/cobalt/browser/metrics/cobalt_enabled_state_provider.cc b/cobalt/browser/metrics/cobalt_enabled_state_provider.cc
+index 9e3127b..0c8bad6 100644
+--- a/cobalt/browser/metrics/cobalt_enabled_state_provider.cc
++++ b/cobalt/browser/metrics/cobalt_enabled_state_provider.cc
+@@ -21,12 +21,8 @@
+ namespace cobalt {
+ 
+ bool CobaltEnabledStateProvider::IsConsentGiven() const {
+-  // If override on the command line, always report.
+-  if (metrics::IsMetricsReportingForceEnabled()) {
+-    return true;
+-  }
+-  // Else read currently stored pref.
+-  return local_state_->GetBoolean(metrics::prefs::kMetricsReportingEnabled);
++  (void)local_state_;
++  return false;
+ }
+ 
+ bool CobaltEnabledStateProvider::IsReportingEnabled() const {
+@@ -35,8 +31,7 @@ bool CobaltEnabledStateProvider::IsReportingEnabled() const {
+ }
+ 
+ void CobaltEnabledStateProvider::SetConsentGiven(bool is_consent_given) {
+-  local_state_->SetBoolean(metrics::prefs::kMetricsReportingEnabled,
+-                           is_consent_given);
++  (void)is_consent_given;
+ }
+ void CobaltEnabledStateProvider::SetReportingEnabled(
+     bool is_reporting_enabled) {
+diff --git a/cobalt/browser/metrics/cobalt_metrics_log_uploader.cc b/cobalt/browser/metrics/cobalt_metrics_log_uploader.cc
+index f4427e8..12357ad 100644
+--- a/cobalt/browser/metrics/cobalt_metrics_log_uploader.cc
++++ b/cobalt/browser/metrics/cobalt_metrics_log_uploader.cc
+@@ -27,58 +27,16 @@
+ 
+ namespace cobalt {
+ 
+-using browser::metrics::CobaltUMAEvent;
+-
+-// Helper method to create a trimmed down and sanitized version of the UMA
+-// proto for Cobalt
+-void PopulateCobaltUmaEvent(
+-    const ::metrics::ChromeUserMetricsExtension& uma_proto,
+-    const ::metrics::ReportingInfo reporting_info_proto,
+-    CobaltUMAEvent& cobalt_proto) {
+-  cobalt_proto.mutable_histogram_event()->CopyFrom(uma_proto.histogram_event());
+-  cobalt_proto.mutable_user_action_event()->CopyFrom(
+-      uma_proto.user_action_event());
+-  cobalt_proto.mutable_reporting_info()->CopyFrom(reporting_info_proto);
+-}
+-
+ void CobaltMetricsLogUploader::UploadLog(
+     const std::string& compressed_log_data,
+     const metrics::LogMetadata& log_metadata,
+     const std::string& log_hash,
+     const std::string& log_signature,
+     const metrics::ReportingInfo& reporting_info) {
+-  // Always run the upload complete callback as a success. Arguments to callback
+-  // don't matter much here as we're not really doing anything but forwarding to
+-  // the H5vcc API.
+   base::ScopedClosureRunner closure(
+-      base::BindOnce(on_upload_complete_, /*status*/ 200, /* error_code */ 0,
++      base::BindOnce(on_upload_complete_, /*status*/ 200, /*error_code*/ 0,
+                      /*was_https*/ true, false, ""));
+-
+-  if (!metrics_listener_.is_bound()) {
+-    return;
+-  }
+-
+-  // For now, we only support UMA.
+-  if (service_type_ != ::metrics::MetricsLogUploader::MetricServiceType::UMA) {
+-    return;
+-  }
+-
+-  std::string uncompressed_serialized_proto;
+-  ::metrics::DecodeLogData(compressed_log_data, &uncompressed_serialized_proto);
+-  ::metrics::ChromeUserMetricsExtension uma_event;
+-  uma_event.ParseFromString(uncompressed_serialized_proto);
+-  CobaltUMAEvent cobalt_uma_event;
+-  PopulateCobaltUmaEvent(uma_event, reporting_info, cobalt_uma_event);
+-  std::string base64_encoded_proto;
+-  // Base64 encode the payload as web client's can't consume it without
+-  // corrupting the data (see b/293431381). Also, use a URL/web safe
+-  // encoding so it can be safely included in any web network request.
+-  base::Base64UrlEncode(cobalt_uma_event.SerializeAsString(),
+-                        base::Base64UrlEncodePolicy::INCLUDE_PADDING,
+-                        &base64_encoded_proto);
+-  DLOG(INFO) << "UMA Payload uploading! Hash: " << log_hash;
+-  metrics_listener_->OnMetrics(
+-      h5vcc_metrics::mojom::H5vccMetricType::kCobaltUma, base64_encoded_proto);
++  (void)service_type_;
+ }
+ 
+ void CobaltMetricsLogUploader::SetMetricsListener(
+diff --git a/cobalt/browser/metrics/cobalt_metrics_service_client.cc b/cobalt/browser/metrics/cobalt_metrics_service_client.cc
+index ee2eb45..68e625a 100644
+--- a/cobalt/browser/metrics/cobalt_metrics_service_client.cc
++++ b/cobalt/browser/metrics/cobalt_metrics_service_client.cc
+@@ -209,50 +209,20 @@ void CobaltMetricsServiceClient::Initialize() {
+ 
+   log_uploader_ = CreateLogUploaderInternal();
+   log_uploader_weak_ptr_ = log_uploader_->GetWeakPtr();
+-  StartIdleRefreshTimer();
+-  StartMemoryMetricsLogger();
+-  StartCpuMetricsLogger();
+ }
+ 
+ void CobaltMetricsServiceClient::StartMemoryMetricsLogger() {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  memory_state_.emplace(base::ThreadPool::CreateSequencedTaskRunner({}),
+-                        CreateMemoryMetricsEmitter());
+-  memory_state_.AsyncCall(&MemoryPollingState::RecordMetricsAfterDelay);
+ }
+ 
+ void CobaltMetricsServiceClient::StartCpuMetricsLogger() {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+-  cpu_state_.emplace(base::ThreadPool::CreateSequencedTaskRunner({}),
+-                     CreateCpuMetricsEmitter());
+-  cpu_state_.AsyncCall(&CpuPollingState::RecordMetricsAfterDelay);
+ }
+ 
+ void CobaltMetricsServiceClient::StartIdleRefreshTimer() {
+-  if (idle_refresh_timer_.IsRunning()) {
+-    idle_refresh_timer_.Stop();
+-  }
+-
+-  // At a rate of half the upload interval, we force UMA to consider the app
+-  // as non-idle. This guarantees metrics are uploaded regularly. This is done
+-  // for two reasons:
+-  //
+-  //   1) The nature of the YouTube application is such that the user can be
+-  //      "idle" for long periods (e.g., watching a movie). We still want to
+-  //      send metrics in these cases.
+-  //
+-  //   2) The typical way Chromium handles non-idle is page loads and user
+-  //      actions. User actions are currently sparse and/or not working due to
+-  //      the nature of Kabuki's implementation (see b/417477183).
+-  auto timer_interval = GetStandardUploadInterval() / 2;
+-  timer_interval = timer_interval > min_idle_refresh_interval_
+-                       ? timer_interval
+-                       : min_idle_refresh_interval_;
+-  idle_refresh_timer_.Start(
+-      FROM_HERE, timer_interval, this,
+-      &CobaltMetricsServiceClient::OnApplicationNotIdleInternal);
+-  DLOG(INFO) << "Starting refresh timer for: "
+-             << idle_refresh_timer_.GetCurrentDelay().InSeconds() << " seconds";
++  CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++  (void)min_idle_refresh_interval_;
++  idle_refresh_timer_.Stop();
+ }
+ 
+ std::unique_ptr<metrics::MetricsService>
+@@ -383,14 +353,14 @@ GURL CobaltMetricsServiceClient::GetMetricsServerUrl() {
+   // This below is made up, and in any case likely not to be used (it ends up in
+   // CreateUploader()'s `server_url`. Return empty and use instead logic in
+   // CobaltMetricsLogUploader.
+-  return GURL("https://youtube.com/tv/uma");
++  return GURL();
+ }
+ 
+ GURL CobaltMetricsServiceClient::GetInsecureMetricsServerUrl() {
+   CHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   DCHECK(IsInitialized());
+   // This is made up and not used. See GetMetricsServerUrl() for more details.
+-  return GURL("https://youtube.com/tv/uma");
++  return GURL();
+ }
+ 
+ std::unique_ptr<metrics::MetricsLogUploader>
