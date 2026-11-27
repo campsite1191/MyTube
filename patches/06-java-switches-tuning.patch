@@ -1,35 +1,44 @@
 diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
-index 0b83390..61d4122 100644
+index 0b83390..1609f76 100644
 --- a/cobalt/android/androidtv_flag_map.cc
 +++ b/cobalt/android/androidtv_flag_map.cc
-@@ -52,8 +52,11 @@ constexpr char kAreaBasedVideoBufferBudgetFeature[] =
+@@ -50,10 +50,13 @@ constexpr char kAreaBasedVideoBufferBudgetFeature[] =
+     "AreaBasedVideoBufferBudget";
+ 
  // Experiment-controlled defaults, used when the experiment key is absent.
- constexpr char kDefaultInitialOldSpaceSizeMb[] = "64";
- constexpr char kDefaultMaxOldSpaceSizeMb[] = "512";
-+constexpr char kDefaultImageDecodeCacheLimitMbs[] = "48";
+-constexpr char kDefaultInitialOldSpaceSizeMb[] = "64";
+-constexpr char kDefaultMaxOldSpaceSizeMb[] = "512";
++constexpr char kDefaultInitialOldSpaceSizeMb[] = "32";
++constexpr char kDefaultMaxOldSpaceSizeMb[] = "256";
++constexpr char kDefaultImageDecodeCacheLimitMbs[] = "24";
 +constexpr char kEnableAv1StartupOptimizationFeature[] =
 +    "EnableAv1StartupOptimization";
  #if !defined(ARCH_CPU_ARM64) && !defined(ARCH_CPU_X86_64)
 -constexpr char kDefaultForceGpuMemAvailableMb[] = "64";
-+constexpr char kDefaultForceGpuMemAvailableMb[] = "128";
++constexpr char kDefaultForceGpuMemAvailableMb[] = "80";
  #endif
  
  std::string KeepDigits(std::string_view value) {
-@@ -178,12 +181,8 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
-     }
-   };
+@@ -182,8 +185,8 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+     AppendSwitchIfAbsent(cmd_line, ::switches::kDisableQuic);
+   }
  
--  if (!flag_map.Has(flags::kEnableQuic)) {
--    AppendSwitchIfAbsent(cmd_line, ::switches::kDisableQuic);
--  }
--
 +  js_flags.push_back(v8_switches::kMinorMs);
    if (flag_map.Has(flags::kUseMinorMsForMinorGc)) {
 -    js_flags.push_back(v8_switches::kMinorMs);
      js_flags.push_back(base::StrCat(
          {v8_switches::kMinorMsMinNewSpaceCapacityForConcurrentMarkingMb, "0"}));
    }
-@@ -223,12 +222,17 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+@@ -192,6 +195,8 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+     js_flags.push_back(v8_switches::kFlushBytecode);
+     js_flags.push_back(
+         base::StrCat({v8_switches::kBytecodeOldTime, *old_time}));
++  } else {
++    js_flags.push_back(v8_switches::kFlushBytecode);
+   }
+ 
+   js_flags.push_back(
+@@ -223,12 +228,17 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
                         ::switches::kDisableGpuMemoryBufferCompositorResources);
    append_numeric_switch(flags::kGpuImageCacheLimitItems,
                          ::switches::kCCImageCacheLimitItems);
@@ -51,7 +60,7 @@ index 0b83390..61d4122 100644
  
    std::vector<std::string> mojo_pipe_params;
    add_numeric_param(
-@@ -263,13 +267,12 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+@@ -263,13 +273,12 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
  
    append_switch_if_set(flags::kAvoidCcReuseResource,
                         ::switches::kAvoidCCReuseResource);
@@ -97,20 +106,22 @@ index 5bc8bc9..c7a3964 100644
      // DeviceUtils.updateDeviceSpecificUserAgentSwitch().
      boolean force720pUi =
 diff --git a/cobalt/app/cobalt_switch_defaults_android.cc b/cobalt/app/cobalt_switch_defaults_android.cc
-index dece364..cff7660 100644
+index dece364..940a28c 100644
 --- a/cobalt/app/cobalt_switch_defaults_android.cc
 +++ b/cobalt/app/cobalt_switch_defaults_android.cc
-@@ -77,12 +77,7 @@ CommandLinePreprocessor::GetCobaltParamSwitchDefaults() {
-       {blink::switches::kJavaScriptFlags,
-        // Disable decommitting pooled pages to prevent virtual memory
-        // fragmentation.
+@@ -74,15 +74,6 @@ CommandLinePreprocessor::GetCobaltParamSwitchDefaults() {
+       {::switches::kNumRasterThreads, "2"},
+       // Limit the HTTP disk cache to 25 MiB (25 * 1024 * 1024 bytes).
+       {switches::kMaxHttpCacheSize, "26214400"},
+-      {blink::switches::kJavaScriptFlags,
+-       // Disable decommitting pooled pages to prevent virtual memory
+-       // fragmentation.
 -       "--no-decommit-pooled-pages,"
 -       // Disable v8 concurrent marking by default.
 -       "--no-concurrent-marking"},
 -      // Enable precise memory info so we can make accurate client-side
 -      // measurements.
 -      {::switches::kEnableBlinkFeatures, "PreciseMemoryInfo"},
-+       "--no-decommit-pooled-pages"},
        {::switches::kEnableFeatures,
         base::JoinString(
             {

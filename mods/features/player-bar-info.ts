@@ -125,7 +125,7 @@ export function readActiveQualityLabel(
   }
   const width = video?.videoWidth ?? 0;
   const height = video?.videoHeight ?? 0;
-  const shortEdge = width > 0 && height > 0 ? Math.min(width, height) : height > 0 ? height : 0;
+  const shortEdge = width > 0 && height > 0 ? Math.min(width, height) : Math.max(height, 0);
   return shortEdge > 0 ? `${shortEdge}p` : null;
 }
 
@@ -412,7 +412,7 @@ export function installPlayerBarInfo(): () => void {
 
     function scheduleRender(e?: Event): void {
       if (signal.aborted) return;
-      if (!e || e.type !== 'timeupdate') {
+      if (e?.type !== 'timeupdate') {
         pendingForceRender = true;
       }
       if (pendingApply) return;

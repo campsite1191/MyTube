@@ -13,6 +13,16 @@ import {
 } from '../../mods/features/sponsorblock.ts';
 import { transformPlayerOverlays, transformTransportControls } from '../../mods/transforms/player-overlays.ts';
 
+async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      assert.fail(`Timed out after ${timeoutMs}ms waiting for condition`);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+}
+
 describe('computeSha256HexPrefix', () => {
   test('computes native WebCrypto SHA-256 hex prefixes for SponsorBlock API lookup', async () => {
     const prefix = await computeSha256HexPrefix('dQw4w9WgXcQ', 4);
@@ -146,7 +156,7 @@ describe('fetchSponsorBlockSegments', () => {
 
     const winListeners = new Map<string, Set<() => void>>();
     const fakeLocation = { hash: '#/', search: '' };
-    let resolveFetch!: (resp: Response) => void;
+    let resolveFetch: ((resp: Response) => void) | undefined;
 
     t.after(() => {
       if (prevWindow === undefined) delete globals.window;
@@ -258,8 +268,8 @@ describe('fetchSponsorBlockSegments', () => {
     assert.equal(promotedList.length, 0);
 
     // Wait for computeSha256HexPrefix to reach fetch, then resolve SponsorBlock segments
-    await new Promise((r) => setTimeout(r, 15));
-    resolveFetch(
+    await waitFor(() => typeof resolveFetch === 'function');
+    resolveFetch?.(
       new Response(
         JSON.stringify([
           {
@@ -273,7 +283,7 @@ describe('fetchSponsorBlockSegments', () => {
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       )
     );
-    await new Promise((r) => setTimeout(r, 20));
+    await waitFor(() => getActiveSponsorBlockSegments('raceVid1').length === 2 && appendedOverlays.length === 1);
 
     assert.equal(getActiveSponsorBlockSegments('raceVid1').length, 2);
     assert.equal(getActiveSponsorBlockSegments('otherVid').length, 0);
@@ -463,7 +473,7 @@ describe('fetchSponsorBlockSegments', () => {
     for (const fn of winListeners.get('hashchange') ?? []) fn();
 
     const hashB = await computeSha256HexPrefix('raceVidB', 4);
-    await new Promise((r) => setTimeout(r, 15));
+    await waitFor(() => [...resolvers.keys()].some((u) => u.includes(hashB)));
     const entryB = [...resolvers.entries()].find(([u]) => u.includes(hashB));
     entryB?.[1](
       new Response(
@@ -471,7 +481,7 @@ describe('fetchSponsorBlockSegments', () => {
         { status: 200 }
       )
     );
-    await new Promise((r) => setTimeout(r, 20));
+    await waitFor(() => bNotified === 2);
     assert.equal(bNotified, 2);
 
     // Immediate hit path for already-loaded active video.
@@ -549,15 +559,18 @@ describe('fetchSponsorBlockSegments', () => {
       rejectNext = true;
       fakeLocation.hash = '#/watch?v=errVid1';
       for (const fn of winListeners.get('hashchange') ?? []) fn();
-      await new Promise((r) => setTimeout(r, 15));
+      await waitFor(() => warnCount === 1);
       assert.equal(warnCount, 1);
 
+      let abortDispatched = false;
       globals.fetch = (async () => {
+        abortDispatched = true;
         throw new DOMException('aborted', 'AbortError');
       }) as typeof fetch;
       fakeLocation.hash = '#/watch?v=abortErrVid';
       for (const fn of winListeners.get('hashchange') ?? []) fn();
-      await new Promise((r) => setTimeout(r, 15));
+      await waitFor(() => abortDispatched);
+      await new Promise<void>((r) => setImmediate(r));
       assert.equal(warnCount, 1);
 
       globals.fetch = (async () => new Response('null', { status: 200 })) as typeof fetch;
@@ -709,7 +722,7 @@ describe('fetchSponsorBlockSegments', () => {
       },
     };
 
-    let resolveFetch!: (resp: Response) => void;
+    let resolveFetch: ((resp: Response) => void) | undefined;
     globals.fetch = (() =>
       new Promise<Response>((resolve) => {
         resolveFetch = resolve;
@@ -731,8 +744,8 @@ describe('fetchSponsorBlockSegments', () => {
     transformTransportControls(nextPayload);
     dispatched.length = 0;
 
-    await new Promise((r) => setTimeout(r, 15));
-    resolveFetch(
+    await waitFor(() => typeof resolveFetch === 'function');
+    resolveFetch?.(
       new Response(
         JSON.stringify([
           {
@@ -746,7 +759,7 @@ describe('fetchSponsorBlockSegments', () => {
         { status: 200 }
       )
     );
-    await new Promise((r) => setTimeout(r, 20));
+    await waitFor(() => dispatched.length >= 1 && getActiveSponsorBlockSegments('lateVidM2').length === 2);
 
     // 1. Null videoId must never return loaded segments from the active Watch video.
     assert.deepEqual(getActiveSponsorBlockSegments(null), []);

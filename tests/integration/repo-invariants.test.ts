@@ -155,16 +155,25 @@ describe('Repository, patch & CI workflow invariants', () => {
     assert.equal(patch10.includes('player_components_factory.cc'), false);
   });
 
-  test('[P10] patches/10 avoids force-enabling foreground MemoryCache eviction and patches/11 keeps enable_feature_if_set', () => {
+  test('[P10] enables Cobalt/foreground memory pressure without evicting MemoryCache, preserves --disable-quic and kSmallerInterestArea, and caps 4K/V8 memory ceilings', () => {
+    const patch02 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '02-disable-splash-and-telemetry.patch'), 'utf8');
+    const patch06 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '06-java-switches-tuning.patch'), 'utf8');
     const patch10 = fs.readFileSync(path.join(ROOT_DIR, 'patches', '10-media-hdr-aaudio-cache-tuning.patch'), 'utf8');
     const patch11 = fs.readFileSync(
       path.join(ROOT_DIR, 'patches', '11-manifest-hardening-and-mojo-sizing.patch'),
       'utf8'
     );
-    assert.equal(patch10.includes('+  AppendSwitchIfAbsent('), false);
+    assert.equal(patch02.includes('kEnableCobaltMemoryPressureEvaluator'), true);
+    assert.equal(patch06.includes('-    AppendSwitchIfAbsent(cmd_line, ::switches::kDisableQuic);'), false);
+    assert.equal(patch06.includes('-       "--no-decommit-pooled-pages,"'), true);
+    assert.equal(patch06.includes('+       "--no-decommit-pooled-pages"'), false);
+    assert.equal(patch06.includes('constexpr char kDefaultMaxOldSpaceSizeMb[] = "256";'), true);
     assert.equal(patch10.includes('switches::kAllowCriticalMemoryPressureHandlingInForeground'), true);
-    assert.equal(patch10.includes('kEvictMemoryCacheOnCriticalMemoryPressure'), false);
-    assert.equal(patch10.includes('kCobaltEnableModerateMemoryPressure'), false);
+    assert.equal(patch10.includes('cmd_line, switches::kAllowCriticalMemoryPressureHandlingInForeground'), true);
+    assert.equal(patch10.includes('base::features::kCobaltEnableModerateMemoryPressure.name'), true);
+    assert.equal(patch10.includes('+      blink::features::kEvictMemoryCacheOnCriticalMemoryPressure'), false);
+    assert.equal(patch10.includes('-               features::kSmallerInterestArea.name,'), false);
+    assert.equal(patch10.includes('constexpr int kVideoBufferBudget4KHdr = 100 * 1024 * 1024;'), true);
     assert.equal(patch11.includes('-  auto enable_feature_if_set'), false);
   });
 

@@ -391,12 +391,14 @@ describe('whenYttvReady watcher paths', () => {
       });
       assert.equal(settingsMenuItems.length, 3);
       assert.equal(
-        (settingsMenuItems[0]?.compactLinkRenderer.title as { runs?: Array<{ text?: string }> }).runs?.[0]?.text,
+        (settingsMenuItems[0]?.compactLinkRenderer.title as { runs?: Array<{ text?: string }> } | undefined)?.runs?.[0]
+          ?.text,
         'Quality'
       );
       assert.equal(settingsMenuItems[1]?.compactLinkRenderer.subtitle?.simpleText, 'Normal');
       assert.equal(
-        (settingsMenuItems[2]?.compactLinkRenderer.title as { runs?: Array<{ text?: string }> }).runs?.[0]?.text,
+        (settingsMenuItems[2]?.compactLinkRenderer.title as { runs?: Array<{ text?: string }> } | undefined)?.runs?.[0]
+          ?.text,
         'Stats for nerds'
       );
     } finally {

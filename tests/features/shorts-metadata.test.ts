@@ -1045,28 +1045,34 @@ describe('shorts-metadata', () => {
     assert.equal(lockupAttrEl.textContent, '420K views • 3 days ago');
     assert.equal(
       (
-        lockupShortMissingMeta.lockupViewModel?.metadata?.lockupMetadataViewModel?.metadata as {
-          contentMetadataViewModel: { metadataRows: Array<{ metadataParts: Array<{ text: { content: string } }> }> };
-        }
-      ).contentMetadataViewModel.metadataRows[0]?.metadataParts[0]?.text.content,
+        lockupShortMissingMeta.lockupViewModel?.metadata?.lockupMetadataViewModel?.metadata as
+          | {
+              contentMetadataViewModel: {
+                metadataRows: Array<{ metadataParts: Array<{ text: { content: string } }> }>;
+              };
+            }
+          | undefined
+      )?.contentMetadataViewModel.metadataRows[0]?.metadataParts[0]?.text.content,
       '420K views • 3 days ago'
     );
     assert.equal(
-      (shortsLockupCold.shortsLockupViewModel?.overlayMetadata as { secondaryText: { content: string } }).secondaryText
-        .content,
+      (shortsLockupCold.shortsLockupViewModel?.overlayMetadata as { secondaryText: { content: string } } | undefined)
+        ?.secondaryText.content,
       '420K views • 3 days ago'
     );
     assert.equal(
       (
-        shortsLockupDirectTap.shortsLockupViewModel?.overlayMetadata as {
-          secondaryText: { content: string };
-        }
-      ).secondaryText.content,
+        shortsLockupDirectTap.shortsLockupViewModel?.overlayMetadata as
+          | {
+              secondaryText: { content: string };
+            }
+          | undefined
+      )?.secondaryText.content,
       '420K views • 3 days ago'
     );
     assert.equal(
-      (shortsLockupThumb.shortsLockupViewModel?.overlayMetadata as { secondaryText: { content: string } }).secondaryText
-        .content,
+      (shortsLockupThumb.shortsLockupViewModel?.overlayMetadata as { secondaryText: { content: string } } | undefined)
+        ?.secondaryText.content,
       'Existing subtitle'
     );
 
@@ -1082,10 +1088,14 @@ describe('shorts-metadata', () => {
     assert.equal(fetchedIds.length, 5);
     assert.equal(
       (
-        cachedLockup.lockupViewModel?.metadata?.lockupMetadataViewModel?.metadata as {
-          contentMetadataViewModel: { metadataRows: Array<{ metadataParts: Array<{ text: { content: string } }> }> };
-        }
-      ).contentMetadataViewModel.metadataRows[0]?.metadataParts[0]?.text.content,
+        cachedLockup.lockupViewModel?.metadata?.lockupMetadataViewModel?.metadata as
+          | {
+              contentMetadataViewModel: {
+                metadataRows: Array<{ metadataParts: Array<{ text: { content: string } }> }>;
+              };
+            }
+          | undefined
+      )?.contentMetadataViewModel.metadataRows[0]?.metadataParts[0]?.text.content,
       '420K views • 3 days ago'
     );
 

@@ -1,8 +1,8 @@
 diff --git a/cobalt/browser/cobalt_browser_main_parts.cc b/cobalt/browser/cobalt_browser_main_parts.cc
-index 90a4e2d..015676e 100644
+index 1b71674..0de40b7 100644
 --- a/cobalt/browser/cobalt_browser_main_parts.cc
 +++ b/cobalt/browser/cobalt_browser_main_parts.cc
-@@ -829,7 +829,7 @@ void CobaltBrowserMainParts::StartMetricsRecording() {
+@@ -902,7 +902,7 @@ void CobaltBrowserMainParts::StartMetricsRecording() {
    // no uploads are sent.
    GlobalFeatures::GetInstance()
        ->metrics_services_manager()
@@ -12,7 +12,7 @@ index 90a4e2d..015676e 100644
  }
  
 diff --git a/cobalt/browser/features.cc b/cobalt/browser/features.cc
-index 4820de2..c5867a8 100644
+index 4820de2..d572df8 100644
 --- a/cobalt/browser/features.cc
 +++ b/cobalt/browser/features.cc
 @@ -63,7 +63,7 @@ BASE_FEATURE(kHangWatchThreadPoolDump,
@@ -51,6 +51,15 @@ index 4820de2..c5867a8 100644
  #else   // BUILDFLAG(IS_ANDROID)
  BASE_FEATURE(kEnablePictureInPicture,
               "PictureInPicture",
+@@ -183,7 +183,7 @@ const base::FeatureParam<base::TimeDelta> kGpuMemoryAblationDelayParam{
+ 
+ BASE_FEATURE(kEnableCobaltMemoryPressureEvaluator,
+              "EnableCobaltMemoryPressureEvaluator",
+-             base::FEATURE_DISABLED_BY_DEFAULT);
++             base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ const base::FeatureParam<double> kCobaltMemoryPressureModerateFractionParam{
+     &kEnableCobaltMemoryPressureEvaluator, "moderate_fraction", 0.85};
 @@ -199,7 +199,7 @@ const base::FeatureParam<int> kCobaltMemoryPressurePollIntervalSecondsParam{
  
  BASE_FEATURE(kCobaltSkipTrustedHeaderClient,

@@ -1,5 +1,5 @@
 diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
-index b779156..e3838ba 100644
+index b417d88..1dc9c89 100644
 --- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
 +++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
 @@ -17,6 +17,9 @@ package dev.cobalt.coat;
@@ -28,7 +28,7 @@ index b779156..e3838ba 100644
  
    // How many seconds before the app exits if it fails to land YouTube home page.
    private static final int DEFAULT_HANG_APP_CRASH_TIMEOUT_SECONDS = 120;
-@@ -507,10 +512,52 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+@@ -505,8 +510,50 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
      StartupGuard.getInstance().scheduleCrash(timeout);
    }
  
@@ -79,5 +79,3 @@ index b779156..e3838ba 100644
      super.onCreate(savedInstanceState);
  
      setupStartupGuard();
-     createContent(savedInstanceState);
- 

@@ -1,8 +1,8 @@
 diff --git a/cobalt/android/androidtv_flag_map.cc b/cobalt/android/androidtv_flag_map.cc
-index 69f72d0..19ac756 100644
+index 39ea84b..0491d13 100644
 --- a/cobalt/android/androidtv_flag_map.cc
 +++ b/cobalt/android/androidtv_flag_map.cc
-@@ -241,8 +241,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+@@ -247,8 +247,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
    add_numeric_param(
        mojo_pipe_params, flags::kCobaltDynamicMojoPipeMediaSize,
        network::features::kCobaltDynamicMojoPipeSizingMediaSize.name);
@@ -12,7 +12,7 @@ index 69f72d0..19ac756 100644
      std::string feature = network::features::kCobaltDynamicMojoPipeSizing.name;
      if (!mojo_pipe_params.empty()) {
        base::StrAppend(&feature, {":", base::JoinString(mojo_pipe_params, "/")});
-@@ -250,8 +249,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
+@@ -256,8 +255,7 @@ void ExpandAndroidTvFlags(const AndroidTvFlagMap& flag_map,
      enable_features.push_back(std::move(feature));
    }
  

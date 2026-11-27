@@ -1,8 +1,8 @@
 diff --git a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
-index 43bf562..b779156 100644
+index 5f04631..b417d88 100644
 --- a/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
 +++ b/cobalt/android/apk/app/src/main/java/dev/cobalt/coat/CobaltActivity.java
-@@ -395,7 +395,11 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+@@ -393,7 +393,11 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
      }
      // Gamepad buttons and certain partner-handled keys should bypass IME. The IME incorrectly
      // consumes the events as VKEY_UNKNOWN and prevent proper handling by the OS.
@@ -15,7 +15,7 @@ index 43bf562..b779156 100644
        return super.onKeyDown(keyCode, event);
      }
      return dispatchKeyEventToIme(keyCode, KeyEvent.ACTION_DOWN) || super.onKeyDown(keyCode, event);
-@@ -403,7 +407,11 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
+@@ -401,7 +405,11 @@ public abstract class CobaltActivity extends BaseCobaltActivity {
  
    @Override
    public boolean onKeyUp(int keyCode, KeyEvent event) {

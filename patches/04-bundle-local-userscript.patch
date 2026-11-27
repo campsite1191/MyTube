@@ -1,8 +1,8 @@
 diff --git a/cobalt/android/BUILD.gn b/cobalt/android/BUILD.gn
-index 160587a..52c762b 100644
+index c015563..e0986c9 100644
 --- a/cobalt/android/BUILD.gn
 +++ b/cobalt/android/BUILD.gn
-@@ -358,8 +358,14 @@ android_library("cobalt_apk_java") {
+@@ -343,8 +343,14 @@ android_library("cobalt_apk_java") {
  
  android_assets("coat_assets") {
    sources = [ "apk/app/src/app/assets/web/cobalt_logo_1024.png" ]
@@ -20,7 +20,7 @@ index 160587a..52c762b 100644
    deps = [
      "//starboard/content/fonts:copy_font_data",
 diff --git a/cobalt/shell/browser/shell.cc b/cobalt/shell/browser/shell.cc
-index b08c7f1..f62ce2e 100644
+index b08c7f1..f3bd2b1 100644
 --- a/cobalt/shell/browser/shell.cc
 +++ b/cobalt/shell/browser/shell.cc
 @@ -86,6 +86,10 @@

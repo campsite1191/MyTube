@@ -14,10 +14,10 @@
     "p-limit": "^7.3.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.3.8",
-    "@types/node": "^22.13.10",
-    "esbuild": "^0.25.1",
-    "knip": "6.46.1",
-    "typescript": "^5.8.2"
+    "@biomejs/biome": "2.6.9",
+    "@types/node": "^24.19.4",
+    "esbuild": "^0.28.2",
+    "knip": "6.48.0",
+    "typescript": "^6.0.3"
   }
 }
